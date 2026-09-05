@@ -14,6 +14,11 @@ def sync_status(user=Depends(require_permission("view"))):
     return excel_service.status()
 
 
+@router.get("/ping")
+def sync_ping(user=Depends(require_permission("view"))):
+    return excel_service.ping()
+
+
 @router.post("/refresh")
 def refresh(user=Depends(require_permission("view"))):
     try:

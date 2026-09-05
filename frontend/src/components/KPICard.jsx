@@ -12,7 +12,8 @@ export default function KPICard({ label, value, hint, accent = "brand", onClick,
     <button
       type="button"
       onClick={onClick}
-      className="card kpi-click p-4 text-left w-full"
+      title={onClick ? "Click to view matching records" : undefined}
+      className={`card p-4 text-left w-full ${onClick ? "kpi-click" : ""}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div>

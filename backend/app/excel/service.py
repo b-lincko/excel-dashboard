@@ -70,6 +70,8 @@ class ExcelService:
         self._headers: list[str] = []
         self._mtime: Optional[float] = None
         self._fingerprint: str = ""
+        self._stale: bool = False
+        self._last_error: Optional[str] = None
         self._lock = threading.RLock()
 
     def cfg(self) -> AppConfig:
@@ -250,15 +252,33 @@ class ExcelService:
             self._cache = None
             self._mtime = None
             self._fingerprint = ""
+            self._stale = False
+            self._last_error = None
+
+    def _serve_cache(self, err: Optional[str] = None) -> list[dict[str, Any]]:
+        if self._cache is None:
+            raise ExcelUnavailable(err or "Excel file is currently unavailable.")
+        self._stale = True
+        self._last_error = err
+        return self._cache
 
     def load(self, force: bool = False) -> list[dict[str, Any]]:
         with self._lock:
             mt = self.mtime()
             if not force and self._cache is not None and mt == self._mtime:
+                self._stale = False
+                self._last_error = None
                 return self._cache
             if not self.available():
-                raise ExcelUnavailable("Excel file is currently unavailable.")
-            wb = self._load_workbook(data_only=False)
+                return self._serve_cache("Excel file is currently unavailable.")
+            try:
+                wb = self._load_workbook(data_only=False)
+            except (ExcelLocked, ExcelUnavailable, PermissionError, OSError) as exc:
+                if self._cache is not None:
+                    return self._serve_cache(str(exc))
+                if isinstance(exc, (ExcelLocked, ExcelUnavailable)):
+                    raise
+                raise ExcelUnavailable(f"Excel file could not be opened: {exc}") from exc
             try:
                 all_records: list[dict[str, Any]] = []
                 headers: list[str] = []
@@ -274,6 +294,8 @@ class ExcelService:
             self._cache = all_records
             self._mtime = mt
             self._fingerprint = self.fingerprint()
+            self._stale = False
+            self._last_error = None
             database.set_sync_meta("last_read", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             database.set_sync_meta("mtime", self.mtime_iso() or "")
             database.set_sync_meta("token", self._fingerprint)
@@ -704,31 +726,56 @@ class ExcelService:
             if tmp.exists():
                 tmp.unlink(missing_ok=True)
 
+    def ping(self) -> dict[str, Any]:
+        """Cheap live check: stat the file and reload only when it actually changed."""
+        file_token = self.fingerprint()
+        if file_token and file_token != self._fingerprint:
+            try:
+                self.load()
+            except (ExcelLocked, ExcelUnavailable, OSError):
+                pass
+        cached = self._cache is not None
+        stale = bool(file_token and self._fingerprint and file_token != self._fingerprint) or self._stale
+        return {
+            "available": self.available(),
+            "mtime": self.mtime_iso(),
+            "sync_token": self._fingerprint or file_token,
+            "file_token": file_token,
+            "record_count": len(self._cache or []),
+            "stale": stale,
+            "synchronized": cached,
+            "error": None if cached else (self._last_error or "Excel file is currently unavailable."),
+            "warning": self._last_error if cached and stale else None,
+        }
+
     def status(self) -> dict[str, Any]:
         available = self.available()
+        err = None
         try:
-            records = self.load() if available else []
-            err = None
+            records = self.load() if available or self._cache is not None else []
         except ExcelUnavailable as e:
-            records = []
+            records = list(self._cache or [])
             err = str(e)
         except ExcelLocked as e:
-            records = []
+            records = list(self._cache or [])
             err = str(e)
+        live = self.ping()
         return {
             "available": available,
             "path": str(self.excel_path()),
             "worksheet": ", ".join(self.cfg().worksheets or [self.cfg().worksheet_name]),
             "mtime": self.mtime_iso(),
-            "sync_token": self.fingerprint() if available else "",
+            "sync_token": live.get("sync_token") or (self.fingerprint() if available else ""),
             "record_count": len(records),
             "last_read": database.get_sync_meta("last_read"),
             "last_write": database.get_sync_meta("last_write"),
             "last_write_user": database.get_sync_meta("last_write_user"),
             "last_backup": database.get_sync_meta("last_backup"),
-            "synchronized": available and err is None,
-            "error": err,
-            "headers": self._headers if available else [],
+            "synchronized": bool(records),
+            "stale": live.get("stale") or bool(err and records),
+            "error": None if records else err,
+            "warning": err if err and records else live.get("warning"),
+            "headers": self._headers if (available or self._headers) else [],
         }
 
 

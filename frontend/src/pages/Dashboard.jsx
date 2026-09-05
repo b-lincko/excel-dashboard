@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -179,15 +179,15 @@ export default function Dashboard() {
               <YAxis allowDecimals={false} />
               <Tooltip />
               <Legend />
-              <Bar dataKey="created" name="Created" fill="#0F3D5E" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="done" name="Done" fill="#10B981" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="created" name="Created" fill="#0F3D5E" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              <Bar dataKey="done" name="Done" fill="#10B981" radius={[4, 4, 0, 0]} isAnimationActive={false} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
         <ChartCard title="Blockades" subtitle="Why open MRs are stuck">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={data?.blockades || []} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78} onClick={(d) => d?.name && go({ status: d.name, flag: "open" })}>
+              <Pie data={data?.blockades || []} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78} isAnimationActive={false} onClick={(d) => d?.name && go({ status: d.name, flag: "open" })}>
                 {(data?.blockades || []).map((_, i) => (
                   <Cell key={i} fill={PIE[i % PIE.length]} />
                 ))}
@@ -208,15 +208,15 @@ export default function Dashboard() {
               <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
               <Tooltip />
               <Legend />
-              <Line type="monotone" dataKey="created" stroke="#0F3D5E" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="closed" stroke="#10B981" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="created" stroke="#0F3D5E" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="closed" stroke="#10B981" strokeWidth={2} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
         <ChartCard title="Status" subtitle="From Excel STATUS values">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={data?.status || []} dataKey="value" nameKey="name" innerRadius={52} outerRadius={80} onClick={(d) => d?.name && go({ status: d.name })}>
+              <Pie data={data?.status || []} dataKey="value" nameKey="name" innerRadius={52} outerRadius={80} isAnimationActive={false} onClick={(d) => d?.name && go({ status: d.name })}>
                 {(data?.status || []).map((_, i) => (
                   <Cell key={i} fill={PIE[i % PIE.length]} />
                 ))}
@@ -236,7 +236,7 @@ export default function Dashboard() {
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
               <YAxis allowDecimals={false} />
               <Tooltip />
-              <Bar dataKey="value" fill="#0EA5E9" radius={[6, 6, 0, 0]} onClick={(d) => d?.name && go({ delay_reason: d.name })} />
+              <Bar dataKey="value" fill="#0EA5E9" radius={[6, 6, 0, 0]} isAnimationActive={false} onClick={(d) => d?.name && go({ delay_reason: d.name })} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -247,7 +247,7 @@ export default function Dashboard() {
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
               <YAxis allowDecimals={false} />
               <Tooltip />
-              <Bar dataKey="value" fill="#F59E0B" radius={[6, 6, 0, 0]} onClick={(d) => d?.id && nav(`/work-orders?flag=open&aging=${d.id}`)} />
+              <Bar dataKey="value" fill="#F59E0B" radius={[6, 6, 0, 0]} isAnimationActive={false} onClick={(d) => d?.id && nav(`/work-orders?flag=open&aging=${d.id}`)} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>

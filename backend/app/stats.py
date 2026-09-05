@@ -477,7 +477,8 @@ def mindmap(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
-    records = filtered(excel_service.get_all(), filters)
+    all_records = excel_service.get_all()
+    records = filtered(all_records, filters)
     cfg = load_config()
     t = today()
     iso = t.isocalendar()
@@ -498,9 +499,9 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
         "blockades": blockades(records),
         "today": today_activity(records),
         "mindmap": mindmap(records),
-        "last_days": last_days(excel_service.get_all(), 14),
-        "trend": trend(excel_service.get_all(), 12),
-        "weekly": weekly(excel_service.get_all(), int(iso[0]), int(iso[1])),
+        "last_days": last_days(all_records, 14),
+        "trend": trend(all_records, 12),
+        "weekly": weekly(all_records, int(iso[0]), int(iso[1])),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "as_of": t.isoformat(),
         "count": len(records),

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Columns3, Download, Plus, RefreshCw } from "lucide-react";
 import { api, qs } from "../lib/api.js";
+import { useLiveReload } from "../lib/live.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import Filters from "../components/Filters.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
@@ -45,6 +46,9 @@ function fromSearch(search, presetFlag) {
     "flag",
     "aging",
     "reason",
+    "year",
+    "week",
+    "month",
     "sort",
     "order",
   ].forEach((k) => {
@@ -58,6 +62,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
   const loc = useLocation();
   const nav = useNavigate();
   const { can } = useAuth();
+  const tick = useLiveReload();
   const [filters, setFilters] = useState(() => fromSearch(loc.search, presetFlag));
   const [options, setOptions] = useState({});
   const [rows, setRows] = useState([]);
@@ -81,8 +86,8 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
     api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
   }, []);
 
-  function load() {
-    setLoading(true);
+  function load(silent = false) {
+    if (!silent) setLoading(true);
     setError("");
     const params = { ...filters, q, sort, order, page, page_size: pageSize };
     api
@@ -91,7 +96,9 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
         setRows(d.items || []);
         setTotal(d.total || 0);
       })
-      .catch((e) => setError(e.message))
+      .catch((e) => {
+        if (!silent) setError(e.message);
+      })
       .finally(() => setLoading(false));
   }
 
@@ -99,6 +106,11 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, sort, order, page, pageSize]);
+
+  useEffect(() => {
+    if (tick) load(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
 
   function toggleSort(key) {
     if (sort === key) setOrder(order === "asc" ? "desc" : "asc");

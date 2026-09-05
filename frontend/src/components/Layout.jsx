@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Activity,
   AlertTriangle,
@@ -40,39 +40,51 @@ export default function Layout() {
   const { user, logout, can } = useAuth();
   const { theme, toggle } = useTheme();
   const nav = useNavigate();
-  const loc = useLocation();
   const [sync, setSync] = useState(null);
   const [q, setQ] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
-  const [intervalSec, setIntervalSec] = useState(10);
   const fileRef = useRef(null);
 
   async function loadSync() {
     try {
-      const next = await api.get("/api/sync/status");
+      const next = await api.get("/api/sync/ping");
       setSync((prev) => {
-        if (prev && next.sync_token && prev.sync_token !== next.sync_token) {
+        if (next.sync_token && prev?.sync_token && prev.sync_token !== next.sync_token) {
           window.dispatchEvent(new CustomEvent("woms:data", { detail: next }));
         }
-        return next;
+        return { ...prev, ...next };
       });
     } catch (e) {
-      setSync({
-        synchronized: false,
-        error: e.offline ? e.message : "Excel file is currently unavailable.",
-        offline: !!e.offline,
-      });
+      setSync((prev) =>
+        prev && (prev.synchronized || prev.record_count)
+          ? { ...prev, stale: true, warning: e.message }
+          : {
+              synchronized: false,
+              error: e.offline ? e.message : "Excel file is currently unavailable.",
+              offline: !!e.offline,
+            }
+      );
     }
   }
 
   useEffect(() => {
-    loadSync();
-    if (!intervalSec) return undefined;
-    const id = setInterval(loadSync, intervalSec * 1000);
+    api
+      .get("/api/sync/status")
+      .then((next) => {
+        setSync(next);
+      })
+      .catch((e) => {
+        setSync({
+          synchronized: false,
+          error: e.offline ? e.message : "Excel file is currently unavailable.",
+          offline: !!e.offline,
+        });
+      });
+    const id = setInterval(loadSync, 2000);
     return () => clearInterval(id);
-  }, [loc.pathname, intervalSec]);
+  }, []);
 
   async function onUpload(e) {
     const file = e.target.files?.[0];
@@ -101,7 +113,7 @@ export default function Layout() {
       setSync(next);
       window.dispatchEvent(new CustomEvent("woms:data", { detail: next }));
     } catch (e) {
-      setSync({ synchronized: false, error: e.message });
+      setSync((prev) => ({ ...(prev || {}), stale: true, warning: e.message }));
     } finally {
       setRefreshing(false);
     }
@@ -168,14 +180,22 @@ export default function Layout() {
           <div className="flex items-center gap-2 text-xs">
             <span
               className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium ${
-                sync?.synchronized
-                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
-                  : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                sync?.stale
+                  ? "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"
+                  : sync?.synchronized
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                    : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
               }`}
               title={sync?.error || sync?.path}
             >
               <Activity size={12} />
-              {sync?.synchronized ? "Synchronized" : sync?.error ? "Excel unavailable" : "Checking…"}
+              {sync?.stale
+                ? "Updating from Excel…"
+                : sync?.synchronized
+                  ? "Synchronized"
+                  : sync?.error
+                    ? "Excel unavailable"
+                    : "Checking…"}
             </span>
             {sync?.mtime && (
               <span className="hidden lg:inline text-slate-400">Last Excel sync {sync.mtime}</span>

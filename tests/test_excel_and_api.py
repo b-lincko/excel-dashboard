@@ -177,6 +177,31 @@ def test_upload_scans_workbook(workbook):
     assert reject.status_code == 400
 
 
+def test_ping_and_week_filter(workbook):
+    from app.main import app
+    from app import database
+    from app.excel.service import excel_service
+
+    database.init_db()
+    excel_service.invalidate()
+    client = TestClient(app)
+    token = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    ping = client.get("/api/sync/ping", headers=headers)
+    assert ping.status_code == 200
+    body = ping.json()
+    assert body["synchronized"] is True
+    assert body["record_count"] > 2000
+    assert body["sync_token"]
+    again = client.get("/api/sync/ping", headers=headers)
+    assert again.json()["sync_token"] == body["sync_token"]
+    week = client.get("/api/work-orders?year=2026&week=36&page_size=5", headers=headers)
+    assert week.status_code == 200
+    weekly = client.get("/api/dashboard/weekly?year=2026&week=36", headers=headers)
+    assert weekly.status_code == 200
+    assert weekly.json()["kpis"]["total"] == week.json()["total"]
+
+
 def test_preserve_other_sheets(workbook):
     from openpyxl import load_workbook
     from openpyxl.worksheet.formula import ArrayFormula

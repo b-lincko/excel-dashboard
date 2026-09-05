@@ -65,12 +65,7 @@ export default function MindMap({ data }) {
         setItems(d.items || []);
         setTotal(d.total || 0);
       })
-      .catch(() => {
-        if (!cancelled) {
-          setItems([]);
-          setTotal(0);
-        }
-      })
+      .catch(() => {})
       .finally(() => {
         if (!cancelled) setLoadingItems(false);
       });
@@ -205,6 +200,7 @@ export default function MindMap({ data }) {
                       dataKey="value"
                       fill="#0F3D5E"
                       radius={[4, 4, 0, 0]}
+                      isAnimationActive={false}
                       cursor="pointer"
                       onClick={(d) => {
                         const hit = (selected.children || []).find((c) => c.label === d?.name);

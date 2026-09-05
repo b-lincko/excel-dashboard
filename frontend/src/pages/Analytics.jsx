@@ -12,7 +12,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api } from "../lib/api.js";
+import { api, qs } from "../lib/api.js";
+import { goSearch, useLiveReload } from "../lib/live.js";
 import ChartCard from "../components/ChartCard.jsx";
 import KPICard from "../components/KPICard.jsx";
 
@@ -27,38 +28,44 @@ const TABS = [
 
 export default function Analytics() {
   const nav = useNavigate();
+  const tick = useLiveReload();
   const [tab, setTab] = useState("weekly");
   const yearNow = new Date().getFullYear();
   const [year, setYear] = useState(yearNow);
-  const [week, setWeek] = useState(null);
+  const [week, setWeek] = useState("");
   const [weekly, setWeekly] = useState(null);
   const [monthly, setMonthly] = useState(null);
   const [yearly, setYearly] = useState(null);
   const [dash, setDash] = useState(null);
 
+  const go = (params) => goSearch(nav, params);
+
   useEffect(() => {
-    const q = week ? `?year=${year}&week=${week}` : "";
-    api.get(`/api/dashboard/weekly${q}`).then((d) => {
-      setWeekly(d);
-      if (!week) {
-        setYear(d.year);
-        setWeek(d.week);
-      }
-    }).catch(() => {});
-  }, [year, week]);
+    const params = { year };
+    if (week) params.week = week;
+    api
+      .get(`/api/dashboard/weekly${qs(params)}`)
+      .then((d) => {
+        setWeekly(d);
+        if (!week && d.week) setWeek(String(d.week));
+      })
+      .catch(() => {});
+  }, [year, week, tick]);
+
   useEffect(() => {
     api.get(`/api/dashboard/monthly?year=${year}`).then(setMonthly).catch(() => {});
-  }, [year]);
+  }, [year, tick]);
+
   useEffect(() => {
     api.get("/api/dashboard/yearly").then(setYearly).catch(() => {});
     api.get("/api/dashboard").then(setDash).catch(() => {});
-  }, []);
+  }, [tick]);
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
-        <p className="text-sm text-slate-500">All figures are computed from the live Excel workbook.</p>
+        <p className="text-sm text-slate-500">All figures are computed from the live Excel workbook. Click a number to open the matching records.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         {TABS.map(([id, label]) => (
@@ -81,17 +88,46 @@ export default function Analytics() {
             </div>
             <div>
               <label className="lbl">ISO week</label>
-              <input type="number" min={1} max={53} value={week} onChange={(e) => setWeek(Number(e.target.value))} />
+              <input
+                type="number"
+                min={1}
+                max={53}
+                value={week}
+                onChange={(e) => setWeek(e.target.value)}
+              />
             </div>
             <div className="text-sm text-slate-500 pb-2">{weekly?.label} · {weekly?.start} → {weekly?.end}</div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <KPICard label="Created this week" value={weekly?.kpis?.total} />
-            <KPICard label="Open" value={weekly?.kpis?.open} accent="sky" />
-            <KPICard label="Closed" value={weekly?.kpis?.closed} accent="emerald" />
-            <KPICard label="Overdue" value={weekly?.kpis?.overdue} accent="rose" />
+            <KPICard
+              label="Created this week"
+              value={weekly?.kpis?.total}
+              hint="Click to view these MRs"
+              onClick={() => go({ year: weekly?.year, week: weekly?.week })}
+            />
+            <KPICard
+              label="Open"
+              value={weekly?.kpis?.open}
+              accent="sky"
+              hint="Still open from this week"
+              onClick={() => go({ year: weekly?.year, week: weekly?.week, flag: "open" })}
+            />
+            <KPICard
+              label="Closed"
+              value={weekly?.kpis?.closed}
+              accent="emerald"
+              hint="Closed of this week's MRs"
+              onClick={() => go({ year: weekly?.year, week: weekly?.week, flag: "closed" })}
+            />
+            <KPICard
+              label="Overdue"
+              value={weekly?.kpis?.overdue}
+              accent="rose"
+              hint="Overdue from this week"
+              onClick={() => go({ year: weekly?.year, week: weekly?.week, flag: "overdue" })}
+            />
           </div>
-          <ChartCard title={weekly?.label || "Weekly analysis"} subtitle="Created, completed, closed, still open, overdue">
+          <ChartCard title={weekly?.label || "Weekly analysis"} subtitle="Click a bar to open that day's created MRs">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={weekly?.days || []}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -99,11 +135,11 @@ export default function Analytics() {
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="created" fill="#0F3D5E" />
-                <Bar dataKey="completed" fill="#0EA5E9" />
-                <Bar dataKey="closed" fill="#10B981" />
-                <Bar dataKey="open" fill="#F59E0B" />
-                <Bar dataKey="overdue" fill="#EF4444" />
+                <Bar dataKey="created" fill="#0F3D5E" isAnimationActive={false} cursor="pointer" onClick={(d) => d?.date && go({ date_from: d.date, date_to: d.date })} />
+                <Bar dataKey="completed" fill="#0EA5E9" isAnimationActive={false} cursor="pointer" onClick={(d) => d?.date && go({ date_from: d.date, date_to: d.date })} />
+                <Bar dataKey="closed" fill="#10B981" isAnimationActive={false} cursor="pointer" onClick={(d) => d?.date && go({ date_from: d.date, date_to: d.date, flag: "closed" })} />
+                <Bar dataKey="open" fill="#F59E0B" isAnimationActive={false} cursor="pointer" onClick={() => go({ flag: "open" })} />
+                <Bar dataKey="overdue" fill="#EF4444" isAnimationActive={false} cursor="pointer" onClick={() => go({ flag: "overdue" })} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
@@ -117,12 +153,12 @@ export default function Analytics() {
             <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <KPICard label="Created" value={monthly?.kpis?.total} />
-            <KPICard label="Closed" value={monthly?.kpis?.closed} accent="emerald" />
-            <KPICard label="Completion" value={`${monthly?.kpis?.completion_rate ?? 0}%`} />
-            <KPICard label="Avg close" value={monthly?.kpis?.average_closing_days ?? "—"} />
+            <KPICard label="Created" value={monthly?.kpis?.total} hint="Click to view" onClick={() => go({ year })} />
+            <KPICard label="Closed" value={monthly?.kpis?.closed} accent="emerald" hint="Click to view" onClick={() => go({ year, flag: "closed" })} />
+            <KPICard label="Open" value={monthly?.kpis?.open} accent="sky" hint="Click to view" onClick={() => go({ year, flag: "open" })} />
+            <KPICard label="Overdue" value={monthly?.kpis?.overdue} accent="rose" hint="Click to view" onClick={() => go({ year, flag: "overdue" })} />
           </div>
-          <ChartCard title={`Monthly trend — ${year}`}>
+          <ChartCard title={`Monthly trend — ${year}`} subtitle="Click a point to open that month">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={monthly?.months || []}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -130,9 +166,9 @@ export default function Analytics() {
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Legend />
-                <Line dataKey="created" stroke="#0F3D5E" />
-                <Line dataKey="closed" stroke="#10B981" />
-                <Line dataKey="overdue" stroke="#EF4444" />
+                <Line dataKey="created" stroke="#0F3D5E" isAnimationActive={false} />
+                <Line dataKey="closed" stroke="#10B981" isAnimationActive={false} />
+                <Line dataKey="overdue" stroke="#EF4444" isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </ChartCard>
@@ -151,7 +187,7 @@ export default function Analytics() {
               </thead>
               <tbody>
                 {(monthly?.months || []).map((m) => (
-                  <tr key={m.month}>
+                  <tr key={m.month} onClick={() => go({ year, month: m.month })} title="Open this month's records">
                     <td>{m.full}</td>
                     <td>{m.created}</td>
                     <td>{m.completed}</td>
@@ -169,7 +205,7 @@ export default function Analytics() {
 
       {tab === "yearly" && (
         <div className="card overflow-hidden">
-          <div className="px-4 py-3 font-semibold">Year-over-year comparison</div>
+          <div className="px-4 py-3 font-semibold">Year-over-year comparison — click a row for details</div>
           <table className="data">
             <thead>
               <tr>
@@ -185,7 +221,7 @@ export default function Analytics() {
             </thead>
             <tbody>
               {(yearly?.years || []).map((y) => (
-                <tr key={y.year}>
+                <tr key={y.year} onClick={() => go({ year: y.year })}>
                   <td className="font-semibold">{y.year}</td>
                   <td>{y.total}</td>
                   <td>{y.open}</td>
@@ -233,7 +269,7 @@ export default function Analytics() {
       )}
 
       {tab === "aging" && (
-        <ChartCard title="Open work order aging">
+        <ChartCard title="Open work order aging" subtitle="Click a bar to view those records">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={dash?.aging || []}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -243,6 +279,8 @@ export default function Analytics() {
               <Bar
                 dataKey="value"
                 fill="#F59E0B"
+                isAnimationActive={false}
+                cursor="pointer"
                 onClick={(d) => d?.id && nav(`/work-orders?flag=open&aging=${d.id}`)}
               />
             </BarChart>
