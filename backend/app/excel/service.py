@@ -662,6 +662,48 @@ class ExcelService:
                     new_value=nv,
                 )
 
+    def replace_from_bytes(self, content: bytes, username: str, filename: str = "upload.xlsx") -> dict[str, Any]:
+        if not content or len(content) < 100:
+            raise ValueError("The uploaded file is empty or too small to be an Excel workbook.")
+        dest = self.excel_path()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _temp_xlsx(dest.parent)
+        tmp.write_bytes(content)
+        try:
+            self._validate_saved(tmp)
+        except Exception as exc:
+            tmp.unlink(missing_ok=True)
+            raise ValueError(f"That file could not be opened as Excel: {exc}") from exc
+        try:
+            lock = self._file_lock()
+            lock.acquire()
+        except Timeout as exc:
+            tmp.unlink(missing_ok=True)
+            raise ExcelLocked(
+                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+            ) from exc
+        try:
+            if dest.exists():
+                self.create_backup(reason="upload")
+            os.replace(tmp, dest)
+            self.invalidate()
+            records = self.load(force=True)
+            database.add_audit(username, "upload", details=f"Uploaded workbook {filename} ({len(records)} rows)")
+            database.set_sync_meta("last_write", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            database.set_sync_meta("last_write_user", username)
+            return self.status()
+        except PermissionError as exc:
+            raise ExcelLocked(
+                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+            ) from exc
+        finally:
+            try:
+                lock.release()
+            except Exception:
+                pass
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+
     def status(self) -> dict[str, Any]:
         available = self.available()
         try:

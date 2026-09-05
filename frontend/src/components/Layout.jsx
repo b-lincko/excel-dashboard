@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -17,6 +17,7 @@ import {
   Users,
   CheckCircle2,
   RefreshCw,
+  Upload,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
@@ -43,7 +44,10 @@ export default function Layout() {
   const [sync, setSync] = useState(null);
   const [q, setQ] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
   const [intervalSec, setIntervalSec] = useState(10);
+  const fileRef = useRef(null);
 
   async function loadSync() {
     try {
@@ -69,6 +73,26 @@ export default function Layout() {
     const id = setInterval(loadSync, intervalSec * 1000);
     return () => clearInterval(id);
   }, [loc.pathname, intervalSec]);
+
+  async function onUpload(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await api.upload("/api/sync/upload", fd);
+      setSync(res.sync);
+      window.dispatchEvent(new CustomEvent("woms:data", { detail: res.sync }));
+      setUploadMsg(`Scanned ${res.sync?.record_count ?? 0} rows from ${file.name}`);
+    } catch (err) {
+      setUploadMsg(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function refresh() {
     setRefreshing(true);
@@ -155,6 +179,31 @@ export default function Layout() {
             </span>
             {sync?.mtime && (
               <span className="hidden lg:inline text-slate-400">Last Excel sync {sync.mtime}</span>
+            )}
+            {can("edit") && (
+              <>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  className="hidden"
+                  onChange={onUpload}
+                />
+                <button
+                  className="btn-outline !px-2.5 !py-1.5 text-xs"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                  title="Upload an Excel workbook. The dashboard graphs rebuild from it."
+                >
+                  <Upload size={14} className={uploading ? "animate-pulse" : ""} />
+                  {uploading ? "Scanning…" : "Upload Excel"}
+                </button>
+              </>
+            )}
+            {uploadMsg && (
+              <span className="hidden xl:inline max-w-[220px] truncate text-slate-500" title={uploadMsg}>
+                {uploadMsg}
+              </span>
             )}
             <button className="btn-ghost !px-2" onClick={refresh} title="Refresh from Excel">
               <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />

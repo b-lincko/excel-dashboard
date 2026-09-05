@@ -132,11 +132,49 @@ def test_auth_and_dashboard(workbook):
     assert dash.status_code == 200
     body = dash.json()
     assert body["kpis"]["total"] > 2000
+    assert body["mindmap"]["root"]["value"] == body["kpis"]["total"]
+    assert body["mindmap"]["branches"]
     wos = client.get("/api/work-orders?page_size=10", headers=headers)
     assert wos.status_code == 200
     assert wos.json()["total"] > 2000
+    # Empty-filter dashboard used to request /api/work-orders&page_size=… (404).
+    glued = client.get("/api/work-orders&page_size=8&sort=created_date", headers=headers)
+    assert glued.status_code == 404
+    ok_list = client.get("/api/work-orders?page_size=8&sort=created_date", headers=headers)
+    assert ok_list.status_code == 200
+    assert len(ok_list.json()["items"]) == 8
     health = client.get("/api/health")
     assert health.status_code == 200
+
+
+def test_upload_scans_workbook(workbook):
+    from app.main import app
+    from app import database
+    from app.excel.service import excel_service
+
+    database.init_db()
+    excel_service.invalidate()
+    path, _ = workbook
+    client = TestClient(app)
+    token = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    content = path.read_bytes()
+    res = client.post(
+        "/api/sync/upload",
+        headers=headers,
+        files={"file": ("file.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body["sync"]["record_count"] > 2000
+    assert body["mindmap"]["root"]["value"] == body["sync"]["record_count"]
+    reject = client.post(
+        "/api/sync/upload",
+        headers=headers,
+        files={"file": ("notes.txt", b"not-an-excel-file", "text/plain")},
+    )
+    assert reject.status_code == 400
 
 
 def test_preserve_other_sheets(workbook):

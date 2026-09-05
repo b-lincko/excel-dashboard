@@ -60,6 +60,7 @@ export const api = {
   post: (path, body) => request(path, { method: "POST", body }),
   put: (path, body) => request(path, { method: "PUT", body }),
   del: (path) => request(path, { method: "DELETE" }),
+  upload: (path, formData) => request(path, { method: "POST", body: formData, raw: true }),
   download: async (path, filename) => {
     const token = getToken();
     const res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });

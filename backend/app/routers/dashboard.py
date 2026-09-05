@@ -58,7 +58,12 @@ def dashboard(
     user=Depends(require_permission("view")),
 ):
     filters = _filters(locals())
-    payload = dashboard_payload(filters)
+    try:
+        payload = dashboard_payload(filters)
+    except ExcelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except ExcelLocked as exc:
+        raise HTTPException(status_code=423, detail=str(exc))
     payload["sync"] = excel_service.status()
     return payload
 

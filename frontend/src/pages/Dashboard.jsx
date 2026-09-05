@@ -32,6 +32,7 @@ import KPICard from "../components/KPICard.jsx";
 import Filters from "../components/Filters.jsx";
 import ChartCard from "../components/ChartCard.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
+import MindMap from "../components/MindMap.jsx";
 
 const PIE = ["#0F3D5E", "#1D6A96", "#0EA5E9", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#64748B", "#14B8A6"];
 
@@ -57,10 +58,11 @@ export default function Dashboard() {
   }, []);
 
   const load = useCallback(() => {
-    const query = qs(filters);
     return Promise.all([
-      api.get(`/api/dashboard${query}`),
-      api.get(`/api/work-orders${query}&page_size=8&sort=created_date`),
+      api.get(`/api/dashboard${qs(filters)}`),
+      api
+        .get(`/api/work-orders${qs({ ...filters, page_size: 8, sort: "created_date" })}`)
+        .catch(() => ({ items: [] })),
     ]);
   }, [filters]);
 
@@ -91,18 +93,21 @@ export default function Dashboard() {
   const k = data?.kpis || {};
 
   const go = (params) => {
-    const sp = new URLSearchParams({ ...filters, ...params });
-    [...sp.keys()].forEach((key) => {
-      if (!sp.get(key)) sp.delete(key);
+    const sp = new URLSearchParams();
+    Object.entries({ ...filters, ...params }).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === "") return;
+      sp.set(key, Array.isArray(value) ? value.join(",") : String(value));
     });
-    nav(`/work-orders?${sp.toString()}`);
+    const s = sp.toString();
+    nav(s ? `/work-orders?${s}` : "/work-orders");
   };
 
   if (error && !data) {
+    const excelDown = !offline && /unavailable|could not be opened|locked/i.test(String(error));
     return (
       <div className="card p-8 text-center max-w-xl mx-auto">
         <div className="text-lg font-semibold">
-          {offline ? "Backend API is not running" : "Excel file is currently unavailable."}
+          {offline ? "Backend API is not running" : excelDown ? "Excel file is currently unavailable." : "Could not load the dashboard"}
         </div>
         <p className="text-sm text-slate-500 mt-2">{typeof error === "string" ? error : JSON.stringify(error)}</p>
         {offline && (
@@ -132,6 +137,8 @@ export default function Dashboard() {
       </div>
 
       <Filters value={filters} onChange={setFilters} options={options} />
+
+      <MindMap data={data?.mindmap} />
 
       <div className="card p-4">
         <div className="flex items-center justify-between text-sm mb-2">

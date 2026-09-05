@@ -402,6 +402,80 @@ def trend(records: list[dict[str, Any]], months: int = 12) -> list[dict[str, Any
     return points
 
 
+def _mm_children(records: list[dict[str, Any]], field: str, filter_key: str, limit: int = 12) -> list[dict[str, Any]]:
+    rows = group_by(records, field)[:limit]
+    return [
+        {
+            "id": f"{filter_key}:{r['name']}",
+            "label": r["name"],
+            "value": r["total"],
+            "open": r["open"],
+            "closed": r["closed"],
+            "filter": {filter_key: r["name"]},
+        }
+        for r in rows
+    ]
+
+
+def mindmap(records: list[dict[str, Any]]) -> dict[str, Any]:
+    k = kpis(records)
+    return {
+        "root": {
+            "id": "all",
+            "label": "All material requests",
+            "value": k["total"],
+            "filter": {},
+        },
+        "branches": [
+            {
+                "id": "sites",
+                "label": "Sites",
+                "value": len({r.get("department") for r in records}),
+                "filter": {},
+                "children": _mm_children(records, "department", "department"),
+            },
+            {
+                "id": "status",
+                "label": "Status",
+                "value": k["total"],
+                "filter": {},
+                "children": _mm_children(records, "status", "status"),
+            },
+            {
+                "id": "blockades",
+                "label": "Blockades",
+                "value": k["blockades"],
+                "filter": {"flag": "open"},
+                "children": [
+                    {"id": f"st:{b['name']}", "label": b["name"], "value": b["value"], "filter": {"flag": "open", "status": b["name"]}}
+                    for b in blockades(records)
+                ],
+            },
+            {
+                "id": "people",
+                "label": "Assigned to",
+                "value": len({r.get("assigned_to") for r in records if r.get("assigned_to")}),
+                "filter": {},
+                "children": _mm_children(records, "assigned_to", "assigned_to"),
+            },
+            {
+                "id": "delivery",
+                "label": "Delivery",
+                "value": k["total"],
+                "filter": {},
+                "children": _mm_children(records, "delay_reason", "delay_reason"),
+            },
+            {
+                "id": "priority",
+                "label": "Priority",
+                "value": k["total"],
+                "filter": {},
+                "children": _mm_children(records, "priority", "priority"),
+            },
+        ],
+    }
+
+
 def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
     records = filtered(excel_service.get_all(), filters)
     cfg = load_config()
@@ -423,6 +497,7 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
         ],
         "blockades": blockades(records),
         "today": today_activity(records),
+        "mindmap": mindmap(records),
         "last_days": last_days(excel_service.get_all(), 14),
         "trend": trend(excel_service.get_all(), 12),
         "weekly": weekly(excel_service.get_all(), int(iso[0]), int(iso[1])),

@@ -84,3 +84,13 @@ table.data tbody tr {
 .kpi-click {
   @apply cursor-pointer transition hover:-translate-y-0.5 hover:shadow-lg;
 }
+
+.mm-node {
+  @apply rounded-xl border px-3 py-2 text-left transition shadow-sm;
+}
+.mm-node:hover {
+  @apply -translate-y-0.5 shadow-md;
+}
+.mm-node.is-on {
+  @apply ring-2 ring-brand-500 border-brand-500;
+}
