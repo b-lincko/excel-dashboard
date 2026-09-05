@@ -94,3 +94,7 @@ table.data tbody tr {
 .mm-node.is-on {
   @apply ring-2 ring-brand-500 border-brand-500;
 }
+
+.widget-edit {
+  @apply rounded-2xl ring-1 ring-dashed ring-brand-400/80 p-1;
+}

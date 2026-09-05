@@ -64,7 +64,7 @@ def dashboard(
         raise HTTPException(status_code=503, detail=str(exc))
     except ExcelLocked as exc:
         raise HTTPException(status_code=423, detail=str(exc))
-    payload["sync"] = excel_service.status()
+    payload["sync"] = excel_service.ping()
     return payload
 
 

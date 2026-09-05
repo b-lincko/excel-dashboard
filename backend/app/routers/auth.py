@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from .. import database
-from ..security import create_token, get_current_user, verify_password
+from ..security import create_token, get_current_user, require_permission, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -33,6 +36,27 @@ def login(body: LoginRequest):
 @router.get("/me")
 def me(user=Depends(get_current_user)):
     return public_user(user)
+
+
+class LayoutBody(BaseModel):
+    widgets: list[dict[str, Any]]
+
+
+@router.get("/layout")
+def get_layout(user=Depends(require_permission("view"))):
+    raw = database.get_setting(f"dashboard_layout:{user['username']}")
+    if not raw:
+        return {"widgets": None}
+    try:
+        return {"widgets": json.loads(raw)}
+    except json.JSONDecodeError:
+        return {"widgets": None}
+
+
+@router.put("/layout")
+def save_layout(body: LayoutBody, user=Depends(require_permission("view"))):
+    database.set_setting(f"dashboard_layout:{user['username']}", json.dumps(body.widgets))
+    return {"ok": True, "widgets": body.widgets}
 
 
 def public_user(user: dict) -> dict:

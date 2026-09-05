@@ -185,12 +185,17 @@ class ExcelService:
             return str(value)
         return str(value).strip() if isinstance(value, str) else value
 
-    def _load_workbook(self, data_only: bool = False):
+    def _load_workbook(self, data_only: bool = False, read_only: bool = False):
         path = self.excel_path()
         if not path.exists():
             raise ExcelUnavailable("Excel file is currently unavailable.")
         try:
-            return load_workbook(path, data_only=data_only, keep_vba=path.suffix == ".xlsm")
+            return load_workbook(
+                path,
+                data_only=data_only,
+                read_only=read_only,
+                keep_vba=(path.suffix == ".xlsm" and not read_only),
+            )
         except PermissionError as exc:
             raise ExcelLocked(
                 "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
@@ -218,17 +223,33 @@ class ExcelService:
         return headers
 
     def _read_sheet_records(self, ws, sheet_name: str) -> tuple[list[str], list[dict[str, Any]]]:
-        headers = self._read_headers(ws)
-        records: list[dict[str, Any]] = []
-        mapping = self.cfg().mapping.excel_to_internal()
+        cfg = self.cfg()
+        header_row = cfg.header_row
+        start = cfg.data_start_row
+        mapping = cfg.mapping.excel_to_internal()
+        headers: list[str] = []
         id_field_header = None
-        for h in headers:
-            if mapping.get(norm_header(h)) == "work_order_id":
-                id_field_header = h
-                break
-        start = self.cfg().data_start_row
+        records: list[dict[str, Any]] = []
         empty_streak = 0
-        for idx, row in enumerate(ws.iter_rows(min_row=start, max_col=len(headers)), start=start):
+        max_col = 80
+        for idx, row in enumerate(ws.iter_rows(min_row=header_row, max_col=max_col), start=header_row):
+            if idx == header_row:
+                headers = []
+                for col_i, cell in enumerate(row, start=1):
+                    if cell.value is None:
+                        headers.append(f"Column{col_i}")
+                    else:
+                        headers.append(str(cell.value))
+                while headers and headers[-1].startswith("Column"):
+                    headers.pop()
+                max_col = max(len(headers), 1)
+                for h in headers:
+                    if mapping.get(norm_header(h)) == "work_order_id":
+                        id_field_header = h
+                        break
+                continue
+            if idx < start:
+                continue
             raw: dict[str, Any] = {}
             empty = True
             for header, cell in zip(headers, row):
@@ -272,7 +293,7 @@ class ExcelService:
             if not self.available():
                 return self._serve_cache("Excel file is currently unavailable.")
             try:
-                wb = self._load_workbook(data_only=False)
+                wb = self._load_workbook(data_only=False, read_only=True)
             except (ExcelLocked, ExcelUnavailable, PermissionError, OSError) as exc:
                 if self._cache is not None:
                     return self._serve_cache(str(exc))

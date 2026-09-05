@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import threading
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 from statistics import mean
@@ -21,6 +23,9 @@ from .domain import (
     today,
 )
 from .excel.service import excel_service
+
+_DASH_LOCK = threading.Lock()
+_DASH_CACHE: dict[str, Any] = {"token": "", "key": "", "payload": None}
 
 
 def filtered(records: list[dict[str, Any]], filters: dict[str, Any]) -> list[dict[str, Any]]:
@@ -476,13 +481,32 @@ def mindmap(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _filter_key(filters: dict[str, Any]) -> str:
+    return json.dumps(filters or {}, sort_keys=True, default=str)
+
+
+def _options_from(records: list[dict[str, Any]]) -> dict[str, list[str]]:
+    fields = ["status", "priority", "department", "location", "assigned_to", "work_type", "delay_reason", "issue"]
+    out: dict[str, list[str]] = {}
+    for field in fields:
+        vals = {str(r.get(field)).strip() for r in records if str(r.get(field) or "").strip()}
+        out[field] = sorted(vals, key=str.lower)
+    return out
+
+
 def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
     all_records = excel_service.get_all()
+    token = excel_service.sync_token()
+    key = _filter_key(filters)
+    with _DASH_LOCK:
+        cached = _DASH_CACHE
+        if cached["token"] == token and cached["key"] == key and cached["payload"] is not None:
+            return dict(cached["payload"])
     records = filtered(all_records, filters)
     cfg = load_config()
     t = today()
-    iso = t.isocalendar()
-    return {
+    recent = sorted(records, key=lambda r: str(r.get("created_date") or ""), reverse=True)[:8]
+    payload = {
         "kpis": kpis(records),
         "status": status_distribution(records),
         "reasons": reasons(records),
@@ -497,16 +521,20 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
             for name, value in Counter(str(r.get("issue") or "Unknown") for r in records).most_common()
         ],
         "blockades": blockades(records),
-        "today": today_activity(records),
         "mindmap": mindmap(records),
         "last_days": last_days(all_records, 14),
         "trend": trend(all_records, 12),
-        "weekly": weekly(all_records, int(iso[0]), int(iso[1])),
+        "recent": [annotate(r, cfg) for r in recent],
+        "options": _options_from(all_records),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "as_of": t.isoformat(),
         "count": len(records),
         "closed_statuses": cfg.closed_statuses,
+        "sync_token": token,
     }
+    with _DASH_LOCK:
+        _DASH_CACHE.update({"token": token, "key": key, "payload": payload})
+    return payload
 
 
 def parse_query_filters(params: dict[str, Any]) -> dict[str, Any]:
