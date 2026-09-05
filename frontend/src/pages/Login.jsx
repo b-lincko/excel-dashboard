@@ -58,6 +58,12 @@ export default function Login() {
           {error && (
             <div className="mb-4 rounded-lg bg-rose-50 text-rose-700 text-sm px-3 py-2 dark:bg-rose-500/10 dark:text-rose-300">
               {error}
+              {String(error).includes("API is not running") && (
+                <div className="mt-2 text-xs">
+                  run.bat must open two windows: <b>Linkco MR API</b> and <b>Linkco MR UI</b>.
+                  If the API window closed, run <code>scripts\\start-api.bat</code> and leave it open.
+                </div>
+              )}
             </div>
           )}
           <label className="lbl">Username</label>

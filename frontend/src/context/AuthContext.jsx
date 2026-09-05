@@ -16,9 +16,11 @@ export function AuthProvider({ children }) {
     try {
       const me = await api.get("/api/auth/me");
       setUser(me);
-    } catch {
-      setToken(null);
-      setUser(null);
+    } catch (e) {
+      if (!e?.offline) {
+        setToken(null);
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }

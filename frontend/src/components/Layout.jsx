@@ -43,25 +43,39 @@ export default function Layout() {
   const [sync, setSync] = useState(null);
   const [q, setQ] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [intervalSec, setIntervalSec] = useState(10);
 
   async function loadSync() {
     try {
-      setSync(await api.get("/api/sync/status"));
-    } catch {
-      setSync({ synchronized: false, error: "Excel file is currently unavailable." });
+      const next = await api.get("/api/sync/status");
+      setSync((prev) => {
+        if (prev && next.sync_token && prev.sync_token !== next.sync_token) {
+          window.dispatchEvent(new CustomEvent("woms:data", { detail: next }));
+        }
+        return next;
+      });
+    } catch (e) {
+      setSync({
+        synchronized: false,
+        error: e.offline ? e.message : "Excel file is currently unavailable.",
+        offline: !!e.offline,
+      });
     }
   }
 
   useEffect(() => {
     loadSync();
-    const id = setInterval(loadSync, 30000);
+    if (!intervalSec) return undefined;
+    const id = setInterval(loadSync, intervalSec * 1000);
     return () => clearInterval(id);
-  }, [loc.pathname]);
+  }, [loc.pathname, intervalSec]);
 
   async function refresh() {
     setRefreshing(true);
     try {
-      setSync(await api.post("/api/sync/refresh"));
+      const next = await api.post("/api/sync/refresh");
+      setSync(next);
+      window.dispatchEvent(new CustomEvent("woms:data", { detail: next }));
     } catch (e) {
       setSync({ synchronized: false, error: e.message });
     } finally {

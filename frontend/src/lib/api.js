@@ -10,7 +10,9 @@ export function setToken(token) {
 
 async function request(path, { method = "GET", body, headers, raw } = {}) {
   const token = getToken();
-  const res = await fetch(path, {
+  let res;
+  try {
+    res = await fetch(path, {
     method,
     headers: {
       ...(body && !raw ? { "Content-Type": "application/json" } : {}),
@@ -19,6 +21,15 @@ async function request(path, { method = "GET", body, headers, raw } = {}) {
     },
     body: body && !raw ? JSON.stringify(body) : body,
   });
+  } catch (e) {
+    const err = new Error(
+      "API is not running on port 8000. Keep the “Linkco MR API” window open (run.bat starts it)."
+    );
+    err.status = 0;
+    err.offline = true;
+    err.cause = e;
+    throw err;
+  }
   if (res.status === 401) {
     setToken(null);
     if (!path.includes("/api/auth/login")) {

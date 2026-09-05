@@ -41,11 +41,15 @@ def startup():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     database.init_db()
     try:
+        path = excel_service.excel_path()
+        print(f"[WOMS] Excel path: {path} exists={path.exists()}")
         if excel_service.available():
-            excel_service.load(force=True)
-    except Exception:
-        # Dashboard still starts; UI shows Excel unavailable.
-        pass
+            n = len(excel_service.load(force=True))
+            print(f"[WOMS] Loaded {n} material requests")
+        else:
+            print("[WOMS] Excel file is currently unavailable.")
+    except Exception as exc:
+        print(f"[WOMS] Excel load skipped: {exc}")
 
 
 @app.get("/api/health")

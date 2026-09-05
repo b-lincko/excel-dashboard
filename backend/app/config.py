@@ -132,13 +132,46 @@ def default_config() -> AppConfig:
     return AppConfig()
 
 
+def resolve_excel_path(configured: str = "") -> Path:
+    """Find file.xlsx even if a saved config points at another machine."""
+    candidates: list[Path] = []
+    if configured:
+        p = Path(configured)
+        candidates.append(p if p.is_absolute() else (ROOT / p))
+    candidates.extend(
+        [
+            ROOT / "file.xlsx",
+            Path.cwd() / "file.xlsx",
+            Path.cwd().parent / "file.xlsx",
+            ROOT.parent / "file.xlsx",
+        ]
+    )
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            key = str(c)
+            if key in seen:
+                continue
+            seen.add(key)
+            if c.is_file():
+                return c.resolve()
+        except OSError:
+            continue
+    return (ROOT / "file.xlsx").resolve()
+
+
 def load_config() -> AppConfig:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if CONFIG_PATH.exists():
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        return AppConfig.model_validate(data)
-    cfg = AppConfig()
-    save_config(cfg)
+        cfg = AppConfig.model_validate(data)
+    else:
+        cfg = AppConfig()
+    found = resolve_excel_path(cfg.excel_path)
+    if found.exists() and str(found) != cfg.excel_path:
+        cfg.excel_path = str(found)
+    elif not Path(cfg.excel_path).exists() and found.exists():
+        cfg.excel_path = str(found)
     return cfg
 
 

@@ -3,8 +3,6 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 set "ROOT=%~dp0"
-set "API_PORT=8000"
-set "UI_PORT=5173"
 set "VENV_PY=%ROOT%.venv\Scripts\python.exe"
 set "REQ=%ROOT%backend\requirements.txt"
 set "XLSX=%ROOT%file.xlsx"
@@ -12,6 +10,7 @@ set "XLSX=%ROOT%file.xlsx"
 echo ============================================================
 echo   Linkco MR Dashboard — install ^& run
 echo ============================================================
+echo   Folder: %CD%
 echo.
 
 where python >nul 2>&1
@@ -50,18 +49,14 @@ if not exist "%VENV_PY%" (
 
 echo       upgrading pip ...
 "%VENV_PY%" -m pip install --upgrade pip wheel
-echo       installing backend packages (binary wheels, no Rust compile) ...
+echo       installing backend packages ...
 "%VENV_PY%" -m pip install --prefer-binary --only-binary=:all: -r "%REQ%"
 if errorlevel 1 (
-  echo.
-  echo Binary wheels were not available for this Python. Retrying without --only-binary ...
+  echo Binary wheels not available. Retrying ...
   "%VENV_PY%" -m pip install --prefer-binary -r "%REQ%"
 )
 if errorlevel 1 (
-  echo.
-  echo ERROR: pip install failed.
-  echo Delete the .venv folder and run this script again.
-  echo Python 3.11, 3.12 or 3.13 is the most reliable if 3.14 still fails.
+  echo ERROR: pip install failed. Delete the .venv folder and try again.
   pause
   exit /b 1
 )
@@ -85,31 +80,44 @@ if not exist "%ROOT%frontend\node_modules\" (
 echo.
 echo [3/4] Excel workbook
 if not exist "%XLSX%" (
-  echo ERROR: file.xlsx not found in "!ROOT!"
-  echo Place the Linkco MR workbook here as file.xlsx
+  echo ERROR: file.xlsx not found in:
+  echo   %CD%
+  echo Copy the Linkco MR workbook here and name it file.xlsx
   pause
   exit /b 1
 )
-echo       using "!XLSX!"
+echo       using %XLSX%
 
 echo.
-echo [4/4] Starting servers
-echo       API  - http://127.0.0.1:!API_PORT!
-echo       UI   - http://127.0.0.1:!UI_PORT!
+echo [4/4] Starting API then UI
+echo       API window must stay open — that is what reads Excel.
+echo       UI   http://127.0.0.1:5173
+echo       API  http://127.0.0.1:8000
 echo.
 echo       Sign in:  admin / admin123
-echo                 manager / manager123
-echo                 user / user123
-echo.
-echo Two windows will open. Close them to stop.
 echo ============================================================
 echo.
 
-start "Linkco MR API" /D "%ROOT%backend" "%VENV_PY%" run.py
-timeout /t 2 /nobreak >nul
-start "Linkco MR UI" /D "%ROOT%frontend" cmd /k npm run dev -- --host 0.0.0.0 --port !UI_PORT!
+start "Linkco MR API" "%ROOT%scripts\start-api.bat"
 
-echo Servers launched.
-echo Open http://127.0.0.1:!UI_PORT! in your browser.
+echo Waiting for API on port 8000 ...
+set /a _tries=0
+:waitapi
+timeout /t 2 /nobreak >nul
+"%VENV_PY%" -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)" >nul 2>&1
+if not errorlevel 1 goto apiok
+set /a _tries+=1
+if !_tries! lss 20 goto waitapi
+echo.
+echo WARNING: API did not respond yet. Check the "Linkco MR API" window for errors.
+echo You can still open the UI; it will connect once the API is up.
+:apiok
+
+start "Linkco MR UI" "%ROOT%scripts\start-ui.bat"
+
+echo.
+echo Two windows opened:  Linkco MR API  and  Linkco MR UI
+echo Open http://127.0.0.1:5173
+echo Do NOT close the API window or the dashboard cannot load Excel.
 pause
 endlocal

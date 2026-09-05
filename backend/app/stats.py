@@ -40,6 +40,34 @@ def kpis(records: list[dict[str, Any]]) -> dict[str, Any]:
     closing = [c for c in closing if c is not None]
     aging = [aging_days(r) for r in open_]
     aging = [a for a in aging if a is not None]
+    t = today()
+    created_today = [r for r in records if to_date(r.get("created_date")) == t]
+    done_today = [
+        r
+        for r in records
+        if is_closed(r, cfg)
+        and (
+            to_date(r.get("closed_date")) == t
+            or to_date(r.get("completion_date")) == t
+            or to_date(r.get("scheduled_date")) == t
+        )
+    ]
+    delivered_today = [
+        r
+        for r in records
+        if str(r.get("issue") or "").strip().lower() == "delivered"
+        and (
+            to_date(r.get("closed_date")) == t
+            or to_date(r.get("scheduled_date")) == t
+            or to_date(r.get("completion_date")) == t
+        )
+    ]
+    blockades = [
+        r
+        for r in open_
+        if str(r.get("status") or "").strip().upper() in {"UNDER NTP", "ON HOLD", "OPEN"}
+        or is_overdue(r, cfg)
+    ]
     return {
         "total": total,
         "open": len(open_),
@@ -51,7 +79,77 @@ def kpis(records: list[dict[str, Any]]) -> dict[str, Any]:
         "average_closing_days": round(mean(closing), 1) if closing else None,
         "average_aging_days": round(mean(aging), 1) if aging else None,
         "oldest_open_days": max(aging) if aging else 0,
+        "created_today": len(created_today),
+        "done_today": len(done_today),
+        "delivered_today": len(delivered_today),
+        "blockades": len(blockades),
+        "progress_open": round((len(in_prog) / len(open_) * 100) if open_ else 0, 1),
     }
+
+
+def today_activity(records: list[dict[str, Any]]) -> dict[str, Any]:
+    cfg = load_config()
+    t = today()
+    created = [r for r in records if to_date(r.get("created_date")) == t]
+    done = [
+        r
+        for r in records
+        if is_closed(r, cfg)
+        and (
+            to_date(r.get("closed_date")) == t
+            or to_date(r.get("completion_date")) == t
+            or to_date(r.get("scheduled_date")) == t
+        )
+    ]
+    return {
+        "date": t.isoformat(),
+        "created": len(created),
+        "done": len(done),
+        "created_items": [annotate(r, cfg) for r in created[:25]],
+        "done_items": [annotate(r, cfg) for r in done[:25]],
+    }
+
+
+def blockades(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cfg = load_config()
+    open_recs = [r for r in records if is_open(r, cfg)]
+    counts = Counter()
+    for r in open_recs:
+        st = str(r.get("status") or "OPEN").strip() or "OPEN"
+        counts[st] += 1
+    total = len(open_recs) or 1
+    out = []
+    for name, value in counts.most_common():
+        out.append({"name": name, "value": value, "pct": round(value / total * 100, 1)})
+    return out
+
+
+def last_days(records: list[dict[str, Any]], n: int = 14) -> list[dict[str, Any]]:
+    cfg = load_config()
+    t = today()
+    points = []
+    for i in range(n - 1, -1, -1):
+        day = t - timedelta(days=i)
+        created = [r for r in records if to_date(r.get("created_date")) == day]
+        closed = [
+            r
+            for r in records
+            if is_closed(r, cfg)
+            and (
+                to_date(r.get("closed_date")) == day
+                or to_date(r.get("completion_date")) == day
+                or to_date(r.get("scheduled_date")) == day
+            )
+        ]
+        points.append(
+            {
+                "name": day.strftime("%d %b"),
+                "date": day.isoformat(),
+                "created": len(created),
+                "done": len(closed),
+            }
+        )
+    return points
 
 
 def status_distribution(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -319,6 +417,13 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
         "priorities": group_by(records, "priority"),
         "work_types": group_by(records, "work_type"),
         "locations": group_by(records, "location"),
+        "delivery": [
+            {"name": name, "value": value, "pct": round(value / max(len(records), 1) * 100, 1)}
+            for name, value in Counter(str(r.get("issue") or "Unknown") for r in records).most_common()
+        ],
+        "blockades": blockades(records),
+        "today": today_activity(records),
+        "last_days": last_days(excel_service.get_all(), 14),
         "trend": trend(excel_service.get_all(), 12),
         "weekly": weekly(excel_service.get_all(), int(iso[0]), int(iso[1])),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
