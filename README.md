@@ -44,7 +44,7 @@ Keep `file.xlsx` in the project root (it is the source of truth).
 
 ### Requirements
 
-- Python 3.11+
+- Python 3.11+ (3.11–3.13 recommended; 3.14 is supported via current Pydantic wheels)
 - Node.js 18+
 
 ### Manual install

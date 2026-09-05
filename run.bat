@@ -33,6 +33,7 @@ if errorlevel 1 (
 )
 
 echo [1/4] Python virtual environment
+%PYTHON% --version
 if not exist ".venv\Scripts\python.exe" (
   echo       creating .venv ...
   %PYTHON% -m venv .venv
@@ -43,11 +44,20 @@ if not exist ".venv\Scripts\python.exe" (
   )
 )
 call ".venv\Scripts\activate.bat"
-python -m pip install --upgrade pip >nul
-echo       installing backend packages ...
-pip install -r "backend\requirements.txt"
+echo       upgrading pip ...
+python -m pip install --upgrade pip wheel
+echo       installing backend packages (binary wheels, no Rust compile) ...
+python -m pip install --prefer-binary --only-binary=:all: -r "backend\requirements.txt"
 if errorlevel 1 (
+  echo.
+  echo Binary wheels were not available for this Python. Retrying without --only-binary ...
+  python -m pip install --prefer-binary -r "backend\requirements.txt"
+)
+if errorlevel 1 (
+  echo.
   echo ERROR: pip install failed.
+  echo If you previously had a failed install, delete the .venv folder and run this script again.
+  echo Python 3.11, 3.12 or 3.13 is the most reliable if 3.14 still fails.
   pause
   exit /b 1
 )

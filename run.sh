@@ -37,9 +37,9 @@ if [ ! -x "$ROOT/.venv/bin/python" ]; then
 fi
 # shellcheck disable=SC1091
 source "$ROOT/.venv/bin/activate"
-python -m pip install --upgrade pip >/dev/null
+python -m pip install --upgrade pip wheel >/dev/null
 echo "      installing backend packages …"
-pip install -r "$ROOT/backend/requirements.txt"
+pip install --prefer-binary -r "$ROOT/backend/requirements.txt"
 
 echo
 echo "[2/4] Frontend packages"
