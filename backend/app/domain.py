@@ -98,6 +98,56 @@ def is_awaiting_po(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool
     return is_open(rec, cfg) and not has_po(rec) and not is_delivered(rec)
 
 
+def has_rfq_date(rec: dict[str, Any]) -> bool:
+    return bool(to_date(rec.get("scheduled_date")) or str(rec.get("scheduled_date") or "").strip())
+
+
+def is_need_rfq(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    return is_awaiting_po(rec, cfg) and not has_rfq_date(rec)
+
+
+def is_rfq_sent(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    return is_awaiting_po(rec, cfg) and has_rfq_date(rec)
+
+
+def is_po_issued(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    return is_pending_po(rec, cfg) and not is_eta_late(rec, cfg)
+
+
+def delivery_done_date(rec: dict[str, Any]) -> Optional[date]:
+    return to_date(rec.get("completion_date")) or to_date(rec.get("scheduled_date"))
+
+
+def is_on_time_delivery(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> Optional[bool]:
+    """Scorable delivered/closed rows vs due date. None = not enough dates to score."""
+    if not is_delivered(rec) and not is_closed(rec, cfg):
+        return None
+    due = to_date(rec.get("due_date"))
+    done = to_date(rec.get("completion_date"))
+    if done and due:
+        return done <= due
+    if is_delivered(rec) and due:
+        return due >= today() or not is_overdue(rec, cfg)
+    return None
+
+
+def po_stage(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> str:
+    """Exclusive pipeline stage for the PO board (derived, not stored)."""
+    if is_delivered(rec):
+        return "delivered"
+    if is_closed(rec, cfg):
+        return "closed"
+    if is_eta_late(rec, cfg):
+        return "eta_late"
+    if is_pending_po(rec, cfg):
+        return "po_issued"
+    if is_rfq_sent(rec, cfg):
+        return "rfq_sent"
+    if is_need_rfq(rec, cfg):
+        return "need_rfq"
+    return "other"
+
+
 def eta_date(rec: dict[str, Any]) -> Optional[date]:
     return to_date(rec.get("closed_date"))
 
@@ -221,6 +271,12 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
     if flag == "pending_po" and not is_pending_po(rec, cfg):
         return False
     if flag == "awaiting_po" and not is_awaiting_po(rec, cfg):
+        return False
+    if flag == "need_rfq" and not is_need_rfq(rec, cfg):
+        return False
+    if flag == "rfq_sent" and not is_rfq_sent(rec, cfg):
+        return False
+    if flag == "po_issued" and not is_po_issued(rec, cfg):
         return False
     if flag == "delivered" and not is_delivered(rec):
         return False
@@ -354,8 +410,13 @@ def annotate(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> dict[str, 
     out["is_delivered"] = is_delivered(rec)
     out["is_pending_po"] = is_pending_po(rec, cfg)
     out["is_awaiting_po"] = is_awaiting_po(rec, cfg)
+    out["is_need_rfq"] = is_need_rfq(rec, cfg)
+    out["is_rfq_sent"] = is_rfq_sent(rec, cfg)
+    out["is_po_issued"] = is_po_issued(rec, cfg)
     out["is_eta_late"] = is_eta_late(rec, cfg)
     out["is_due_this_week"] = is_due_this_week(rec, cfg)
+    out["on_time"] = is_on_time_delivery(rec, cfg)
+    out["po_stage"] = po_stage(rec, cfg)
     eta = eta_date(rec)
     out["days_to_eta"] = (eta - today()).days if eta else None
     return out

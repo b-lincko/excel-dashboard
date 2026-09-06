@@ -248,9 +248,21 @@ def test_ops_queue_and_suppliers(workbook):
     sbody = suppliers.json()
     assert sbody["kpis"]["pending_po"] == sum(1 for r in recs if is_pending_po(r))
     assert sbody["suppliers"]
+    assert "board" in sbody
+    assert sbody["kpis"]["need_rfq"] + sbody["kpis"]["rfq_sent"] == sbody["kpis"]["awaiting_po"]
+    assert 0 <= sbody["kpis"]["on_time_rate"] <= 100
     pending = client.get("/api/work-orders?flag=pending_po&page_size=5", headers=headers)
     assert pending.status_code == 200
     assert pending.json()["total"] == sbody["kpis"]["pending_po"]
+    need = client.get("/api/work-orders?flag=need_rfq&page_size=1", headers=headers)
+    assert need.status_code == 200
+    assert need.json()["total"] == sbody["kpis"]["need_rfq"]
+    rfq = client.get("/api/work-orders?flag=rfq_sent&page_size=1", headers=headers)
+    assert rfq.status_code == 200
+    assert rfq.json()["total"] == sbody["kpis"]["rfq_sent"]
+    issued = client.get("/api/work-orders?flag=po_issued&page_size=1", headers=headers)
+    assert issued.status_code == 200
+    assert issued.json()["total"] == sbody["kpis"]["po_issued"]
 
 
 def test_preserve_other_sheets(workbook):

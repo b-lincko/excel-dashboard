@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from .config import load_config
 from .dates import to_date
+from . import database
 from .domain import (
     aging_days,
     annotate,
@@ -17,11 +18,15 @@ from .domain import (
     is_delivered,
     is_due_this_week,
     is_eta_late,
+    is_need_rfq,
     is_ntp,
     is_on_hold,
+    is_on_time_delivery,
     is_open,
     is_overdue,
     is_pending_po,
+    is_po_issued,
+    is_rfq_sent,
     matches_filters,
     today,
 )
@@ -54,6 +59,13 @@ SLIM_KEYS = (
     "is_eta_late",
     "is_pending_po",
     "is_delivered",
+    "is_need_rfq",
+    "is_rfq_sent",
+    "is_po_issued",
+    "delay_source",
+    "delay_kind",
+    "on_time",
+    "po_stage",
 )
 
 
@@ -148,9 +160,35 @@ def queue_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     }
 
 
+def _overlay_delay(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    extras = database.get_all_record_extras()
+    out: list[dict[str, Any]] = []
+    for rec in records:
+        extra = extras.get(str(rec.get("record_id") or "")) or {}
+        item = rec
+        copied = False
+        for field in ("delay_kind", "delay_source", "delay_justification"):
+            excel_val = str(rec.get(field) or "").strip()
+            db_val = str(extra.get(field) or "").strip()
+            if not excel_val and db_val:
+                if not copied:
+                    item = dict(rec)
+                    copied = True
+                item[field] = db_val
+        out.append(item)
+    return out
+
+
+def _delay_source_key(rec: dict[str, Any]) -> str:
+    raw = str(rec.get("delay_source") or "").strip().lower()
+    if raw in {"site", "procurement", "supplier"}:
+        return raw
+    return ""
+
+
 def supplier_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     cfg = load_config()
-    records = _filtered(excel_service.get_all(), filters or {})
+    records = _overlay_delay(_filtered(excel_service.get_all(), filters or {}))
     t = today()
     groups: dict[str, list] = defaultdict(list)
     for r in records:
@@ -169,6 +207,8 @@ def supplier_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]
         late = [r for r in recs if is_eta_late(r, cfg)]
         aging = [d for d in (aging_days(r) for r in open_) if d is not None]
         closing = [d for d in (closing_days(r) for r in closed) if d is not None]
+        scored = [s for s in (is_on_time_delivery(r, cfg) for r in recs) if s is not None]
+        on_time = sum(1 for s in scored if s)
         rows.append(
             {
                 "name": name,
@@ -180,18 +220,36 @@ def supplier_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]
                 "pending_delivery": len(pending_delivery),
                 "pending_po": len(pending_po),
                 "awaiting_po": len(awaiting_po),
+                "need_rfq": sum(1 for r in recs if is_need_rfq(r, cfg)),
+                "rfq_sent": sum(1 for r in recs if is_rfq_sent(r, cfg)),
+                "po_issued": sum(1 for r in recs if is_po_issued(r, cfg)),
                 "eta_late": len(late),
+                "scored": len(scored),
+                "on_time": on_time,
+                "late": len(scored) - on_time,
+                "on_time_rate": round((on_time / len(scored) * 100) if scored else 0, 1),
+                "delay_site": sum(1 for r in recs if _delay_source_key(r) == "site"),
+                "delay_procurement": sum(1 for r in recs if _delay_source_key(r) == "procurement"),
+                "delay_supplier": sum(1 for r in recs if _delay_source_key(r) == "supplier"),
                 "avg_aging_days": round(mean(aging), 1) if aging else None,
                 "avg_close_days": round(mean(closing), 1) if closing else None,
                 "completion_rate": round((len(closed) / len(recs) * 100) if recs else 0, 1),
             }
         )
-    rows.sort(key=lambda x: (x["open"], x["eta_late"], x["total"]), reverse=True)
+    rows.sort(key=lambda x: (x["overdue"], x["eta_late"], -x["on_time_rate"], x["open"]), reverse=True)
 
     pending_pos = _sort_date([r for r in records if is_pending_po(r, cfg)], "created_date", False)
     awaiting_po = _sort_date([r for r in records if is_awaiting_po(r, cfg)], "created_date", False)
     eta_late = _sort_date([r for r in records if is_eta_late(r, cfg)], "closed_date", False)
+    need_rfq = _sort_date([r for r in records if is_need_rfq(r, cfg)], "created_date", False)
+    rfq_sent = _sort_date([r for r in records if is_rfq_sent(r, cfg)], "created_date", False)
+    po_issued = _sort_date([r for r in records if is_po_issued(r, cfg)], "scheduled_date", False)
+    delivered_rows = _sort_date([r for r in records if is_delivered(r)], "completion_date", True)
     delivery = Counter(str(r.get("issue") or "Unknown") for r in records)
+    delay_sources = Counter(_delay_source_key(r) for r in records if _delay_source_key(r))
+    overall_scored = [s for s in (is_on_time_delivery(r, cfg) for r in records) if s is not None]
+    overall_on_time = sum(1 for s in overall_scored if s)
+    named = [r for r in rows if r["name"] != "Unassigned"]
 
     return {
         "as_of": t.isoformat(),
@@ -203,18 +261,59 @@ def supplier_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]
             "unassigned": next((r["total"] for r in rows if r["name"] == "Unassigned"), 0),
             "pending_po": len(pending_pos),
             "awaiting_po": len(awaiting_po),
+            "need_rfq": len(need_rfq),
+            "rfq_sent": len(rfq_sent),
+            "po_issued": len(po_issued),
             "eta_late": len(eta_late),
             "delivered": sum(1 for r in records if is_delivered(r)),
             "open": sum(1 for r in records if is_open(r, cfg)),
+            "scored": len(overall_scored),
+            "on_time": overall_on_time,
+            "on_time_rate": round((overall_on_time / len(overall_scored) * 100) if overall_scored else 0, 1),
         },
         "suppliers": rows,
+        "on_time": [
+            {"name": r["name"], "on_time_rate": r["on_time_rate"], "scored": r["scored"], "on_time": r["on_time"]}
+            for r in named[:25]
+        ],
+        "delays": [
+            {
+                "name": r["name"],
+                "site": r["delay_site"],
+                "procurement": r["delay_procurement"],
+                "supplier": r["delay_supplier"],
+            }
+            for r in named[:25]
+            if r["delay_site"] or r["delay_procurement"] or r["delay_supplier"]
+        ],
+        "delay_sources": [
+            {"name": name, "value": value, "pct": round(value / max(sum(delay_sources.values()), 1) * 100, 1)}
+            for name, value in delay_sources.most_common()
+        ],
         "delivery": [
             {"name": name, "value": value, "pct": round(value / max(len(records), 1) * 100, 1)}
             for name, value in delivery.most_common()
         ],
+        "board": {
+            "need_rfq": _take(need_rfq, cfg, 30),
+            "rfq_sent": _take(rfq_sent, cfg, 30),
+            "po_issued": _take(po_issued, cfg, 30),
+            "eta_late": _take(eta_late, cfg, 30),
+            "delivered": _take(delivered_rows, cfg, 30),
+        },
+        "board_counts": {
+            "need_rfq": len(need_rfq),
+            "rfq_sent": len(rfq_sent),
+            "po_issued": len(po_issued),
+            "eta_late": len(eta_late),
+            "delivered": len(delivered_rows),
+        },
         "pending_pos": _take(pending_pos, cfg, 50),
         "awaiting_po": _take(awaiting_po, cfg, 50),
         "eta_late": _take(eta_late, cfg, 50),
+        "need_rfq": _take(need_rfq, cfg, 50),
+        "rfq_sent": _take(rfq_sent, cfg, 50),
+        "po_issued": _take(po_issued, cfg, 50),
     }
 
 
