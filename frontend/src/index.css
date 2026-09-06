@@ -96,7 +96,9 @@ table.data tbody tr {
 }
 
 .widget-edit {
-  @apply rounded-2xl border border-dashed border-brand-400/80 p-1;
+  border: 1px dashed #1d6a96;
+  border-radius: 1rem;
+  padding: 0.25rem;
 }
 
 .print-only {
