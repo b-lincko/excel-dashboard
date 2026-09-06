@@ -212,8 +212,10 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
       <Filters
         value={filters}
         onChange={(v) => {
-          setFilters(v);
-          if (!v.q) setQ("");
+          const next = { ...v };
+          if (presetFlag && !next.flag) next.flag = presetFlag;
+          setFilters(next);
+          if (!next.q) setQ("");
           setPage(1);
         }}
         options={options}
