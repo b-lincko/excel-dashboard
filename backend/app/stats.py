@@ -506,17 +506,34 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
     records = filtered(all_records, filters)
     cfg = load_config()
     t = today()
+    departments = group_by(records, "department")
+    employees = group_by(records, "assigned_to")
+    priorities = group_by(records, "priority")
+    work_types = group_by(records, "work_type")
+    locations = group_by(records, "location")
+    groups = {
+        "department": departments,
+        "assigned_to": employees,
+        "status": group_by(records, "status"),
+        "priority": priorities,
+        "work_type": work_types,
+        "location": locations,
+        "supplier": group_by(records, "supplier"),
+        "issue": group_by(records, "issue"),
+        "delay_reason": group_by(records, "delay_reason"),
+    }
     recent = sorted(records, key=lambda r: str(r.get("created_date") or ""), reverse=True)[:8]
     payload = {
         "kpis": kpis(records),
         "status": status_distribution(records),
         "reasons": reasons(records),
         "aging": aging(records),
-        "departments": group_by(records, "department"),
-        "employees": group_by(records, "assigned_to"),
-        "priorities": group_by(records, "priority"),
-        "work_types": group_by(records, "work_type"),
-        "locations": group_by(records, "location"),
+        "departments": departments,
+        "employees": employees,
+        "priorities": priorities,
+        "work_types": work_types,
+        "locations": locations,
+        "groups": groups,
         "delivery": [
             {"name": name, "value": value, "pct": round(value / max(len(records), 1) * 100, 1)}
             for name, value in Counter(str(r.get("issue") or "Unknown") for r in records).most_common()

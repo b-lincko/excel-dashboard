@@ -30,12 +30,24 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import KPICard from "./KPICard.jsx";
 import ChartCard from "./ChartCard.jsx";
 import StatusBadge from "./StatusBadge.jsx";
 import MindMap from "./MindMap.jsx";
-import { CATALOG, KPI_METRICS } from "../lib/widgets.js";
+import CustomChart from "./CustomChart.jsx";
+import {
+  CATALOG,
+  CHART_STYLES,
+  DATASETS,
+  GROUP_METRICS,
+  KPI_METRICS,
+  MINDMAP_BRANCHES,
+  buildMindmap,
+  datasetById,
+  metricValue,
+} from "../lib/widgets.js";
 
 const PIE = ["#0F3D5E", "#1D6A96", "#0EA5E9", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#64748B", "#14B8A6"];
 
@@ -392,6 +404,55 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
                   ))}
                 </select>
               )}
+              {(w.type === "chart_custom" || w.type === "table_custom") && (
+                <select className="w-auto !py-1 !px-2 text-xs" value={w.dataset || "status"} onChange={(e) => update(w.id, { dataset: e.target.value })}>
+                  {(w.type === "table_custom" ? DATASETS.filter((d) => d.kind === "group") : DATASETS).map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {w.type === "chart_custom" && (
+                <>
+                  <select className="w-auto !py-1 !px-2 text-xs" value={w.style || "bar"} onChange={(e) => update(w.id, { style: e.target.value })}>
+                    {CHART_STYLES.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                  {datasetById(w.dataset).kind === "group" && (
+                    <select className="w-auto !py-1 !px-2 text-xs" value={w.metric || "total"} onChange={(e) => update(w.id, { metric: e.target.value })}>
+                      {GROUP_METRICS.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </>
+              )}
+              {w.type === "mindmap_custom" && (
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  {MINDMAP_BRANCHES.map((b) => {
+                    const on = (w.branches || []).includes(b.id);
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        className={`btn-outline !py-0.5 !px-2 text-[11px] ${on ? "!bg-brand-700 !text-white !border-brand-700" : ""}`}
+                        onClick={() => {
+                          const cur = w.branches || [];
+                          update(w.id, { branches: on ? cur.filter((x) => x !== b.id) : [...cur, b.id] });
+                        }}
+                      >
+                        {b.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <button className="btn-ghost !px-1.5 !py-1 ml-auto text-rose-600" onClick={() => remove(w.id)} title="Remove">
                 <Trash2 size={14} />
               </button>
@@ -409,16 +470,121 @@ export function AddWidgetBar({ onAdd, onClose }) {
   CATALOG.forEach((c) => {
     (groups[c.category] ||= []).push(c);
   });
+  const [dataset, setDataset] = useState("status");
+  const [style, setStyle] = useState("bar");
+  const [metric, setMetric] = useState("total");
+  const [kpi, setKpi] = useState("open");
+  const [tableDs, setTableDs] = useState("department");
+  const [branches, setBranches] = useState(["sites", "status", "blockades"]);
+  const ds = datasetById(dataset);
+
+  function toggleBranch(id) {
+    setBranches((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
   return (
-    <div className="card p-4 space-y-3">
+    <div className="card p-4 space-y-4">
       <div className="flex items-center justify-between">
         <div className="font-semibold flex items-center gap-2">
-          <Plus size={16} /> Add to dashboard
+          <Plus size={16} /> Create or add widgets
         </div>
         <button className="btn-ghost !px-2 !py-1" onClick={onClose}>
           <X size={16} />
         </button>
       </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="rounded-xl border border-slate-200 dark:border-white/10 p-3 space-y-2">
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Create a graph</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="lbl">Data</label>
+              <select value={dataset} onChange={(e) => setDataset(e.target.value)}>
+                {DATASETS.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="lbl">Style</label>
+              <select value={style} onChange={(e) => setStyle(e.target.value)}>
+                {CHART_STYLES.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {ds.kind === "group" && (
+              <div className="col-span-2">
+                <label className="lbl">Metric</label>
+                <select value={metric} onChange={(e) => setMetric(e.target.value)}>
+                  {GROUP_METRICS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+          <button className="btn-primary w-full" onClick={() => onAdd("chart_custom", { dataset, style, metric, span: style === "hbar" || ds.kind === "series" ? "2" : "1" })}>
+            Add graph
+          </button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 dark:border-white/10 p-3 space-y-2">
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Create a number</div>
+          <label className="lbl">Metric</label>
+          <select value={kpi} onChange={(e) => setKpi(e.target.value)}>
+            {KPI_METRICS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <button className="btn-primary w-full" onClick={() => onAdd("kpi", { metric: kpi, span: "1" })}>
+            Add number
+          </button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 dark:border-white/10 p-3 space-y-2">
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Create a table</div>
+          <label className="lbl">Group by</label>
+          <select value={tableDs} onChange={(e) => setTableDs(e.target.value)}>
+            {DATASETS.filter((d) => d.kind === "group").map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+          <button className="btn-primary w-full" onClick={() => onAdd("table_custom", { dataset: tableDs, span: "1" })}>
+            Add table
+          </button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 dark:border-white/10 p-3 space-y-2">
+          <div className="text-[11px] uppercase tracking-wide text-slate-500">Create a mind map</div>
+          <div className="flex flex-wrap gap-2">
+            {MINDMAP_BRANCHES.map((b) => (
+              <label key={b.id} className="flex items-center gap-1.5 text-xs">
+                <input type="checkbox" className="w-auto" checked={branches.includes(b.id)} onChange={() => toggleBranch(b.id)} />
+                {b.label}
+              </label>
+            ))}
+          </div>
+          <button
+            className="btn-primary w-full"
+            disabled={!branches.length}
+            onClick={() => onAdd("mindmap_custom", { branches, span: "full" })}
+          >
+            Add mind map
+          </button>
+        </div>
+      </div>
+
       {Object.entries(groups).map(([cat, items]) => (
         <div key={cat}>
           <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">{cat}</div>

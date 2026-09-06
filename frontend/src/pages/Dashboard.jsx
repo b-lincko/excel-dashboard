@@ -156,7 +156,7 @@ export default function Dashboard() {
 
       {adding && editing && (
         <AddWidgetBar
-          onAdd={(type) => persist([...layout, newWidget(type)])}
+          onAdd={(type, extras) => persist([...layout, newWidget(type, extras)])}
           onClose={() => setAdding(false)}
         />
       )}

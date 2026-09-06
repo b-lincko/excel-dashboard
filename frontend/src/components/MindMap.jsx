@@ -39,7 +39,7 @@ function NodeCard({ node, tone, selected, onClick, size = "md" }) {
   );
 }
 
-export default function MindMap({ data }) {
+export default function MindMap({ data, include }) {
   const nav = useNavigate();
   const [openIds, setOpenIds] = useState(() => new Set(["sites", "status", "blockades"]));
   const [selected, setSelected] = useState(null);

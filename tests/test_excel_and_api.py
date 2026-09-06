@@ -136,6 +136,8 @@ def test_auth_and_dashboard(workbook):
     assert body["mindmap"]["branches"]
     assert body.get("recent") is not None
     assert body.get("options")
+    assert body.get("groups", {}).get("status")
+    assert body.get("groups", {}).get("supplier")
     again = client.get("/api/dashboard", headers=headers)
     assert again.status_code == 200
     layout = client.put("/api/auth/layout", headers=headers, json={"widgets": [{"id": "kpis_today", "type": "kpis_today", "span": "full"}]})
