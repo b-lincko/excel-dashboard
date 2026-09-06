@@ -96,7 +96,7 @@ table.data tbody tr {
 }
 
 .widget-edit {
-  @apply rounded-2xl ring-1 ring-dashed ring-brand-400/80 p-1;
+  @apply rounded-2xl border border-dashed border-brand-400/80 p-1;
 }
 
 .print-only {
