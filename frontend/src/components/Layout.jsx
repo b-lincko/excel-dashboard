@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   AlertTriangle,
@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   ListTodo,
   LogOut,
+  Menu,
   Moon,
   Search,
   Settings,
@@ -20,36 +21,64 @@ import {
   RefreshCw,
   Truck,
   Upload,
+  X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { api } from "../lib/api.js";
+import ErrorBoundary from "./ErrorBoundary.jsx";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
-  { to: "/work-orders", label: "Work Orders", icon: ClipboardList },
-  { to: "/open", label: "Open Orders", icon: FolderOpen },
-  { to: "/overdue", label: "Overdue", icon: AlertTriangle },
-  { to: "/closed", label: "Closed Orders", icon: CheckCircle2 },
-  { to: "/queue", label: "Action queue", icon: ListTodo },
-  { to: "/suppliers", label: "Suppliers / PO", icon: Truck },
-  { to: "/analytics", label: "Analytics", icon: BarChart3 },
-  { to: "/reports", label: "Reports", icon: FileText },
-  { to: "/audit", label: "Audit Log", icon: Shield, perm: "audit" },
-  { to: "/users", label: "Users", icon: Users, perm: "users" },
-  { to: "/settings", label: "Settings", icon: Settings, perm: "settings" },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, group: "Work" },
+  { to: "/work-orders", label: "Work orders", icon: ClipboardList, group: "Work" },
+  { to: "/open", label: "Open", icon: FolderOpen, group: "Work" },
+  { to: "/overdue", label: "Overdue", icon: AlertTriangle, group: "Work" },
+  { to: "/closed", label: "Closed", icon: CheckCircle2, group: "Work" },
+  { to: "/queue", label: "Action queue", icon: ListTodo, group: "Ops" },
+  { to: "/suppliers", label: "Suppliers / PO", icon: Truck, group: "Ops" },
+  { to: "/analytics", label: "Analytics", icon: BarChart3, group: "Ops" },
+  { to: "/reports", label: "Reports", icon: FileText, group: "Ops" },
+  { to: "/audit", label: "Audit log", icon: Shield, perm: "audit", group: "Admin" },
+  { to: "/users", label: "Users", icon: Users, perm: "users", group: "Admin" },
+  { to: "/settings", label: "Settings", icon: Settings, perm: "settings", group: "Admin" },
 ];
+
+const TITLES = {
+  "/": "Dashboard",
+  "/work-orders": "Work orders",
+  "/open": "Open orders",
+  "/overdue": "Overdue",
+  "/closed": "Closed orders",
+  "/queue": "Action queue",
+  "/suppliers": "Suppliers",
+  "/analytics": "Analytics",
+  "/reports": "Reports",
+  "/audit": "Audit log",
+  "/users": "Users",
+  "/settings": "Settings",
+};
 
 export default function Layout() {
   const { user, logout, can } = useAuth();
   const { theme, toggle } = useTheme();
   const nav = useNavigate();
+  const loc = useLocation();
   const [sync, setSync] = useState(null);
   const [q, setQ] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
+  const [menu, setMenu] = useState(false);
   const fileRef = useRef(null);
+
+  useEffect(() => {
+    const title = Object.entries(TITLES).find(([path]) => (path === "/" ? loc.pathname === "/" : loc.pathname.startsWith(path)));
+    document.title = title ? `${title[1]} · Linkco MR` : "Linkco MR";
+  }, [loc.pathname]);
+
+  useEffect(() => {
+    setMenu(false);
+  }, [loc.pathname]);
 
   async function loadSync() {
     try {
@@ -76,9 +105,7 @@ export default function Layout() {
   useEffect(() => {
     api
       .get("/api/sync/status")
-      .then((next) => {
-        setSync(next);
-      })
+      .then(setSync)
       .catch((e) => {
         setSync({
           synchronized: false,
@@ -86,7 +113,7 @@ export default function Layout() {
           offline: !!e.offline,
         });
       });
-    const id = setInterval(loadSync, 2000);
+    const id = setInterval(loadSync, 3000);
     return () => clearInterval(id);
   }, []);
 
@@ -102,7 +129,7 @@ export default function Layout() {
       const res = await api.upload("/api/sync/upload", fd);
       setSync(res.sync);
       window.dispatchEvent(new CustomEvent("woms:data", { detail: res.sync }));
-      setUploadMsg(`Scanned ${res.sync?.record_count ?? 0} rows from ${file.name}`);
+      setUploadMsg(`Scanned ${res.sync?.record_count ?? 0} rows`);
     } catch (err) {
       setUploadMsg(err.message || "Upload failed");
     } finally {
@@ -123,49 +150,80 @@ export default function Layout() {
     }
   }
 
+  const items = NAV.filter((n) => !n.perm || can(n.perm));
+  const groups = [];
+  items.forEach((n) => {
+    const last = groups[groups.length - 1];
+    if (!last || last.group !== n.group) groups.push({ group: n.group, items: [n] });
+    else last.items.push(n);
+  });
+
+  const sidebar = (
+    <>
+      <div className="px-5 py-5 flex items-center gap-3">
+        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-400 to-brand-700 grid place-items-center font-extrabold text-white shadow-lg">
+          WO
+        </div>
+        <div className="min-w-0">
+          <div className="font-bold tracking-tight text-white leading-tight">Linkco MR</div>
+          <div className="text-[11px] text-slate-400 truncate">IM Work Order · Material Request</div>
+        </div>
+        <button className="ml-auto lg:hidden btn-ghost !text-slate-300 !px-2" onClick={() => setMenu(false)} aria-label="Close menu">
+          <X size={18} />
+        </button>
+      </div>
+      <nav className="px-3 flex-1 space-y-4 overflow-y-auto">
+        {groups.map((g) => (
+          <div key={g.group}>
+            <div className="px-3 mb-1 text-[10px] uppercase tracking-wider text-slate-500">{g.group}</div>
+            <div className="space-y-0.5">
+              {g.items.map((n) => (
+                <NavLink
+                  key={n.to}
+                  to={n.to}
+                  end={n.end}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition ${
+                      isActive ? "bg-white/10 text-white" : "text-slate-400 hover:text-white hover:bg-white/5"
+                    }`
+                  }
+                >
+                  <n.icon size={16} />
+                  {n.label}
+                </NavLink>
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
+      <div className="p-4 border-t border-white/5">
+        <div className="text-xs text-slate-400 mb-1 truncate">{user?.full_name}</div>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-wider text-cyan-300/80">{user?.role}</span>
+          <button className="btn-ghost !text-slate-400 !px-2 !py-1" onClick={logout} title="Sign out" aria-label="Sign out">
+            <LogOut size={16} />
+          </button>
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <div className="min-h-screen flex bg-slate-50 dark:bg-ink-900">
-      <aside className="w-[250px] shrink-0 bg-ink-900 text-slate-200 flex flex-col border-r border-white/5">
-        <div className="px-5 py-5 flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-400 to-brand-700 grid place-items-center font-extrabold text-white shadow-lg">
-            WO
-          </div>
-          <div>
-            <div className="font-bold tracking-tight text-white leading-tight">Linkco MR</div>
-            <div className="text-[11px] text-slate-400">IM Work Order · Material Request</div>
-          </div>
-        </div>
-        <nav className="px-3 flex-1 space-y-0.5">
-          {NAV.filter((n) => !n.perm || can(n.perm)).map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.end}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition ${
-                  isActive
-                    ? "bg-white/10 text-white"
-                    : "text-slate-400 hover:text-white hover:bg-white/5"
-                }`
-              }
-            >
-              <n.icon size={16} />
-              {n.label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="p-4 border-t border-white/5">
-          <div className="text-xs text-slate-400 mb-1">{user?.full_name}</div>
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] uppercase tracking-wider text-cyan-300/80">{user?.role}</span>
-            <button className="btn-ghost !text-slate-400 !px-2 !py-1" onClick={logout} title="Sign out">
-              <LogOut size={16} />
-            </button>
-          </div>
-        </div>
+      {menu && <button className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setMenu(false)} aria-label="Close menu overlay" />}
+      <aside className="hidden lg:flex w-[250px] shrink-0 bg-ink-900 text-slate-200 flex-col border-r border-white/5">{sidebar}</aside>
+      <aside
+        className={`fixed z-40 inset-y-0 left-0 w-[250px] bg-ink-900 text-slate-200 flex flex-col border-r border-white/5 transition-transform lg:hidden ${
+          menu ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        {sidebar}
       </aside>
       <div className="flex-1 min-w-0 flex flex-col">
-        <header className="h-16 shrink-0 bg-white/80 dark:bg-ink-800/80 backdrop-blur border-b border-slate-200 dark:border-white/5 flex items-center gap-4 px-6">
+        <header className="h-16 shrink-0 bg-white/90 dark:bg-ink-800/90 backdrop-blur border-b border-slate-200 dark:border-white/5 flex items-center gap-3 px-3 sm:px-6">
+          <button className="lg:hidden btn-ghost !px-2" onClick={() => setMenu(true)} aria-label="Open menu">
+            <Menu size={18} />
+          </button>
           <form
             className="flex-1 max-w-xl relative"
             onSubmit={(e) => {
@@ -177,33 +235,27 @@ export default function Layout() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search work orders, technicians, issues, remarks…"
+              placeholder="Search MRs, technicians, PO, remarks…"
               className="pl-9"
+              aria-label="Search work orders"
             />
           </form>
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-1.5 sm:gap-2 text-xs">
             <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 font-medium ${
                 sync?.stale
                   ? "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"
                   : sync?.synchronized
                     ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
                     : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
               }`}
-              title={sync?.error || sync?.path}
+              title={sync?.error || sync?.path || ""}
             >
               <Activity size={12} />
-              {sync?.stale
-                ? "Updating from Excel…"
-                : sync?.synchronized
-                  ? "Synchronized"
-                  : sync?.error
-                    ? "Excel unavailable"
-                    : "Checking…"}
+              <span className="hidden sm:inline">
+                {sync?.stale ? "Updating…" : sync?.synchronized ? "Live" : sync?.error ? "Excel down" : "Checking…"}
+              </span>
             </span>
-            {sync?.mtime && (
-              <span className="hidden lg:inline text-slate-400">Last Excel sync {sync.mtime}</span>
-            )}
             {can("edit") && (
               <>
                 <input
@@ -214,31 +266,33 @@ export default function Layout() {
                   onChange={onUpload}
                 />
                 <button
-                  className="btn-outline !px-2.5 !py-1.5 text-xs"
+                  className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs"
                   onClick={() => fileRef.current?.click()}
                   disabled={uploading}
-                  title="Upload an Excel workbook. The dashboard graphs rebuild from it."
+                  title="Upload Excel workbook"
                 >
                   <Upload size={14} className={uploading ? "animate-pulse" : ""} />
-                  {uploading ? "Scanning…" : "Upload Excel"}
+                  <span className="hidden md:inline">{uploading ? "Scanning…" : "Upload"}</span>
                 </button>
               </>
             )}
             {uploadMsg && (
-              <span className="hidden xl:inline max-w-[220px] truncate text-slate-500" title={uploadMsg}>
+              <span className="hidden xl:inline max-w-[180px] truncate text-slate-500" title={uploadMsg}>
                 {uploadMsg}
               </span>
             )}
-            <button className="btn-ghost !px-2" onClick={refresh} title="Refresh from Excel">
+            <button className="btn-ghost !px-2" onClick={refresh} title="Refresh from Excel" aria-label="Refresh from Excel">
               <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
             </button>
-            <button className="btn-ghost !px-2" onClick={toggle} title="Toggle theme">
+            <button className="btn-ghost !px-2" onClick={toggle} title="Toggle theme" aria-label="Toggle theme">
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>
           </div>
         </header>
-        <main className="flex-1 overflow-auto p-6">
-          <Outlet />
+        <main className="flex-1 overflow-auto p-4 sm:p-6">
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

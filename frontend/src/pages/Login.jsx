@@ -5,8 +5,8 @@ import { useAuth } from "../context/AuthContext.jsx";
 export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin123");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -67,9 +67,23 @@ export default function Login() {
             </div>
           )}
           <label className="lbl">Username</label>
-          <input className="mb-3" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
+          <input
+            className="mb-3"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoFocus
+            autoComplete="username"
+            name="username"
+          />
           <label className="lbl">Password</label>
-          <input className="mb-5" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input
+            className="mb-5"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            name="password"
+          />
           <button className="btn-primary w-full" disabled={busy}>
             {busy ? "Signing in…" : "Sign in"}
           </button>

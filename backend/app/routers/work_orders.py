@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..config import load_config
-from ..domain import annotate, matches_filters
+from ..dates import to_date
+from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_for_open, today
 from ..excel.service import ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
 from ..security import get_current_user, require_permission
 from ..stats import parse_query_filters
@@ -75,26 +76,29 @@ def list_work_orders(
         _raise_excel(exc)
     filters = parse_query_filters(locals())
     cfg = load_config()
-    matched = [annotate(r, cfg) for r in records if matches_filters(r, filters, cfg)]
+    matched = [r for r in records if matches_filters(r, filters, cfg)]
     if reason:
-        matched = [r for r in matched if (r.get("open_reason") or "") == reason]
+        matched = [r for r in matched if reason_for_open(r) == reason]
     reverse = order.lower() != "asc"
-    numeric_sorts = {"aging_days", "days_overdue", "closing_days"}
+    t = today()
+
     def sort_key(r):
+        if sort == "aging_days":
+            return aging_days(r) or 0
+        if sort == "days_overdue":
+            if not is_overdue(r, cfg):
+                return -1
+            due = to_date(r.get("due_date"))
+            return (t - due).days if due else -1
         v = r.get(sort)
         if v is None:
             return -10**12 if reverse else 10**12
-        if sort in numeric_sorts:
-            try:
-                return float(v)
-            except (TypeError, ValueError):
-                return 0
         return str(v).lower()
 
     matched.sort(key=sort_key, reverse=reverse)
     total = len(matched)
     start = (page - 1) * page_size
-    page_rows = matched[start : start + page_size]
+    page_rows = [annotate(r, cfg) for r in matched[start : start + page_size]]
     return {
         "items": page_rows,
         "total": total,
@@ -123,7 +127,13 @@ def options(user=Depends(require_permission("view"))):
         "supplier",
         "issue",
     ]
-    opts = {f: excel_service.unique_values(f) for f in fields}
+    buckets: dict[str, set] = {f: set() for f in fields}
+    for rec in records:
+        for f in fields:
+            v = rec.get(f)
+            if v not in (None, ""):
+                buckets[f].add(str(v))
+    opts = {f: sorted(buckets[f], key=str.lower) for f in fields}
     lists = excel_service.lists()
     return {
         "options": opts,

@@ -132,8 +132,20 @@ class ExcelService:
     def record_id(self, sheet_name: str, row_number: int) -> str:
         return f"{self.site_label(sheet_name)}:{row_number}"
 
-    def map_row(self, raw: dict[str, Any], row_number: int, sheet_name: str) -> dict[str, Any]:
-        mapping = self.cfg().mapping.excel_to_internal()
+    def map_row(
+        self,
+        raw: dict[str, Any],
+        row_number: int,
+        sheet_name: str,
+        cfg: Optional[AppConfig] = None,
+        mapping: Optional[dict[str, str]] = None,
+        fields: Optional[list[str]] = None,
+        site: Optional[str] = None,
+    ) -> dict[str, Any]:
+        cfg = cfg or self.cfg()
+        mapping = mapping or cfg.mapping.excel_to_internal()
+        fields = fields or list(cfg.mapping.model_dump().keys())
+        site = site or self.site_label(sheet_name)
         internal: dict[str, Any] = {}
         for excel_col, value in raw.items():
             field = mapping.get(norm_header(excel_col))
@@ -141,11 +153,11 @@ class ExcelService:
                 internal[field] = self._normalize_value(field, value)
         internal["_row"] = row_number
         internal["_sheet"] = sheet_name
-        internal["_site"] = self.site_label(sheet_name)
-        internal["record_id"] = self.record_id(sheet_name, row_number)
+        internal["_site"] = site
+        internal["record_id"] = f"{site}:{row_number}"
         if not internal.get("department"):
-            internal["department"] = internal["_site"]
-        for field in self.cfg().mapping.model_dump().keys():
+            internal["department"] = site
+        for field in fields:
             internal.setdefault(field, "")
         self._apply_due_date(internal)
         return internal
@@ -227,11 +239,13 @@ class ExcelService:
         header_row = cfg.header_row
         start = cfg.data_start_row
         mapping = cfg.mapping.excel_to_internal()
+        fields = list(cfg.mapping.model_dump().keys())
+        site = self.site_label(sheet_name)
         headers: list[str] = []
         id_field_header = None
         records: list[dict[str, Any]] = []
         empty_streak = 0
-        max_col = 80
+        max_col = 40
         for idx, row in enumerate(ws.iter_rows(min_row=header_row, max_col=max_col), start=header_row):
             if idx == header_row:
                 headers = []
@@ -265,7 +279,9 @@ class ExcelService:
             wo_val = raw.get(id_field_header) if id_field_header else None
             if wo_val in (None, ""):
                 continue
-            records.append(self.map_row(raw, idx, sheet_name))
+            records.append(
+                self.map_row(raw, idx, sheet_name, cfg=cfg, mapping=mapping, fields=fields, site=site)
+            )
         return headers, records
 
     def invalidate(self) -> None:

@@ -61,8 +61,8 @@ def _slim(rec: dict[str, Any]) -> dict[str, Any]:
     return {k: rec.get(k) for k in SLIM_KEYS}
 
 
-def _take(rows: list[dict[str, Any]], n: int = 40) -> list[dict[str, Any]]:
-    return [_slim(r) for r in rows[:n]]
+def _take(rows: list[dict[str, Any]], cfg, n: int = 40) -> list[dict[str, Any]]:
+    return [_slim(annotate(r, cfg)) for r in rows[:n]]
 
 
 def _sort_num(rows: list[dict[str, Any]], key: str, reverse: bool = True) -> list[dict[str, Any]]:
@@ -99,16 +99,15 @@ def queue_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     records = _filtered(all_records, filters or {})
     t = today()
     iso = t.isocalendar()
-    annotated = [annotate(r, cfg) for r in records]
 
-    overdue = _sort_num([r for r in annotated if r["is_overdue"]], "days_overdue", True)
-    ntp = _sort_num([r for r in annotated if r["is_ntp"] and r["is_open"]], "aging_days", True)
-    on_hold = _sort_num([r for r in annotated if r["is_on_hold"] and r["is_open"]], "aging_days", True)
-    due_week = _sort_date([r for r in annotated if r["is_due_this_week"]], "due_date", False)
-    created_today = _sort_date([r for r in annotated if is_created_today(r)], "created_date", True)
+    overdue = _sort_date([r for r in records if is_overdue(r, cfg)], "due_date", False)
+    ntp = _sort_date([r for r in records if is_ntp(r) and is_open(r, cfg)], "created_date", False)
+    on_hold = _sort_date([r for r in records if is_on_hold(r) and is_open(r, cfg)], "created_date", False)
+    due_week = _sort_date([r for r in records if is_due_this_week(r, cfg)], "due_date", False)
+    created_today = _sort_date([r for r in records if is_created_today(r)], "created_date", True)
     done_today = [
         r
-        for r in annotated
+        for r in records
         if is_closed(r, cfg)
         and (
             to_date(r.get("closed_date")) == t
@@ -116,8 +115,8 @@ def queue_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
             or to_date(r.get("scheduled_date")) == t
         )
     ]
-    eta_late = _sort_num([r for r in annotated if r["is_eta_late"]], "days_to_eta", False)
-    pending_po = _sort_num([r for r in annotated if r["is_pending_po"]], "aging_days", True)
+    eta_late = _sort_date([r for r in records if is_eta_late(r, cfg)], "closed_date", False)
+    pending_po = _sort_date([r for r in records if is_pending_po(r, cfg)], "created_date", False)
 
     return {
         "as_of": t.isoformat(),
@@ -137,14 +136,14 @@ def queue_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
             "pending_po": len(pending_po),
         },
         "queues": {
-            "overdue": _take(overdue),
-            "ntp": _take(ntp),
-            "on_hold": _take(on_hold),
-            "due_this_week": _take(due_week),
-            "created_today": _take(created_today),
-            "done_today": _take(done_today),
-            "eta_late": _take(eta_late),
-            "pending_po": _take(pending_po),
+            "overdue": _take(overdue, cfg),
+            "ntp": _take(ntp, cfg),
+            "on_hold": _take(on_hold, cfg),
+            "due_this_week": _take(due_week, cfg),
+            "created_today": _take(created_today, cfg),
+            "done_today": _take(done_today, cfg),
+            "eta_late": _take(eta_late, cfg),
+            "pending_po": _take(pending_po, cfg),
         },
     }
 
@@ -189,10 +188,9 @@ def supplier_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]
         )
     rows.sort(key=lambda x: (x["open"], x["eta_late"], x["total"]), reverse=True)
 
-    annotated = [annotate(r, cfg) for r in records]
-    pending_pos = _sort_num([r for r in annotated if r["is_pending_po"]], "aging_days", True)
-    awaiting_po = _sort_num([r for r in annotated if r["is_awaiting_po"]], "aging_days", True)
-    eta_late = _sort_num([r for r in annotated if r["is_eta_late"]], "days_to_eta", False)
+    pending_pos = _sort_date([r for r in records if is_pending_po(r, cfg)], "created_date", False)
+    awaiting_po = _sort_date([r for r in records if is_awaiting_po(r, cfg)], "created_date", False)
+    eta_late = _sort_date([r for r in records if is_eta_late(r, cfg)], "closed_date", False)
     delivery = Counter(str(r.get("issue") or "Unknown") for r in records)
 
     return {
@@ -214,9 +212,9 @@ def supplier_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]
             {"name": name, "value": value, "pct": round(value / max(len(records), 1) * 100, 1)}
             for name, value in delivery.most_common()
         ],
-        "pending_pos": _take(pending_pos, 50),
-        "awaiting_po": _take(awaiting_po, 50),
-        "eta_late": _take(eta_late, 50),
+        "pending_pos": _take(pending_pos, cfg, 50),
+        "awaiting_po": _take(awaiting_po, cfg, 50),
+        "eta_late": _take(eta_late, cfg, 50),
     }
 
 

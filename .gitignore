@@ -8,6 +8,7 @@ frontend/dist/
 frontend/node_modules/
 data/woms.db
 data/app_config.json
+data/.jwt_secret
 data/work_orders.xlsx
 data/*.lock
 backups/

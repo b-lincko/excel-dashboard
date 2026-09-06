@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Columns3, Download, Plus, RefreshCw } from "lucide-react";
 import { api, qs } from "../lib/api.js";
@@ -78,6 +78,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
   const [visible, setVisible] = useState(() => new Set(ALL_COLS.map((c) => c[0])));
   const [showCols, setShowCols] = useState(false);
   const [q, setQ] = useState(filters.q || "");
+  const hadRows = useRef(false);
 
   useEffect(() => {
     setFilters(fromSearch(loc.search, presetFlag));
@@ -90,13 +91,15 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
 
   function load(silent = false) {
     if (!silent) setLoading(true);
-    setError("");
+    if (!silent) setError("");
     const params = { ...filters, q, sort, order, page, page_size: pageSize };
     api
       .get(`/api/work-orders${qs(params)}`)
       .then((d) => {
         setRows(d.items || []);
         setTotal(d.total || 0);
+        setError("");
+        hadRows.current = true;
       })
       .catch((e) => {
         if (!silent) setError(e.message);
@@ -105,7 +108,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
   }
 
   useEffect(() => {
-    load();
+    load(hadRows.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, sort, order, page, pageSize]);
 
@@ -154,7 +157,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
           <p className="text-sm text-slate-500">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="btn-outline" onClick={load}>
+          <button className="btn-outline" onClick={() => load()}>
             <RefreshCw size={14} /> Refresh
           </button>
           <button className="btn-outline" onClick={exportCsv}>
@@ -230,7 +233,10 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.work_order_id} onClick={() => nav(`/work-orders/${encodeURIComponent(r.work_order_id)}`)}>
+                <tr
+                  key={r.record_id || `${r._sheet}:${r._row}` || r.work_order_id}
+                  onClick={() => nav(`/work-orders/${encodeURIComponent(r.record_id || r.work_order_id)}`)}
+                >
                   {cols.map(([k]) => (
                     <td key={k} className={k === "description" || k === "remarks" ? "max-w-[280px] truncate" : ""}>
                       {k === "status" || k === "priority" ? (

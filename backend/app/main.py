@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -12,16 +14,40 @@ from .config import DATA_DIR
 from .excel.service import excel_service
 from .routers import audit, auth, dashboard, ops, reports, settings, sync, users, work_orders
 
+
+def _boot() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    database.init_db()
+    try:
+        path = excel_service.excel_path()
+        print(f"[WOMS] Excel path: {path} exists={path.exists()}")
+        if excel_service.available():
+            n = len(excel_service.load(force=True))
+            print(f"[WOMS] Loaded {n} material requests")
+        else:
+            print("[WOMS] Excel file is currently unavailable.")
+    except Exception as exc:
+        print(f"[WOMS] Excel load skipped: {exc}")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    _boot()
+    yield
+
+
 app = FastAPI(
-    title="Work Order Management System",
-    description="Professional work-order dashboard with Excel as the source of truth.",
-    version="1.0.0",
+    title="Linkco MR — Work Order Management",
+    description="Operations dashboard with Excel as the source of truth.",
+    version="1.1.0",
+    lifespan=lifespan,
 )
 
+app.add_middleware(GZipMiddleware, minimum_size=400)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -37,30 +63,15 @@ app.include_router(settings.router)
 app.include_router(sync.router)
 
 
-@app.on_event("startup")
-def startup():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    database.init_db()
-    try:
-        path = excel_service.excel_path()
-        print(f"[WOMS] Excel path: {path} exists={path.exists()}")
-        if excel_service.available():
-            n = len(excel_service.load(force=True))
-            print(f"[WOMS] Loaded {n} material requests")
-        else:
-            print("[WOMS] Excel file is currently unavailable.")
-    except Exception as exc:
-        print(f"[WOMS] Excel load skipped: {exc}")
-
-
 @app.get("/api/health")
 def health():
-    status = excel_service.status()
+    live = excel_service.ping()
     return {
         "ok": True,
-        "excel": status.get("synchronized"),
-        "records": status.get("record_count"),
-        "error": status.get("error"),
+        "excel": live.get("synchronized"),
+        "records": live.get("record_count"),
+        "error": live.get("error"),
+        "stale": live.get("stale"),
     }
 
 

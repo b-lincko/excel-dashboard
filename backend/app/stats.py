@@ -193,7 +193,7 @@ def aging(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return buckets
 
 
-def group_by(records: list[dict[str, Any]], field: str) -> list[dict[str, Any]]:
+def group_by(records: list[dict[str, Any]], field: str, limit: Optional[int] = None) -> list[dict[str, Any]]:
     cfg = load_config()
     groups: dict[str, list] = defaultdict(list)
     for r in records:
@@ -217,6 +217,8 @@ def group_by(records: list[dict[str, Any]], field: str) -> list[dict[str, Any]]:
             }
         )
     rows.sort(key=lambda x: x["total"], reverse=True)
+    if limit:
+        rows = rows[:limit]
     return rows
 
 
@@ -408,8 +410,7 @@ def trend(records: list[dict[str, Any]], months: int = 12) -> list[dict[str, Any
     return points
 
 
-def _mm_children(records: list[dict[str, Any]], field: str, filter_key: str, limit: int = 12) -> list[dict[str, Any]]:
-    rows = group_by(records, field)[:limit]
+def _mm_children_from_rows(rows: list[dict[str, Any]], filter_key: str, limit: int = 12) -> list[dict[str, Any]]:
     return [
         {
             "id": f"{filter_key}:{r['name']}",
@@ -419,12 +420,19 @@ def _mm_children(records: list[dict[str, Any]], field: str, filter_key: str, lim
             "closed": r["closed"],
             "filter": {filter_key: r["name"]},
         }
-        for r in rows
+        for r in rows[:limit]
     ]
 
 
-def mindmap(records: list[dict[str, Any]]) -> dict[str, Any]:
-    k = kpis(records)
+def mindmap(
+    records: list[dict[str, Any]],
+    k: Optional[dict[str, Any]] = None,
+    groups: Optional[dict[str, list]] = None,
+    blockade_rows: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    k = k or kpis(records)
+    groups = groups or {}
+    blockade_rows = blockade_rows if blockade_rows is not None else blockades(records)
     return {
         "root": {
             "id": "all",
@@ -436,16 +444,16 @@ def mindmap(records: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "id": "sites",
                 "label": "Sites",
-                "value": len({r.get("department") for r in records}),
+                "value": len(groups.get("department") or []),
                 "filter": {},
-                "children": _mm_children(records, "department", "department"),
+                "children": _mm_children_from_rows(groups.get("department") or [], "department"),
             },
             {
                 "id": "status",
                 "label": "Status",
                 "value": k["total"],
                 "filter": {},
-                "children": _mm_children(records, "status", "status"),
+                "children": _mm_children_from_rows(groups.get("status") or [], "status"),
             },
             {
                 "id": "blockades",
@@ -454,29 +462,29 @@ def mindmap(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "filter": {"flag": "open"},
                 "children": [
                     {"id": f"st:{b['name']}", "label": b["name"], "value": b["value"], "filter": {"flag": "open", "status": b["name"]}}
-                    for b in blockades(records)
+                    for b in blockade_rows
                 ],
             },
             {
                 "id": "people",
                 "label": "Assigned to",
-                "value": len({r.get("assigned_to") for r in records if r.get("assigned_to")}),
+                "value": len(groups.get("assigned_to") or []),
                 "filter": {},
-                "children": _mm_children(records, "assigned_to", "assigned_to"),
+                "children": _mm_children_from_rows(groups.get("assigned_to") or [], "assigned_to"),
             },
             {
                 "id": "delivery",
                 "label": "Delivery",
                 "value": k["total"],
                 "filter": {},
-                "children": _mm_children(records, "delay_reason", "delay_reason"),
+                "children": _mm_children_from_rows(groups.get("delay_reason") or groups.get("issue") or [], "delay_reason"),
             },
             {
                 "id": "priority",
                 "label": "Priority",
                 "value": k["total"],
                 "filter": {},
-                "children": _mm_children(records, "priority", "priority"),
+                "children": _mm_children_from_rows(groups.get("priority") or [], "priority"),
             },
         ],
     }
@@ -518,13 +526,15 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
         "priority": priorities,
         "work_type": work_types,
         "location": locations,
-        "supplier": group_by(records, "supplier"),
+        "supplier": group_by(records, "supplier", limit=40),
         "issue": group_by(records, "issue"),
         "delay_reason": group_by(records, "delay_reason"),
     }
+    k = kpis(records)
+    blockade_rows = blockades(records)
     recent = sorted(records, key=lambda r: str(r.get("created_date") or ""), reverse=True)[:8]
     payload = {
-        "kpis": kpis(records),
+        "kpis": k,
         "status": status_distribution(records),
         "reasons": reasons(records),
         "aging": aging(records),
@@ -538,8 +548,8 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
             {"name": name, "value": value, "pct": round(value / max(len(records), 1) * 100, 1)}
             for name, value in Counter(str(r.get("issue") or "Unknown") for r in records).most_common()
         ],
-        "blockades": blockades(records),
-        "mindmap": mindmap(records),
+        "blockades": blockade_rows,
+        "mindmap": mindmap(records, k=k, groups=groups, blockade_rows=blockade_rows),
         "last_days": last_days(all_records, 14),
         "trend": trend(all_records, 12),
         "recent": [annotate(r, cfg) for r in recent],

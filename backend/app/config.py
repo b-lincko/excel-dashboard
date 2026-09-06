@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -160,8 +162,44 @@ def resolve_excel_path(configured: str = "") -> Path:
     return (ROOT / "file.xlsx").resolve()
 
 
-def load_config() -> AppConfig:
+_CFG: Optional[AppConfig] = None
+_CFG_MTIME: Optional[float] = None
+_DEFAULT_JWT = "woms-dev-secret-change-in-production-2026"
+
+
+def _persistent_jwt_secret(configured: str) -> str:
+    env = (os.environ.get("WOMS_JWT_SECRET") or "").strip()
+    if env:
+        return env
+    if configured and configured != _DEFAULT_JWT:
+        return configured
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = DATA_DIR / ".jwt_secret"
+    if path.exists():
+        text = path.read_text(encoding="utf-8").strip()
+        if text:
+            return text
+    secret = secrets.token_urlsafe(48)
+    path.write_text(secret, encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return secret
+
+
+def invalidate_config_cache() -> None:
+    global _CFG, _CFG_MTIME
+    _CFG = None
+    _CFG_MTIME = None
+
+
+def load_config() -> AppConfig:
+    global _CFG, _CFG_MTIME
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    mt = CONFIG_PATH.stat().st_mtime if CONFIG_PATH.exists() else 0.0
+    if _CFG is not None and _CFG_MTIME == mt:
+        return _CFG
     if CONFIG_PATH.exists():
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         cfg = AppConfig.model_validate(data)
@@ -172,9 +210,13 @@ def load_config() -> AppConfig:
         cfg.excel_path = str(found)
     elif not Path(cfg.excel_path).exists() and found.exists():
         cfg.excel_path = str(found)
+    cfg.jwt_secret = _persistent_jwt_secret(cfg.jwt_secret)
+    _CFG = cfg
+    _CFG_MTIME = mt
     return cfg
 
 
 def save_config(cfg: AppConfig) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(cfg.model_dump_json(indent=2), encoding="utf-8")
+    invalidate_config_cache()
