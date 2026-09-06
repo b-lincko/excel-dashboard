@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import database
+from .backup import start_scheduler, stop_scheduler
 from .config import DATA_DIR
 from .excel.service import excel_service
 from .routers import audit, auth, catalog, dashboard, ops, reports, settings, sync, users, work_orders
@@ -33,11 +34,17 @@ def _boot() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _boot()
-    start_scheduler()
+    try:
+        start_scheduler()
+    except Exception as exc:
+        print(f"[WOMS] autobackup scheduler skipped: {exc}")
     try:
         yield
     finally:
-        stop_scheduler()
+        try:
+            stop_scheduler()
+        except Exception:
+            pass
 
 
 app = FastAPI(
