@@ -99,12 +99,6 @@ export default function Login() {
           <button className="btn-primary w-full" disabled={busy}>
             {busy ? "Signing in…" : "Sign in"}
           </button>
-          <div className="mt-6 text-xs text-slate-500 space-y-1">
-            <div className="font-semibold text-slate-600 dark:text-slate-300">Built-in accounts</div>
-            <div>admin / admin123 — full access</div>
-            <div>manager / manager123 — edit & reports</div>
-            <div>user / user123 — view & update</div>
-          </div>
         </form>
       </div>
     </div>
