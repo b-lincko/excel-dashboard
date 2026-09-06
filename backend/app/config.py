@@ -114,6 +114,7 @@ class AppConfig(BaseModel):
         }
     )
     due_offset_default_days: int = 14
+    due_soon_days: int = 3
     in_progress_statuses: list[str] = Field(default_factory=lambda: ["PLACED", "UNDER GATEPASS"])
     cancelled_statuses: list[str] = Field(default_factory=lambda: [])
     aging_buckets: list[dict[str, Any]] = Field(

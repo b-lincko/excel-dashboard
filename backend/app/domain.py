@@ -173,6 +173,28 @@ def is_due_this_week(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bo
     return t <= due <= end.date()
 
 
+def days_until_due(rec: dict[str, Any], on: Optional[date] = None) -> Optional[int]:
+    due = to_date(rec.get("due_date"))
+    if not due:
+        return None
+    return (due - (on or today())).days
+
+
+def is_due_soon(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optional[date] = None) -> bool:
+    """Open MRs whose due date is today through due_soon_days (default 3)."""
+    if is_closed(rec, cfg):
+        return False
+    days = days_until_due(rec, on=on)
+    if days is None:
+        return False
+    cfg = cfg or load_config()
+    try:
+        window = int(getattr(cfg, "due_soon_days", 3) or 3)
+    except (TypeError, ValueError):
+        window = 3
+    return 0 <= days <= max(0, window)
+
+
 def is_created_today(rec: dict[str, Any]) -> bool:
     return to_date(rec.get("created_date")) == today()
 
@@ -243,6 +265,17 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
         if days is None or not _in_bucket(days, bucket, cfg):
             return False
 
+    aging_min = filters.get("aging_min")
+    if aging_min not in (None, ""):
+        try:
+            min_days = int(aging_min)
+        except (TypeError, ValueError):
+            min_days = None
+        if min_days is not None:
+            days = aging_days(rec)
+            if days is None or days < min_days:
+                return False
+
     flag = filters.get("flag")
     if flag == "open" and not is_status_open(rec, cfg):
         return False
@@ -265,6 +298,8 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
     if flag == "on_hold" and not is_on_hold(rec, cfg):
         return False
     if flag == "due_week" and not is_due_this_week(rec, cfg):
+        return False
+    if flag == "due_soon" and not is_due_soon(rec, cfg):
         return False
     if flag == "eta_late" and not is_eta_late(rec, cfg):
         return False
@@ -415,6 +450,8 @@ def annotate(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> dict[str, 
     out["is_po_issued"] = is_po_issued(rec, cfg)
     out["is_eta_late"] = is_eta_late(rec, cfg)
     out["is_due_this_week"] = is_due_this_week(rec, cfg)
+    out["is_due_soon"] = is_due_soon(rec, cfg)
+    out["days_until_due"] = days_until_due(rec)
     out["on_time"] = is_on_time_delivery(rec, cfg)
     out["po_stage"] = po_stage(rec, cfg)
     eta = eta_date(rec)

@@ -4,7 +4,7 @@ import csv
 import io
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -13,7 +13,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether
+from reportlab.platypus import HRFlowable, SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether
 
 from .domain import annotate, is_closed, is_open, is_overdue, matches_filters
 from .config import load_config
@@ -201,6 +201,104 @@ def to_pdf(records: list[dict[str, Any]], title: str) -> bytes:
         story.append(Spacer(1, 6))
         story.append(Paragraph(f"Showing first 400 of {len(records)} records. Export Excel/CSV for the full set.", meta))
     doc.build(story)
+    return buf.getvalue()
+
+
+def _esc(value: Any) -> str:
+    return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def wo_sheet_pdf(rec: dict[str, Any], attachments: Optional[list[dict[str, Any]]] = None) -> bytes:
+    """One-page A4 sheet for site: material, supplier, PO, due, attachments."""
+    attachments = attachments or []
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=14 * mm,
+        rightMargin=14 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+        title=f"IM WO {rec.get('work_order_id') or rec.get('record_id')}",
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "WOTitle", parent=styles["Title"], fontSize=16, textColor=colors.HexColor("#0F3D5E"), spaceAfter=4, alignment=0
+    )
+    meta = ParagraphStyle("WOMeta", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#64748B"), spaceAfter=2)
+    label = ParagraphStyle("WOLabel", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#64748B"), leading=11)
+    value = ParagraphStyle("WOValue", parent=styles["Normal"], fontSize=10, leading=13, textColor=colors.HexColor("#0F172A"))
+    wo = _esc(rec.get("work_order_id") or rec.get("record_id"))
+    story: list[Any] = [
+        Paragraph(f"IM Work Order {wo}", title_style),
+        Paragraph(
+            f"Printed {datetime.now().strftime('%Y-%m-%d %H:%M')} · Linkco MR · Excel remains the source of truth",
+            meta,
+        ),
+        Spacer(1, 4),
+        HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0F3D5E"), spaceAfter=8),
+    ]
+    rows = [
+        ["Site", rec.get("department") or "—", "Status", rec.get("status") or "—"],
+        ["Assigned to", rec.get("assigned_to") or "—", "Priority", rec.get("priority") or "—"],
+        ["Purchase type", rec.get("work_type") or "—", "Due date", str(rec.get("due_date") or "—")[:16]],
+        ["Supplier", rec.get("supplier") or "—", "PO No", rec.get("po_number") or "—"],
+        ["Asset", rec.get("location") or "—", "Delivery", rec.get("issue") or rec.get("delay_reason") or "—"],
+        ["MR received", str(rec.get("created_date") or "—")[:16], "ETA", str(rec.get("closed_date") or "—")[:16]],
+    ]
+    table_data = []
+    for a_l, a_v, b_l, b_v in rows:
+        table_data.append(
+            [
+                Paragraph(_esc(a_l), label),
+                Paragraph(_esc(a_v), value),
+                Paragraph(_esc(b_l), label),
+                Paragraph(_esc(b_v), value),
+            ]
+        )
+    grid = Table(table_data, colWidths=[28 * mm, 63 * mm, 28 * mm, 63 * mm])
+    grid.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#E2E8F0")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+    story.append(grid)
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("Required material", label))
+    story.append(Paragraph(_esc(rec.get("description") or "—")[:1200], value))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Remarks / notes", label))
+    story.append(Paragraph(_esc(rec.get("remarks") or "—")[:1200].replace("\n", "<br/>"), value))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Attachments", label))
+    if attachments:
+        for item in attachments[:20]:
+            note = f" — {_esc(item.get('note'))}" if item.get("note") else ""
+            story.append(
+                Paragraph(
+                    f"• {_esc(item.get('filename'))} ({_esc(item.get('kind') or 'file')}, {_esc(item.get('created_by'))} {_esc(str(item.get('created_at') or '')[:16])}){note}",
+                    value,
+                )
+            )
+    else:
+        story.append(Paragraph("No files attached in the app.", value))
+    story.append(Spacer(1, 10))
+    story.append(
+        Paragraph(
+            "Formulas, SN and due-date columns in Excel are not printed. Take this sheet to site; update the workbook in Linkco MR after the visit.",
+            meta,
+        )
+    )
+    doc.build([KeepTogether(story)])
     return buf.getvalue()
 
 

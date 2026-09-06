@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import database
-from ..security import require_permission
+from .. import database, notify
+from ..security import require_permission, user_permissions
 
 router = APIRouter(tags=["collab"])
 
@@ -57,6 +57,16 @@ class TaskPatch(BaseModel):
 
 class LinkIn(BaseModel):
     record_id: str = Field(min_length=1)
+
+
+class SavedViewIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    filters: dict[str, Any] = Field(default_factory=dict)
+    shared: bool = False
+
+
+class NotificationsReadIn(BaseModel):
+    ids: Optional[list[int]] = None
 
 
 @router.get("/api/chat/people")
@@ -116,7 +126,42 @@ def post_message(thread_id: int, body: ChatMessageIn, user=Depends(require_permi
     if not text:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
     item = database.add_chat_message(thread_id, user["username"], text)
+    notify.fanout_mentions(user["username"], text, thread_id=thread_id)
     return {"item": item}
+
+
+@router.get("/api/notifications")
+def list_notifications(limit: int = 40, unread: int = 0, user=Depends(require_permission("view"))):
+    items = database.list_notifications(user["username"], unread_only=bool(unread), limit=limit)
+    return {"items": items, "unread": database.unread_notification_count(user["username"])}
+
+
+@router.post("/api/notifications/read")
+def read_notifications(body: NotificationsReadIn, user=Depends(require_permission("view"))):
+    marked = database.mark_notifications_read(user["username"], body.ids)
+    return {"marked": marked, "unread": database.unread_notification_count(user["username"])}
+
+
+@router.get("/api/views")
+def list_views(user=Depends(require_permission("view"))):
+    return {"items": database.list_saved_views(user["username"])}
+
+
+@router.post("/api/views")
+def create_view(body: SavedViewIn, user=Depends(require_permission("view"))):
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required.")
+    item = database.create_saved_view(name, user["username"], body.filters or {}, shared=bool(body.shared))
+    return {"item": item}
+
+
+@router.delete("/api/views/{view_id}")
+def delete_view(view_id: int, user=Depends(require_permission("view"))):
+    admin = user.get("role") == "admin" or "users" in user_permissions(user)
+    if not database.delete_saved_view(view_id, user["username"], admin=admin):
+        raise HTTPException(status_code=404, detail="Saved view not found")
+    return {"deleted": True, "id": view_id}
 
 
 @router.get("/api/projects")

@@ -691,6 +691,108 @@ class ExcelService:
             except Exception:
                 pass
 
+    def update_records(
+        self,
+        ids: list[str],
+        changes: dict[str, Any],
+        username: str,
+        append_remarks: bool = False,
+        sync_token: Optional[str] = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Apply the same Excel field changes to many rows under one lock/backup/save."""
+        ids = [str(i).strip() for i in ids if str(i).strip()]
+        if not ids:
+            raise ValueError("Select at least one work order.")
+        if len(ids) > 80:
+            raise ValueError("Bulk update is limited to 80 work orders at a time.")
+        if not self.available():
+            raise ExcelUnavailable("Excel file is currently unavailable.")
+        try:
+            lock = self._file_lock()
+            lock.acquire()
+        except Timeout as exc:
+            raise ExcelLocked(
+                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+            ) from exc
+        try:
+            current_token = self.fingerprint()
+            if sync_token and not force and sync_token != current_token:
+                raise SyncConflict(
+                    "The Excel workbook has changed since you last loaded it. Review the latest data before saving."
+                )
+            self.create_backup(reason="bulk")
+            wb = self._load_workbook()
+            try:
+                all_records: list[dict[str, Any]] = []
+                sheet_headers: dict[str, list[str]] = {}
+                for sheet_name in self.data_sheets(wb):
+                    hdrs, recs = self._read_sheet_records(wb[sheet_name], sheet_name)
+                    sheet_headers[sheet_name] = hdrs
+                    all_records.extend(recs)
+                allowed = set(self.cfg().mapping.model_dump().keys())
+                remark_text = str(changes.get("remarks") or "").strip() if append_remarks else ""
+                field_changes = {k: v for k, v in (changes or {}).items() if not (append_remarks and k == "remarks")}
+                pending: list[tuple[dict[str, Any], dict[str, Any]]] = []
+                missing: list[str] = []
+                seen: set[str] = set()
+                for wo_id in ids:
+                    try:
+                        target = self._locate(all_records, wo_id)
+                    except KeyError:
+                        missing.append(wo_id)
+                        continue
+                    rid = str(target.get("record_id") or wo_id)
+                    if rid in seen:
+                        continue
+                    seen.add(rid)
+                    old = dict(target)
+                    for k, v in field_changes.items():
+                        if k.startswith("_") or k in {"record_id", "department"}:
+                            continue
+                        if k in allowed:
+                            target[k] = v if v is not None else ""
+                    if append_remarks and remark_text:
+                        prev = str(target.get("remarks") or "").rstrip()
+                        target["remarks"] = f"{prev}\n{remark_text}".strip() if prev else remark_text
+                    ws = wb[target["_sheet"]]
+                    headers = self._ensure_mapped_headers(ws, sheet_headers[target["_sheet"]])
+                    sheet_headers[target["_sheet"]] = headers
+                    self._write_record_to_sheet(ws, target, headers, int(target["_row"]))
+                    pending.append((old, rid))
+                if not pending:
+                    raise ValueError("None of the selected work orders were found in Excel.")
+                tmp = _temp_xlsx(self.excel_path().parent)
+                wb.save(tmp)
+            finally:
+                wb.close()
+            try:
+                self._atomic_replace(tmp)
+            except Exception:
+                if tmp.exists():
+                    tmp.unlink(missing_ok=True)
+                raise
+            self.invalidate()
+            items: list[dict[str, Any]] = []
+            for old, rid in pending:
+                rec = self.get_by_id(rid)
+                if not rec:
+                    continue
+                self._audit_diff(username, str(rec.get("work_order_id") or rid), old, rec)
+                items.append(rec)
+            database.set_sync_meta("last_write", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            database.set_sync_meta("last_write_user", username)
+            return {"items": items, "updated": len(items), "missing": missing}
+        except PermissionError as exc:
+            raise ExcelLocked(
+                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+            ) from exc
+        finally:
+            try:
+                lock.release()
+            except Exception:
+                pass
+
     def create_record(self, data: dict[str, Any], username: str) -> dict[str, Any]:
         if not self.available():
             raise ExcelUnavailable("Excel file is currently unavailable.")

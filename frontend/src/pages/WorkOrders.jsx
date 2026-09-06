@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Columns3, Download, Plus, RefreshCw } from "lucide-react";
+import { Bookmark, Columns3, Download, Plus, RefreshCw } from "lucide-react";
 import { api, qs } from "../lib/api.js";
 import { useLiveReload } from "../lib/live.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useUi } from "../context/UiContext.jsx";
 import Filters from "../components/Filters.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 
@@ -47,6 +48,8 @@ function fromSearch(search, presetFlag) {
     "issue",
     "flag",
     "aging",
+    "aging_min",
+    "watched",
     "reason",
     "year",
     "week",
@@ -64,6 +67,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
   const loc = useLocation();
   const nav = useNavigate();
   const { can } = useAuth();
+  const { toast, ask } = useUi();
   const tick = useLiveReload();
   const [filters, setFilters] = useState(() => fromSearch(loc.search, presetFlag));
   const [options, setOptions] = useState({});
@@ -78,6 +82,15 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
   const [visible, setVisible] = useState(() => new Set(ALL_COLS.map((c) => c[0])));
   const [showCols, setShowCols] = useState(false);
   const [q, setQ] = useState(filters.q || "");
+  const [selected, setSelected] = useState(() => new Set());
+  const [views, setViews] = useState([]);
+  const [viewName, setViewName] = useState("");
+  const [viewShared, setViewShared] = useState(false);
+  const [showSaveView, setShowSaveView] = useState(false);
+  const [bulkAssign, setBulkAssign] = useState("");
+  const [bulkStatus, setBulkStatus] = useState("");
+  const [bulkRemark, setBulkRemark] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
   const hadRows = useRef(false);
 
   useEffect(() => {
@@ -100,6 +113,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
 
   useEffect(() => {
     api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
+    api.get("/api/views").then((d) => setViews(d.items || [])).catch(() => {});
   }, []);
 
   function load(silent = false) {
@@ -140,6 +154,88 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
 
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const cols = ALL_COLS.filter((c) => visible.has(c[0]));
+  const pageIds = rows.map((r) => r.record_id).filter(Boolean);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+
+  function toggleRow(id, on) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function togglePage(on) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      pageIds.forEach((id) => {
+        if (on) next.add(id);
+        else next.delete(id);
+      });
+      return next;
+    });
+  }
+
+  function applyView(view) {
+    const next = { ...(view.filters || {}) };
+    if (presetFlag && !next.flag) next.flag = presetFlag;
+    setFilters(next);
+    setQ(next.q || "");
+    setPage(1);
+  }
+
+  async function saveView() {
+    const name = viewName.trim();
+    if (!name) return;
+    try {
+      const d = await api.post("/api/views", { name, filters: { ...filters, q }, shared: viewShared });
+      setViews((list) => [d.item, ...list.filter((v) => v.id !== d.item.id)]);
+      setViewName("");
+      setShowSaveView(false);
+      toast(viewShared ? "Shared view saved" : "View saved", "success");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  }
+
+  async function removeView(view) {
+    const ok = await ask({ title: `Delete “${view.name}”?`, body: "This saved filter set will be removed.", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
+    await api.del(`/api/views/${view.id}`);
+    setViews((list) => list.filter((v) => v.id !== view.id));
+  }
+
+  async function runBulk() {
+    const ids = [...selected];
+    if (!ids.length) return;
+    if (!bulkAssign && !bulkStatus && !bulkRemark.trim()) {
+      toast("Choose an assignee, status, or remark.", "error");
+      return;
+    }
+    const ok = await ask({
+      title: `Update ${ids.length} work order${ids.length === 1 ? "" : "s"}?`,
+      body: "Excel is written once (backup first). Remarks are appended, not overwritten.",
+      confirmLabel: "Write to Excel",
+    });
+    if (!ok) return;
+    setBulkBusy(true);
+    try {
+      const body = { ids, append_remarks: true, force: true };
+      if (bulkAssign) body.assigned_to = bulkAssign;
+      if (bulkStatus) body.status = bulkStatus;
+      if (bulkRemark.trim()) body.remarks = bulkRemark.trim();
+      const d = await api.post("/api/work-orders/bulk", body);
+      toast(`Updated ${d.updated} row${d.updated === 1 ? "" : "s"} in Excel`, "success");
+      setSelected(new Set());
+      setBulkRemark("");
+      load();
+    } catch (e) {
+      toast(e.message || "Bulk update failed", "error");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   async function exportCsv() {
     const params = { ...filters, q, page: 1, page_size: 500, sort, order };
@@ -175,6 +271,9 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
           </button>
           <button className="btn-outline" onClick={exportCsv}>
             <Download size={14} /> Export CSV
+          </button>
+          <button className="btn-outline" onClick={() => setShowSaveView((s) => !s)}>
+            <Bookmark size={14} /> Save view
           </button>
           <div className="relative">
             <button className="btn-outline" onClick={() => setShowCols((s) => !s)}>
@@ -250,6 +349,86 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
           </div>
         }
       />
+
+      {showSaveView && (
+        <div className="card p-4 flex flex-wrap items-end gap-3">
+          <div className="min-w-[200px] flex-1">
+            <label className="lbl">View name</label>
+            <input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder='e.g. my OPEN at F5' />
+          </div>
+          <label className="flex items-center gap-2 text-sm pb-2">
+            <input type="checkbox" className="w-auto" checked={viewShared} onChange={(e) => setViewShared(e.target.checked)} />
+            Share with team
+          </label>
+          <button className="btn-primary" onClick={saveView} disabled={!viewName.trim()}>
+            Save current filters
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {views.map((v) => (
+          <div key={v.id} className="inline-flex items-center gap-1 rounded-full border border-slate-200 dark:border-white/10 px-2 py-1 text-xs">
+            <button type="button" className="hover:underline" onClick={() => applyView(v)}>
+              {v.name}
+              {v.shared ? " · shared" : ""}
+            </button>
+            {v.mine && (
+              <button type="button" className="text-slate-400 hover:text-rose-600" onClick={() => removeView(v)} aria-label={`Delete ${v.name}`}>
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          type="button"
+          className={`rounded-full px-2 py-1 text-xs border ${filters.watched ? "bg-brand-700 text-white border-brand-700" : "border-slate-200 dark:border-white/10"}`}
+          onClick={() => {
+            setFilters((f) => ({ ...f, watched: f.watched ? "" : "1" }));
+            setPage(1);
+          }}
+        >
+          Following
+        </button>
+      </div>
+
+      {can("edit") && selected.size > 0 && (
+        <div className="card p-3 flex flex-wrap items-end gap-3">
+          <div className="text-sm font-medium pb-2">{selected.size} selected</div>
+          <div>
+            <label className="lbl">Assign to</label>
+            <select className="w-auto min-w-[140px]" value={bulkAssign} onChange={(e) => setBulkAssign(e.target.value)}>
+              <option value="">— keep —</option>
+              {(options.assigned_to || []).map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="lbl">Status</label>
+            <select className="w-auto min-w-[140px]" value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}>
+              <option value="">— keep —</option>
+              {(options.status || []).map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1 min-w-[200px]">
+            <label className="lbl">Append remark (@name to ping)</label>
+            <input value={bulkRemark} onChange={(e) => setBulkRemark(e.target.value)} placeholder="Same note on every selected row" />
+          </div>
+          <button className="btn-primary" onClick={runBulk} disabled={bulkBusy}>
+            {bulkBusy ? "Writing…" : "Apply to Excel"}
+          </button>
+          <button className="btn-outline" onClick={() => setSelected(new Set())} disabled={bulkBusy}>
+            Clear
+          </button>
+        </div>
+      )}
 
       {error && <div className="text-sm text-rose-600">{error}</div>}
 

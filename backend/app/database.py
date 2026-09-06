@@ -126,6 +126,34 @@ CREATE TABLE IF NOT EXISTS project_links (
     record_id TEXT NOT NULL,
     PRIMARY KEY (project_id, record_id)
 );
+CREATE TABLE IF NOT EXISTS watches (
+    username TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    work_order_id TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (username, record_id)
+);
+CREATE INDEX IF NOT EXISTS idx_watch_record ON watches(record_id);
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    record_id TEXT,
+    work_order_id TEXT,
+    thread_id INTEGER,
+    body TEXT,
+    created_at TEXT NOT NULL,
+    read_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(username, id);
+CREATE TABLE IF NOT EXISTS saved_views (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    shared INTEGER NOT NULL DEFAULT 0,
+    filters TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 DEFAULT_USERS = [
@@ -787,6 +815,176 @@ def unlink_project_wo(project_id: int, record_id: str) -> None:
             "DELETE FROM project_links WHERE project_id = ? AND record_id = ?",
             (project_id, record_id),
         )
+
+
+def add_watch(username: str, record_id: str, work_order_id: str = "") -> dict[str, Any]:
+    with connect() as conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO watches (username, record_id, work_order_id, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (username, record_id, work_order_id, now_iso()),
+        )
+        if work_order_id:
+            conn.execute(
+                "UPDATE watches SET work_order_id = ? WHERE username = ? AND record_id = ? AND (work_order_id IS NULL OR work_order_id = '')",
+                (work_order_id, username, record_id),
+            )
+    return {"username": username, "record_id": record_id, "work_order_id": work_order_id, "watching": True}
+
+
+def remove_watch(username: str, record_id: str) -> bool:
+    with connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM watches WHERE username = ? AND record_id = ?",
+            (username, record_id),
+        )
+        return cur.rowcount > 0
+
+
+def is_watching(username: str, record_id: str) -> bool:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM watches WHERE username = ? AND record_id = ?",
+            (username, record_id),
+        ).fetchone()
+        return bool(row)
+
+
+def list_watched_ids(username: str) -> list[str]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT record_id FROM watches WHERE username = ? ORDER BY created_at DESC",
+            (username,),
+        ).fetchall()
+        return [str(r["record_id"]) for r in rows]
+
+
+def list_watchers(record_id: str) -> list[str]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT username FROM watches WHERE record_id = ? ORDER BY username",
+            (record_id,),
+        ).fetchall()
+        return [str(r["username"]) for r in rows]
+
+
+def add_notification(
+    username: str,
+    kind: str,
+    body: str,
+    record_id: str = "",
+    work_order_id: str = "",
+    thread_id: Optional[int] = None,
+) -> dict[str, Any]:
+    with connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO notifications (username, kind, record_id, work_order_id, thread_id, body, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (username, kind, record_id or None, work_order_id or None, thread_id, body, now_iso()),
+        )
+        nid = int(cur.lastrowid)
+        row = conn.execute("SELECT * FROM notifications WHERE id = ?", (nid,)).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def list_notifications(username: str, unread_only: bool = False, limit: int = 50) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit or 50), 200))
+    clause = "AND read_at IS NULL" if unread_only else ""
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM notifications WHERE username = ? {clause} ORDER BY id DESC LIMIT ?",
+            (username, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def unread_notification_count(username: str) -> int:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM notifications WHERE username = ? AND read_at IS NULL",
+            (username,),
+        ).fetchone()
+        return int(row["c"] if row else 0)
+
+
+def mark_notifications_read(username: str, ids: Optional[list[int]] = None) -> int:
+    ts = now_iso()
+    with connect() as conn:
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            cur = conn.execute(
+                f"""UPDATE notifications SET read_at = ?
+                    WHERE username = ? AND read_at IS NULL AND id IN ({placeholders})""",
+                [ts, username, *ids],
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE notifications SET read_at = ? WHERE username = ? AND read_at IS NULL",
+                (ts, username),
+            )
+        return int(cur.rowcount or 0)
+
+
+def create_saved_view(name: str, username: str, filters: dict[str, Any], shared: bool = False) -> dict[str, Any]:
+    payload = json.dumps(filters or {}, default=str)
+    with connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO saved_views (name, username, shared, filters, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (name, username, 1 if shared else 0, payload, now_iso()),
+        )
+        vid = int(cur.lastrowid)
+    item = get_saved_view(vid)
+    assert item is not None
+    return item
+
+
+def get_saved_view(view_id: int) -> Optional[dict[str, Any]]:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM saved_views WHERE id = ?", (view_id,)).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    try:
+        item["filters"] = json.loads(item.get("filters") or "{}")
+    except json.JSONDecodeError:
+        item["filters"] = {}
+    item["shared"] = bool(item.get("shared"))
+    return item
+
+
+def list_saved_views(username: str) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM saved_views
+               WHERE username = ? OR shared = 1
+               ORDER BY shared ASC, id DESC""",
+            (username,),
+        ).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["filters"] = json.loads(item.get("filters") or "{}")
+        except json.JSONDecodeError:
+            item["filters"] = {}
+        item["shared"] = bool(item.get("shared"))
+        item["mine"] = item.get("username") == username
+        out.append(item)
+    return out
+
+
+def delete_saved_view(view_id: int, username: str, *, admin: bool = False) -> bool:
+    with connect() as conn:
+        if admin:
+            cur = conn.execute("DELETE FROM saved_views WHERE id = ?", (view_id,))
+        else:
+            cur = conn.execute(
+                "DELETE FROM saved_views WHERE id = ? AND username = ?",
+                (view_id, username),
+            )
+        return cur.rowcount > 0
 
 
 # Ensure schema exists for scripts/tests that never hit FastAPI startup.

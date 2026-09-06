@@ -9,6 +9,7 @@ import WorkOrderDetail from "./pages/WorkOrderDetail.jsx";
 
 const Analytics = lazy(() => import("./pages/Analytics.jsx"));
 const ActionQueue = lazy(() => import("./pages/ActionQueue.jsx"));
+const Alerts = lazy(() => import("./pages/Alerts.jsx"));
 const Suppliers = lazy(() => import("./pages/Suppliers.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Settings = lazy(() => import("./pages/Settings.jsx"));

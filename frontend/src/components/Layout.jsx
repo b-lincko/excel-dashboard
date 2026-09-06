@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   AlertTriangle,
+  Bell,
   BarChart3,
   CheckCircle2,
   ChevronDown,
@@ -43,6 +44,7 @@ const NAV = [
   { to: "/overdue", label: "Overdue", icon: AlertTriangle, group: "Work", page: "overdue" },
   { to: "/closed", label: "Closed", icon: CheckCircle2, group: "Work", page: "closed" },
   { to: "/queue", label: "Action queue", icon: ListTodo, group: "Ops", page: "queue" },
+  { to: "/alerts", label: "SLA alerts", icon: Bell, group: "Ops", page: "alerts" },
   { to: "/suppliers", label: "Suppliers / PO", icon: Truck, group: "Ops", page: "suppliers" },
   { to: "/analytics", label: "Analytics", icon: BarChart3, perm: "analytics", group: "Ops", page: "analytics" },
   { to: "/reports", label: "Reports", icon: FileText, perm: "reports", group: "Ops", page: "reports" },
@@ -63,6 +65,7 @@ const TITLES = {
   "/overdue": "Overdue",
   "/closed": "Closed orders",
   "/queue": "Action queue",
+  "/alerts": "SLA alerts",
   "/suppliers": "Suppliers",
   "/analytics": "Analytics",
   "/reports": "Reports",
@@ -88,9 +91,12 @@ export default function Layout() {
   const [uploading, setUploading] = useState(false);
   const [menu, setMenu] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [inbox, setInbox] = useState({ items: [], unread: 0 });
   const fileRef = useRef(null);
   const searchRef = useRef(null);
   const accountRef = useRef(null);
+  const inboxRef = useRef(null);
 
   useEffect(() => {
     const title = Object.entries(TITLES).find(([path]) => (path === "/" ? loc.pathname === "/" : loc.pathname.startsWith(path)));
@@ -100,6 +106,7 @@ export default function Layout() {
   useEffect(() => {
     setMenu(false);
     setAccountOpen(false);
+    setInboxOpen(false);
   }, [loc.pathname]);
 
   useEffect(() => {
@@ -113,10 +120,12 @@ export default function Layout() {
       if (e.key === "Escape") {
         setMenu(false);
         setAccountOpen(false);
+        setInboxOpen(false);
       }
     }
     function onClick(e) {
       if (accountRef.current && !accountRef.current.contains(e.target)) setAccountOpen(false);
+      if (inboxRef.current && !inboxRef.current.contains(e.target)) setInboxOpen(false);
     }
     window.addEventListener("keydown", onKey);
     window.addEventListener("mousedown", onClick);
@@ -352,6 +361,60 @@ export default function Layout() {
               <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
               <span className="hidden md:inline">{refreshing ? "Refreshing…" : "Hard refresh"}</span>
             </button>
+            <div className="relative" ref={inboxRef}>
+              <button
+                className="btn-ghost !px-2 relative"
+                onClick={() => setInboxOpen((v) => !v)}
+                title="Notifications"
+                aria-label="Notifications"
+              >
+                <Bell size={16} />
+                {inbox.unread > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-rose-600 text-white text-[10px] grid place-items-center">
+                    {inbox.unread > 9 ? "9+" : inbox.unread}
+                  </span>
+                )}
+              </button>
+              {inboxOpen && (
+                <div className="absolute right-0 mt-2 w-80 card p-1 z-30">
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <div className="text-sm font-semibold">Inbox</div>
+                    {inbox.unread > 0 && (
+                      <button
+                        className="text-xs text-brand-700 dark:text-cyan-300"
+                        onClick={async () => {
+                          await api.post("/api/notifications/read", {});
+                          loadInbox();
+                        }}
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {(inbox.items || []).map((n) => (
+                      <button
+                        key={n.id}
+                        type="button"
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-white/5 ${n.read_at ? "" : "bg-sky-50/60 dark:bg-sky-500/10"}`}
+                        onClick={async () => {
+                          await api.post("/api/notifications/read", { ids: [n.id] });
+                          loadInbox();
+                          if (n.record_id) nav(`/work-orders/${encodeURIComponent(n.record_id)}`);
+                          else if (n.thread_id) nav("/chat");
+                          setInboxOpen(false);
+                        }}
+                      >
+                        <div className="text-[11px] uppercase tracking-wider text-slate-400">{n.kind}</div>
+                        <div className="text-sm leading-snug">{n.body}</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">{n.created_at}</div>
+                      </button>
+                    ))}
+                    {!inbox.items?.length && <div className="px-3 py-6 text-sm text-slate-500">No mentions or watch updates yet.</div>}
+                  </div>
+                </div>
+              )}
+            </div>
             <button className="btn-ghost !px-2" onClick={toggle} title="Toggle theme" aria-label="Toggle theme">
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>

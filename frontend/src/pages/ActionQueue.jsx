@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Ban, CalendarClock, ClipboardList, PauseCircle, Printer, Truck } from "lucide-react";
+import { AlertTriangle, Ban, Bell, CalendarClock, ClipboardList, PauseCircle, Printer, Truck } from "lucide-react";
 import { api, qs } from "../lib/api.js";
 import { goSearch, useLiveReload } from "../lib/live.js";
 import KPICard from "../components/KPICard.jsx";
@@ -51,6 +51,22 @@ const SECTIONS = [
       ["status", "Status"],
       ["aging_days", "Age (d)"],
       ["remarks", "Remarks"],
+    ],
+  },
+  {
+    id: "due_soon",
+    title: "Due in 1–3 days",
+    hint: "Open MRs whose due date is today through 3 days",
+    flag: "due_soon",
+    cols: [
+      ["work_order_id", "IM WO #"],
+      ["description", "Material"],
+      ["department", "Site"],
+      ["assigned_to", "Assigned"],
+      ["status", "Status"],
+      ["due_date", "Due"],
+      ["days_until_due", "Days left"],
+      ["priority", "Priority"],
     ],
   },
   {
@@ -158,6 +174,7 @@ export default function ActionQueue() {
         <KPICard label="UNDER NTP" value={c.ntp} icon={Ban} accent="amber" onClick={() => go({ flag: "ntp" })} />
         <KPICard label="ON HOLD" value={c.on_hold} icon={PauseCircle} accent="amber" onClick={() => go({ flag: "on_hold" })} />
         <KPICard label="Due this week" value={c.due_this_week} icon={CalendarClock} accent="sky" onClick={() => go({ flag: "due_week" })} />
+        <KPICard label="Due in 1–3 days" value={c.due_soon} icon={Bell} accent="amber" onClick={() => go({ flag: "due_soon" })} hint="SLA window" />
         <KPICard label="Jobs in today" value={c.created_today} icon={ClipboardList} accent="brand" onClick={() => go({ flag: "created_today" })} />
         <KPICard label="ETA missed" value={c.eta_late} icon={Truck} accent="rose" onClick={() => go({ flag: "eta_late" })} hint="Expected date passed" />
       </div>

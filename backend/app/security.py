@@ -24,6 +24,7 @@ GUEST_PAGES = [
     "overdue",
     "closed",
     "queue",
+    "alerts",
     "suppliers",
     "analytics",
     "reports",

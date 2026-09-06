@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from .. import database
+from .. import database, notify, reports
 from ..config import load_config
 from ..dates import to_date
 from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_for_open, today
@@ -91,6 +92,16 @@ class WorkOrderCreate(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class BulkUpdate(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+    assigned_to: Optional[str] = None
+    status: Optional[str] = None
+    remarks: Optional[str] = None
+    append_remarks: bool = True
+    sync_token: Optional[str] = None
+    force: bool = False
+
+
 def _raise_excel(exc: Exception):
     if isinstance(exc, ExcelUnavailable):
         raise HTTPException(status_code=503, detail=str(exc))
@@ -128,6 +139,8 @@ def list_work_orders(
     issue: Optional[str] = None,
     flag: Optional[str] = None,
     aging: Optional[str] = None,
+    aging_min: Optional[str] = None,
+    watched: Optional[int] = None,
     reason: Optional[str] = None,
     sort: str = "created_date",
     order: str = "desc",
@@ -142,6 +155,9 @@ def list_work_orders(
     filters = parse_query_filters(locals())
     cfg = load_config()
     matched = [r for r in records if matches_filters(r, filters, cfg)]
+    if watched or flag == "watched":
+        watched_ids = set(database.list_watched_ids(user["username"]))
+        matched = [r for r in matched if str(r.get("record_id") or "") in watched_ids]
     if reason:
         matched = [r for r in matched if reason_for_open(r) == reason]
     reverse = order.lower() != "asc"
@@ -219,6 +235,63 @@ def options(user=Depends(require_permission("view"))):
     }
 
 
+@router.post("/bulk")
+def bulk_update(body: BulkUpdate, user=Depends(require_permission("edit"))):
+    changes: dict[str, Any] = {}
+    if body.assigned_to is not None:
+        changes["assigned_to"] = body.assigned_to
+    if body.status is not None:
+        changes["status"] = body.status
+    remark = (body.remarks or "").strip()
+    append = bool(remark) and bool(body.append_remarks)
+    if remark:
+        changes["remarks"] = remark
+    if not changes:
+        raise HTTPException(status_code=400, detail="Choose an assignee, a status, or a remark.")
+    try:
+        result = excel_service.update_records(
+            body.ids,
+            changes,
+            username=user["username"],
+            append_remarks=append,
+            sync_token=body.sync_token,
+            force=body.force,
+        )
+    except (ExcelUnavailable, ExcelLocked, SyncConflict, KeyError, ValueError) as exc:
+        _raise_excel(exc)
+    actor = user["username"]
+    parts = []
+    if body.assigned_to is not None:
+        parts.append(f"assigned to {body.assigned_to or '—'}")
+    if body.status is not None:
+        parts.append(f"status {body.status or '—'}")
+    if remark:
+        parts.append("remark added" if append else "remarks replaced")
+    summary_tail = ", ".join(parts) or "updated"
+    items = []
+    for rec in result["items"]:
+        pinged = notify.fanout_mentions(
+            actor,
+            remark,
+            record_id=str(rec.get("record_id") or ""),
+            work_order_id=str(rec.get("work_order_id") or ""),
+        ) if remark else []
+        notify.notify_watchers(
+            actor,
+            rec,
+            f"{actor} bulk-updated {rec.get('work_order_id') or rec.get('record_id')}: {summary_tail}",
+            skip=set(pinged),
+        )
+        items.append(annotate(_with_extras(rec)))
+    return {
+        "items": items,
+        "updated": len(items),
+        "missing": result.get("missing") or [],
+        "sync_token": excel_service.sync_token(),
+        "saved": True,
+    }
+
+
 @router.get("/{wo_id}")
 def get_work_order(wo_id: str, user=Depends(require_permission("view"))):
     try:
@@ -252,6 +325,28 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
         _save_extras(updated, extra_changes, user["username"])
     if excel_changes.get("supplier"):
         _maybe_add_supplier(excel_changes.get("supplier"), user["username"])
+    actor = user["username"]
+    remark = str(excel_changes.get("remarks") or "")
+    pinged = (
+        notify.fanout_mentions(
+            actor,
+            remark,
+            record_id=str(updated.get("record_id") or ""),
+            work_order_id=str(updated.get("work_order_id") or ""),
+        )
+        if remark
+        else []
+    )
+    if excel_changes or extra_changes:
+        bits = [k for k in {**excel_changes, **extra_changes} if k != "remarks"]
+        if remark:
+            bits.append("remarks")
+        notify.notify_watchers(
+            actor,
+            updated,
+            f"{actor} updated {updated.get('work_order_id') or wo_id}" + (f" ({', '.join(bits)})" if bits else ""),
+            skip=set(pinged),
+        )
     return {"item": annotate(_with_extras(updated)), "sync_token": excel_service.sync_token(), "saved": True}
 
 
@@ -270,6 +365,69 @@ def create_work_order(body: WorkOrderCreate, user=Depends(require_permission("cr
     if excel_data.get("supplier"):
         _maybe_add_supplier(excel_data.get("supplier"), user["username"])
     return {"item": annotate(_with_extras(created)), "sync_token": excel_service.sync_token(), "saved": True}
+
+
+@router.get("/{wo_id}/watch")
+def watch_state(wo_id: str, user=Depends(require_permission("view"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    rid = str(rec.get("record_id") or "")
+    return {
+        "watching": database.is_watching(user["username"], rid),
+        "watchers": database.list_watchers(rid),
+        "record_id": rid,
+        "work_order_id": rec.get("work_order_id"),
+    }
+
+
+@router.post("/{wo_id}/watch")
+def follow_work_order(wo_id: str, user=Depends(require_permission("view"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    rid = str(rec.get("record_id") or "")
+    database.add_watch(user["username"], rid, str(rec.get("work_order_id") or ""))
+    return {
+        "watching": True,
+        "watchers": database.list_watchers(rid),
+        "record_id": rid,
+        "work_order_id": rec.get("work_order_id"),
+    }
+
+
+@router.delete("/{wo_id}/watch")
+def unfollow_work_order(wo_id: str, user=Depends(require_permission("view"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    rid = str(rec.get("record_id") or "")
+    database.remove_watch(user["username"], rid)
+    return {
+        "watching": False,
+        "watchers": database.list_watchers(rid),
+        "record_id": rid,
+        "work_order_id": rec.get("work_order_id"),
+    }
+
+
+@router.get("/{wo_id}/sheet")
+def work_order_sheet(wo_id: str, user=Depends(require_permission("view"))):
+    try:
+        rec = excel_service.get_by_id(wo_id)
+    except (ExcelUnavailable, ExcelLocked) as exc:
+        _raise_excel(exc)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    item = annotate(_with_extras(rec))
+    files = database.list_attachments(str(item.get("record_id") or ""))
+    pdf = reports.wo_sheet_pdf(item, files)
+    name = str(item.get("work_order_id") or wo_id).replace("/", "-")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="WO_{name}.pdf"'},
+    )
 
 
 @router.delete("/{wo_id}")

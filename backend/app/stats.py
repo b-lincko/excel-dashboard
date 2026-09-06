@@ -655,5 +655,6 @@ def parse_query_filters(params: dict[str, Any]) -> dict[str, Any]:
         "issue": as_list(params.get("issue")),
         "flag": params.get("flag") or "",
         "aging": params.get("aging") or "",
+        "aging_min": params.get("aging_min") or "",
         "reason": params.get("reason") or "",
     }

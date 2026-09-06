@@ -68,6 +68,8 @@ export default function WorkOrderDetail() {
   const [newSupplier, setNewSupplier] = useState("");
   const [files, setFiles] = useState([]);
   const [fileNote, setFileNote] = useState("");
+  const [watching, setWatching] = useState(false);
+  const [watchers, setWatchers] = useState([]);
   const attachRef = useRef(null);
 
   const dirty = useMemo(() => {
@@ -95,6 +97,15 @@ export default function WorkOrderDetail() {
           setOriginal(d.item);
           setSyncToken(d.sync_token);
           setMeta(d.item);
+          const rid = d.item.record_id || id;
+          api.get(`/api/work-orders/${encodeURIComponent(rid)}/files`).then((f) => setFiles(f.items || [])).catch(() => {});
+          api
+            .get(`/api/work-orders/${encodeURIComponent(rid)}/watch`)
+            .then((w) => {
+              setWatching(!!w.watching);
+              setWatchers(w.watchers || []);
+            })
+            .catch(() => {});
         })
         .catch((e) => setError(e.message));
     } else {
@@ -280,6 +291,31 @@ export default function WorkOrderDetail() {
           </div>
         </div>
         <div className="flex gap-2">
+          {!isNew && (
+            <button
+              className="btn-outline"
+              onClick={() => api.download(`/api/work-orders/${encodeURIComponent(id)}/sheet`, `WO_${form.work_order_id || id}.pdf`)}
+            >
+              Print sheet
+            </button>
+          )}
+          {!isNew && (
+            <button
+              className="btn-outline"
+              onClick={async () => {
+                const rid = form.record_id || id;
+                const d = watching
+                  ? await api.del(`/api/work-orders/${encodeURIComponent(rid)}/watch`)
+                  : await api.post(`/api/work-orders/${encodeURIComponent(rid)}/watch`);
+                setWatching(!!d.watching);
+                setWatchers(d.watchers || []);
+                toast(d.watching ? "Following this MR" : "Unfollowed", "success");
+              }}
+            >
+              {watching ? "Following" : "Follow"}
+              {watchers.length ? ` · ${watchers.length}` : ""}
+            </button>
+          )}
           {can("delete") && !isNew && (
             <button className="btn-danger" onClick={remove} disabled={busy}>
               Delete
@@ -321,7 +357,12 @@ export default function WorkOrderDetail() {
           <div key={key} className={type === "textarea" ? "md:col-span-2" : ""}>
             <label className="lbl">{label}</label>
             {type === "textarea" ? (
-              <textarea rows={3} value={form[key] || ""} disabled={readOnly} onChange={(e) => setField(key, e.target.value)} />
+              <>
+                <textarea rows={3} value={form[key] || ""} disabled={readOnly} onChange={(e) => setField(key, e.target.value)} />
+                {key === "remarks" && (
+                  <p className="text-[11px] text-slate-500 mt-1">Type @username in remarks to ping that person. Followers are notified on save.</p>
+                )}
+              </>
             ) : type === "site" ? (
               <select value={form[key] || ""} onChange={(e) => setField(key, e.target.value)} disabled={!isNew || readOnly}>
                 {(options.department || ["SH5-SH1", "F5"]).map((o) => (

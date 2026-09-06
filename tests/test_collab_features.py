@@ -128,3 +128,92 @@ def test_chat_projects_attachments_import(workbook):
     exported = client.get("/api/transfer/export.csv", headers=headers)
     assert exported.status_code == 200
     assert b"CSV-TEST-001" in exported.content
+
+
+def test_alerts_watches_bulk_views_and_sheet(workbook):
+    from app.domain import is_due_soon
+    from app.excel.service import excel_service
+    from app.stats import invalidate_dash_cache
+
+    database.init_db()
+    excel_service.invalidate()
+    invalidate_dash_cache()
+    client, headers = _admin(workbook)
+    recs = excel_service.get_all(force=True)
+    soon_n = sum(1 for r in recs if is_due_soon(r))
+    alerts = client.get("/api/ops/alerts", headers=headers)
+    assert alerts.status_code == 200, alerts.text
+    body = alerts.json()
+    assert body["count"] == soon_n
+    assert body["window_days"] == 3
+    flagged = client.get("/api/work-orders?flag=due_soon&page_size=5", headers=headers)
+    assert flagged.status_code == 200
+    assert flagged.json()["total"] == soon_n
+
+    open_recs = [r for r in recs if str(r.get("status") or "").strip().upper() == "OPEN"]
+    assert len(open_recs) >= 2
+    a, b = open_recs[0], open_recs[1]
+    follow = client.post(f"/api/work-orders/{a['record_id']}/watch", headers=headers)
+    assert follow.status_code == 200, follow.text
+    assert follow.json()["watching"] is True
+    watched = client.get("/api/work-orders?watched=1&page_size=20", headers=headers)
+    assert watched.status_code == 200
+    assert any(r["record_id"] == a["record_id"] for r in watched.json()["items"])
+
+    remark = "pytest bulk note @manager please check"
+    bulk = client.post(
+        "/api/work-orders/bulk",
+        headers=headers,
+        json={
+            "ids": [a["record_id"], b["record_id"]],
+            "assigned_to": a.get("assigned_to") or "admin",
+            "remarks": remark,
+            "append_remarks": True,
+            "force": True,
+        },
+    )
+    assert bulk.status_code == 200, bulk.text
+    assert bulk.json()["updated"] == 2
+    excel_service.invalidate()
+    again_a = excel_service.get_by_id(a["record_id"])
+    again_b = excel_service.get_by_id(b["record_id"])
+    assert remark in str(again_a.get("remarks") or "")
+    assert remark in str(again_b.get("remarks") or "")
+    old_a = str(a.get("remarks") or "")
+    if old_a:
+        assert str(again_a.get("remarks") or "").startswith(old_a) or old_a in str(again_a.get("remarks") or "")
+
+    inbox = client.get("/api/notifications", headers=headers)
+    assert inbox.status_code == 200
+    manager = client.post("/api/auth/login", json={"username": "manager", "password": "manager123"})
+    assert manager.status_code == 200
+    mheaders = {"Authorization": f"Bearer {manager.json()['access_token']}"}
+    pings = client.get("/api/notifications", headers=mheaders)
+    assert pings.status_code == 200
+    assert any("mentioned you" in (n.get("body") or "") for n in pings.json()["items"])
+
+    view = client.post(
+        "/api/views",
+        headers=headers,
+        json={"name": "my OPEN at F5", "filters": {"flag": "open", "department": "F5"}, "shared": True},
+    )
+    assert view.status_code == 200, view.text
+    listed = client.get("/api/views", headers=mheaders)
+    assert listed.status_code == 200
+    assert any(v["name"] == "my OPEN at F5" and v["shared"] for v in listed.json()["items"])
+
+    sheet = client.get(f"/api/work-orders/{a['record_id']}/sheet", headers=headers)
+    assert sheet.status_code == 200, sheet.text
+    assert sheet.content[:4] == b"%PDF"
+    assert "application/pdf" in sheet.headers.get("content-type", "")
+
+    chat = client.get("/api/chat/threads", headers=headers)
+    general = next(t for t in chat.json()["items"] if t["title"] == "General")
+    ping = client.post(
+        f"/api/chat/threads/{general['id']}/messages",
+        headers=headers,
+        json={"body": "Need a hand @manager on the gatepass pile"},
+    )
+    assert ping.status_code == 200, ping.text
+    pings2 = client.get("/api/notifications", headers=mheaders)
+    assert any("gatepass" in (n.get("body") or "") for n in pings2.json()["items"])

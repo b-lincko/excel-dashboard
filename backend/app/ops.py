@@ -16,6 +16,7 @@ from .domain import (
     is_closed,
     is_created_today,
     is_delivered,
+    is_due_soon,
     is_due_this_week,
     is_eta_late,
     is_need_rfq,
@@ -52,8 +53,10 @@ SLIM_KEYS = (
     "remarks",
     "aging_days",
     "days_overdue",
+    "days_until_due",
     "days_to_eta",
     "is_overdue",
+    "is_due_soon",
     "is_ntp",
     "is_on_hold",
     "is_eta_late",
@@ -129,6 +132,7 @@ def queue_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     ]
     eta_late = _sort_date([r for r in records if is_eta_late(r, cfg)], "closed_date", False)
     pending_po = _sort_date([r for r in records if is_pending_po(r, cfg)], "created_date", False)
+    due_soon = _sort_date([r for r in records if is_due_soon(r, cfg)], "due_date", False)
 
     return {
         "as_of": t.isoformat(),
@@ -142,6 +146,7 @@ def queue_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
             "ntp": len(ntp),
             "on_hold": len(on_hold),
             "due_this_week": len(due_week),
+            "due_soon": len(due_soon),
             "created_today": len(created_today),
             "done_today": len(done_today),
             "eta_late": len(eta_late),
@@ -152,6 +157,7 @@ def queue_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
             "ntp": _take(ntp, cfg),
             "on_hold": _take(on_hold, cfg),
             "due_this_week": _take(due_week, cfg),
+            "due_soon": _take(due_soon, cfg),
             "created_today": _take(created_today, cfg),
             "done_today": _take(done_today, cfg),
             "eta_late": _take(eta_late, cfg),
@@ -324,9 +330,51 @@ def ops_counts(records: list[dict[str, Any]]) -> dict[str, int]:
         "ntp": sum(1 for r in records if is_ntp(r) and is_open(r, cfg)),
         "on_hold": sum(1 for r in records if is_on_hold(r) and is_open(r, cfg)),
         "due_this_week": sum(1 for r in records if is_due_this_week(r, cfg)),
+        "due_soon": sum(1 for r in records if is_due_soon(r, cfg)),
         "created_today": sum(1 for r in records if is_created_today(r)),
         "eta_late": sum(1 for r in records if is_eta_late(r, cfg)),
         "pending_po": sum(1 for r in records if is_pending_po(r, cfg)),
         "awaiting_po": sum(1 for r in records if is_awaiting_po(r, cfg)),
         "suppliers": len({str(r.get("supplier") or "").strip() for r in records if str(r.get("supplier") or "").strip()}),
+    }
+
+
+def alerts_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """MRs due today through due_soon_days, grouped by site then assignee."""
+    cfg = load_config()
+    records = _filtered(excel_service.get_all(), filters or {})
+    t = today()
+    try:
+        window = int(getattr(cfg, "due_soon_days", 3) or 3)
+    except (TypeError, ValueError):
+        window = 3
+    soon = [annotate(r, cfg) for r in records if is_due_soon(r, cfg)]
+    soon.sort(key=lambda r: (str(r.get("due_date") or ""), str(r.get("department") or ""), str(r.get("work_order_id") or "")))
+    by_site: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    buckets: Counter = Counter()
+    for rec in soon:
+        site = str(rec.get("department") or "Unassigned")
+        person = str(rec.get("assigned_to") or "Unassigned")
+        by_site[site][person].append(_slim(rec))
+        days = rec.get("days_until_due")
+        if days is not None:
+            try:
+                buckets[int(days)] += 1
+            except (TypeError, ValueError):
+                pass
+    sites = []
+    for site, people in sorted(by_site.items(), key=lambda kv: kv[0].lower()):
+        assignees = []
+        for person, items in sorted(people.items(), key=lambda kv: kv[0].lower()):
+            assignees.append({"name": person, "count": len(items), "items": items[:60]})
+        sites.append({"name": site, "count": sum(a["count"] for a in assignees), "assignees": assignees})
+    return {
+        "as_of": t.isoformat(),
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "sync_token": excel_service.sync_token(),
+        "window_days": window,
+        "count": len(soon),
+        "buckets": [{"days": d, "label": "Due today" if d == 0 else f"{d} day{'s' if d != 1 else ''}", "count": int(buckets.get(d, 0))} for d in range(window + 1)],
+        "sites": sites,
+        "items": [_slim(r) for r in soon[:100]],
     }

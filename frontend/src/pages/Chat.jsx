@@ -139,7 +139,7 @@ export default function Chat() {
               <div ref={bottomRef} />
             </div>
             <form onSubmit={send} className="p-3 border-t border-slate-200 dark:border-white/5 flex gap-2">
-              <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write a message…" autoComplete="off" />
+              <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write a message… @username to ping" autoComplete="off" />
               <button className="btn-primary" disabled={busy || !body.trim()}>
                 Send
               </button>
