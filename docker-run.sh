@@ -130,12 +130,9 @@ echo
 echo "[4/4] Building and starting container"
 echo "      App → http://127.0.0.1:${PORT}"
 echo
-echo "      Sign in:  admin / admin123"
-echo "                manager / manager123"
-echo "                user / user123"
-echo
 echo "Press Ctrl+C to stop."
 echo "============================================================"
 
 export WOMS_PORT="$PORT"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-linkco-mr}"
 compose -f "$ROOT/docker-compose.yml" up --build
