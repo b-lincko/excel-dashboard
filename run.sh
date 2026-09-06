@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install dependencies and start the Linkco MR dashboard (Linux / macOS).
+# Look for dependencies, install what is missing, prefer Docker, else local.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -7,25 +7,90 @@ cd "$ROOT"
 
 API_PORT="${API_PORT:-8000}"
 UI_PORT="${UI_PORT:-5173}"
+USE_LOCAL=0
+for arg in "$@"; do
+  case "$arg" in
+    --local|local) USE_LOCAL=1 ;;
+  esac
+done
 
 echo "============================================================"
 echo "  Linkco MR Dashboard — install & run"
 echo "============================================================"
 
+have_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+run_docker() {
+  if [ ! -x "$ROOT/docker-run.sh" ]; then
+    chmod +x "$ROOT/docker-run.sh" 2>/dev/null || true
+  fi
+  if [ ! -f "$ROOT/docker-compose.yml" ] || [ ! -f "$ROOT/Dockerfile" ]; then
+    return 1
+  fi
+  echo "Using Docker (pass --local to force Python + Node on the host)."
+  echo
+  exec "$ROOT/docker-run.sh"
+}
+
+if [ "$USE_LOCAL" -eq 0 ]; then
+  if have_cmd docker || have_cmd apt-get || have_cmd dnf || have_cmd brew || have_cmd curl; then
+    run_docker
+  fi
+fi
+
+echo "Running locally (Docker not used)."
+echo
+
 need() {
-  if ! command -v "$1" >/dev/null 2>&1; then
+  if ! have_cmd "$1"; then
     echo "ERROR: '$1' is not installed or not on PATH." >&2
     exit 1
   fi
 }
 
-if command -v python3 >/dev/null 2>&1; then
+install_python() {
+  if have_cmd python3 || have_cmd python; then
+    return 0
+  fi
+  echo "Python not found — installing…"
+  if have_cmd apt-get; then
+    sudo apt-get update -y
+    sudo apt-get install -y python3 python3-venv python3-pip
+  elif have_cmd dnf; then
+    sudo dnf install -y python3 python3-pip
+  elif have_cmd brew; then
+    brew install python
+  else
+    echo "ERROR: Python 3.11+ is required. Install it and re-run." >&2
+    exit 1
+  fi
+}
+
+install_node() {
+  if have_cmd npm; then
+    return 0
+  fi
+  echo "Node.js / npm not found — installing…"
+  if have_cmd apt-get; then
+    sudo apt-get update -y
+    sudo apt-get install -y nodejs npm
+  elif have_cmd dnf; then
+    sudo dnf install -y nodejs npm
+  elif have_cmd brew; then
+    brew install node
+  else
+    echo "ERROR: Node.js 18+ / npm is required. Install LTS from https://nodejs.org/" >&2
+    exit 1
+  fi
+}
+
+install_python
+install_node
+
+if have_cmd python3; then
   PYTHON=python3
-elif command -v python >/dev/null 2>&1; then
-  PYTHON=python
 else
-  echo "ERROR: Python 3.11+ is required." >&2
-  exit 1
+  PYTHON=python
 fi
 need npm
 

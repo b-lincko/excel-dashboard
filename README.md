@@ -20,14 +20,25 @@ Excel  ⇄  FastAPI  ⇄  React dashboard
 
 ### One command
 
-**Linux / macOS**
+**Docker (recommended)** — installs Docker if missing, builds the image, serves API + UI on port 8000:
+
+```bash
+chmod +x docker-run.sh run.sh
+./docker-run.sh
+```
+
+Windows: double-click `docker-run.bat`.
+
+**Linux / macOS without forcing Docker**
 
 ```bash
 chmod +x run.sh
 ./run.sh
 ```
 
-**Windows**
+`./run.sh` uses Docker when it can; `./run.sh --local` installs Python/Node on the host instead.
+
+**Windows (host Python + Node)**
 
 Double-click `run.bat`, or from Command Prompt:
 
@@ -35,10 +46,10 @@ Double-click `run.bat`, or from Command Prompt:
 run.bat
 ```
 
-This installs Python packages into `.venv`, runs `npm install` if needed, then starts:
+Local mode installs Python packages into `.venv`, runs `npm install` if needed, then starts:
 
 - API — http://127.0.0.1:8000
-- UI — http://127.0.0.1:5173
+- UI — http://127.0.0.1:5173  (Docker serves both at http://127.0.0.1:8000)
 
 Keep `file.xlsx` in the project root (it is the source of truth).
 

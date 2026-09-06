@@ -1,0 +1,14 @@
+services:
+  woms:
+    build: .
+    image: linkco-mr:latest
+    container_name: linkco-mr
+    ports:
+      - "${WOMS_PORT:-8000}:8000"
+    volumes:
+      - ./file.xlsx:/app/file.xlsx
+      - ./data:/app/data
+      - ./backups:/app/backups
+    environment:
+      WOMS_JWT_SECRET: ${WOMS_JWT_SECRET:-}
+    restart: unless-stopped

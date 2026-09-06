@@ -1,0 +1,18 @@
+.git
+.venv
+venv
+.pytest_cache
+__pycache__
+*.pyc
+node_modules
+frontend/node_modules
+frontend/dist
+backups
+data
+*.xlsx.lock
+.DS_Store
+.env
+backend/.env
+.coverage
+htmlcov
+Unselected files
