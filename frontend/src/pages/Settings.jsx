@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
+import { CalendarClock, FolderOpen, HardDrive } from "lucide-react";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
+
+const DAYS = [
+  { id: 0, label: "Mon" },
+  { id: 1, label: "Tue" },
+  { id: 2, label: "Wed" },
+  { id: 3, label: "Thu" },
+  { id: 4, label: "Fri" },
+  { id: 5, label: "Sat" },
+  { id: 6, label: "Sun" },
+];
 
 export default function Settings() {
   const { can } = useAuth();
@@ -9,6 +20,7 @@ export default function Settings() {
   const [cfg, setCfg] = useState(null);
   const [sync, setSync] = useState(null);
   const [backups, setBackups] = useState([]);
+  const [schedule, setSchedule] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -16,8 +28,14 @@ export default function Settings() {
     api.get("/api/settings").then((d) => {
       setCfg(d.settings);
       setSync(d.sync);
+      setSchedule(d.backup || null);
     });
-    if (can("backup")) api.get("/api/settings/backups").then((d) => setBackups(d.items || []));
+    if (can("backup")) {
+      api.get("/api/settings/backups").then((d) => {
+        setBackups(d.items || []);
+        setSchedule(d.schedule || null);
+      });
+    }
   }
   useEffect(load, []);
 
@@ -27,7 +45,9 @@ export default function Settings() {
     try {
       const d = await api.put("/api/settings", { values: cfg });
       setCfg(d.settings);
+      setSchedule(d.backup || schedule);
       toast("Configuration saved", "success");
+      load();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -57,7 +77,7 @@ export default function Settings() {
     <div className="space-y-5 max-w-5xl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-sm text-slate-500">Excel location, column mapping and business rules.</p>
+        <p className="text-sm text-slate-500">Excel location, column mapping, backups and business rules.</p>
       </div>
       {error && <div className="text-sm text-rose-600">{error}</div>}
 
@@ -73,10 +93,6 @@ export default function Settings() {
             <input value={cfg.worksheet_name} onChange={(e) => setCfg({ ...cfg, worksheet_name: e.target.value })} disabled={!can("settings")} />
           </div>
           <div>
-            <label className="lbl">Backup directory</label>
-            <input value={cfg.backup_dir} onChange={(e) => setCfg({ ...cfg, backup_dir: e.target.value })} disabled={!can("settings")} />
-          </div>
-          <div>
             <label className="lbl">Auto refresh (seconds)</label>
             <input
               type="number"
@@ -90,6 +106,19 @@ export default function Settings() {
           Status: {sync?.synchronized ? "Synchronized" : "Not synchronized"} · {sync?.record_count} records · last write {sync?.last_write || "—"}
         </div>
       </div>
+
+      {can("backup") && (
+        <BackupPanel
+          cfg={cfg}
+          setCfg={setCfg}
+          backups={backups}
+          schedule={schedule}
+          canSettings={can("settings")}
+          onRestore={restore}
+          onReload={load}
+          toast={toast}
+        />
+      )}
 
       <div className="card p-5">
         <div className="font-semibold mb-3">Column mapping (Excel → application)</div>
@@ -142,53 +171,262 @@ export default function Settings() {
           {saving ? "Saving…" : "Save configuration"}
         </button>
       )}
+    </div>
+  );
+}
 
-      {can("backup") && (
-        <div className="card overflow-hidden">
-          <div className="px-4 py-3 flex items-center justify-between">
-            <div className="font-semibold">Backups</div>
-            <button
-              className="btn-outline"
-              onClick={async () => {
-                await api.post("/api/settings/backups");
-                load();
-                toast("Backup created", "success");
-              }}
-            >
-              Create backup now
+function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, onReload, toast }) {
+  const [browse, setBrowse] = useState(false);
+  const [listing, setListing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [newFolder, setNewFolder] = useState("");
+  const days = cfg.backup_days?.length ? cfg.backup_days : [0, 1, 2, 3, 4, 5, 6];
+
+  async function openBrowse(path) {
+    const d = await api.get(`/api/settings/folders${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+    setListing(d);
+    setBrowse(true);
+  }
+
+  async function createFolder() {
+    const name = newFolder.trim();
+    if (!name || !listing?.path) return;
+    const sep = listing.path.includes("\\") && !listing.path.startsWith("/") ? "\\" : "/";
+    const path = `${listing.path.replace(/[\\/]+$/, "")}${sep}${name}`;
+    const d = await api.post("/api/settings/folders", { path });
+    setNewFolder("");
+    setListing(d.listing);
+    toast("Folder created", "success");
+  }
+
+  function toggleDay(id) {
+    const has = days.includes(id);
+    const next = has ? days.filter((d) => d !== id) : [...days, id].sort((a, b) => a - b);
+    setCfg({ ...cfg, backup_days: next.length ? next : [id] });
+  }
+
+  async function backupNow() {
+    setBusy(true);
+    try {
+      await api.post("/api/settings/backups");
+      onReload();
+      toast("Backup created", "success");
+    } catch (e) {
+      toast(e.message || "Backup failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runAuto() {
+    setBusy(true);
+    try {
+      await api.post("/api/settings/backups/run-auto");
+      onReload();
+      toast("Automatic backup ran", "success");
+    } catch (e) {
+      toast(e.message || "Autobackup failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <HardDrive size={16} /> Backup system
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Copies of <span className="font-mono">file.xlsx</span> go to the folder you choose. Autobackup runs while the app is open.
+          </p>
+        </div>
+        <label className="inline-flex items-center gap-2 text-sm font-medium">
+          <input
+            type="checkbox"
+            className="!w-auto"
+            checked={!!cfg.backup_auto_enabled}
+            disabled={!canSettings}
+            onChange={(e) => setCfg({ ...cfg, backup_auto_enabled: e.target.checked })}
+          />
+          Autobackup
+        </label>
+      </div>
+
+      <div className="p-5 space-y-4">
+        <div>
+          <label className="lbl">Backup folder</label>
+          <div className="flex gap-2">
+            <input
+              value={cfg.backup_dir || ""}
+              disabled={!canSettings}
+              onChange={(e) => setCfg({ ...cfg, backup_dir: e.target.value })}
+              placeholder="D:\\Backups\\Linkco or /data/backups"
+            />
+            <button className="btn-outline shrink-0" type="button" onClick={() => openBrowse(cfg.backup_dir)} disabled={!canSettings}>
+              <FolderOpen size={14} /> Browse
             </button>
           </div>
-          <table className="data">
-            <thead>
-              <tr>
-                <th>File</th>
-                <th>Modified</th>
-                <th>Size</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {backups.map((b) => (
-                <tr key={b.path} className="!cursor-default">
-                  <td className="font-mono text-xs">{b.name}</td>
-                  <td>{b.modified}</td>
-                  <td>{Math.round(b.size / 1024)} KB</td>
-                  <td>
-                    <button className="btn-outline !py-1 !px-2 text-xs" onClick={() => restore(b)}>
-                      Restore
-                    </button>
-                  </td>
-                </tr>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-3">
+          <div>
+            <label className="lbl">Time</label>
+            <input
+              type="time"
+              disabled={!canSettings}
+              value={(cfg.backup_time || "02:00").slice(0, 5)}
+              onChange={(e) => setCfg({ ...cfg, backup_time: e.target.value || "02:00" })}
+            />
+          </div>
+          <div>
+            <label className="lbl">Start date</label>
+            <input
+              type="date"
+              disabled={!canSettings}
+              value={cfg.backup_start_date || ""}
+              onChange={(e) => setCfg({ ...cfg, backup_start_date: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="lbl">Ratio (keep last N)</label>
+            <input
+              type="number"
+              min={0}
+              disabled={!canSettings}
+              value={cfg.backup_ratio ?? 14}
+              onChange={(e) => setCfg({ ...cfg, backup_ratio: Number(e.target.value) })}
+            />
+            <p className="text-[11px] text-slate-500 mt-1">0 keeps every auto/manual copy. Write-safety copies are not pruned.</p>
+          </div>
+        </div>
+
+        <div>
+          <label className="lbl">Days</label>
+          <div className="flex flex-wrap gap-1.5">
+            {DAYS.map((d) => {
+              const on = days.includes(d.id);
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  disabled={!canSettings}
+                  onClick={() => toggleDay(d.id)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${
+                    on
+                      ? "bg-brand-700 text-white border-brand-700"
+                      : "border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300"
+                  }`}
+                >
+                  {d.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <CalendarClock size={14} />
+          <span>{cfg.backup_auto_enabled ? `Next run ${schedule?.next_run || "—"}` : "Autobackup is off"}</span>
+          <span>· last auto {schedule?.last_auto_backup || "never"}</span>
+          <span className="ml-auto flex gap-2">
+            <button className="btn-outline !py-1 !px-2 text-xs" onClick={backupNow} disabled={busy}>
+              {busy ? "Working…" : "Backup now"}
+            </button>
+            <button className="btn-outline !py-1 !px-2 text-xs" onClick={runAuto} disabled={busy || !cfg.backup_auto_enabled}>
+              Run autobackup
+            </button>
+          </span>
+        </div>
+      </div>
+
+      <table className="data">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Kind</th>
+            <th>Modified</th>
+            <th>Size</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {backups.map((b) => (
+            <tr key={b.path} className="!cursor-default">
+              <td className="font-mono text-xs">{b.name}</td>
+              <td className="uppercase text-[11px] text-slate-500">{b.reason || "—"}</td>
+              <td>{b.modified}</td>
+              <td>{Math.round(b.size / 1024)} KB</td>
+              <td>
+                <button className="btn-outline !py-1 !px-2 text-xs" onClick={() => onRestore(b)}>
+                  Restore
+                </button>
+              </td>
+            </tr>
+          ))}
+          {!backups.length && (
+            <tr className="!cursor-default">
+              <td colSpan={5} className="text-center text-slate-400 py-8">
+                No backups yet.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+
+      {browse && listing && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => setBrowse(false)}>
+          <div className="card w-full max-w-lg p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="font-semibold">Select backup folder</div>
+            <div className="font-mono text-xs break-all text-slate-500">{listing.path}</div>
+            {listing.error && <div className="text-sm text-rose-600">{listing.error}</div>}
+            <div className="flex gap-2">
+              <button className="btn-outline text-xs" type="button" onClick={() => listing.parent && openBrowse(listing.parent)} disabled={!listing.parent}>
+                Up
+              </button>
+              {(listing.roots || []).slice(0, 6).map((r) => (
+                <button key={r.path} className="btn-ghost text-xs !px-2" type="button" onClick={() => openBrowse(r.path)}>
+                  {r.name || r.path}
+                </button>
               ))}
-              {!backups.length && (
-                <tr className="!cursor-default">
-                  <td colSpan={4} className="text-center text-slate-400 py-8">
-                    No backups yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+            </div>
+            <div className="max-h-64 overflow-auto rounded-lg border border-slate-200 dark:border-white/10">
+              {(listing.folders || []).map((f) => (
+                <button
+                  key={f.path}
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 dark:hover:bg-white/5 border-b border-slate-100 dark:border-white/5 last:border-0"
+                  onClick={() => openBrowse(f.path)}
+                >
+                  {f.name}
+                </button>
+              ))}
+              {!(listing.folders || []).length && <div className="px-3 py-6 text-center text-sm text-slate-400">No subfolders</div>}
+            </div>
+            <div className="flex gap-2">
+              <input placeholder="New folder name" value={newFolder} onChange={(e) => setNewFolder(e.target.value)} />
+              <button className="btn-outline shrink-0" type="button" onClick={createFolder} disabled={!newFolder.trim()}>
+                Create
+              </button>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button className="btn-ghost" type="button" onClick={() => setBrowse(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                type="button"
+                disabled={!listing.exists}
+                onClick={() => {
+                  setCfg({ ...cfg, backup_dir: listing.path });
+                  setBrowse(false);
+                }}
+              >
+                Use this folder
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

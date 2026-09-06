@@ -420,21 +420,55 @@ class ExcelService:
         if not root.exists():
             return items
         for p in sorted(root.rglob("*.xlsx"), key=lambda x: x.stat().st_mtime, reverse=True):
+            reason = p.stem.rsplit("_", 1)[-1] if "_" in p.stem else ""
             items.append(
                 {
                     "path": str(p),
                     "name": p.name,
                     "size": p.stat().st_size,
                     "modified": datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    "reason": reason,
+                    "folder": str(p.parent),
                 }
             )
             if len(items) >= limit:
                 break
         return items
 
+    def prune_backups(self, keep: int, reasons: tuple[str, ...] = ("auto", "manual")) -> int:
+        keep_n = int(keep or 0)
+        if keep_n <= 0:
+            return 0
+        root = self.backup_dir()
+        if not root.exists():
+            return 0
+        matched: list[Path] = []
+        want = {str(r).lower() for r in reasons}
+        for p in root.rglob("*.xlsx"):
+            tag = p.stem.rsplit("_", 1)[-1].lower() if "_" in p.stem else ""
+            if tag in want:
+                matched.append(p)
+        matched.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        removed = 0
+        for p in matched[keep_n:]:
+            parent = p.parent
+            try:
+                p.unlink()
+                removed += 1
+                if parent != root and parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+            except OSError:
+                continue
+        return removed
+
     def restore_backup(self, backup_path: str) -> None:
-        src = Path(backup_path)
-        if not src.exists():
+        src = Path(backup_path).expanduser().resolve()
+        root = self.backup_dir().resolve()
+        try:
+            inside = src.is_relative_to(root)
+        except AttributeError:
+            inside = str(src).startswith(str(root))
+        if not inside or not src.is_file():
             raise FileNotFoundError("Backup file not found")
         self.create_backup(reason="pre_restore")
         with self._file_lock():

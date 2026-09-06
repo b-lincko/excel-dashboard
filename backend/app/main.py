@@ -33,7 +33,11 @@ def _boot() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _boot()
-    yield
+    start_scheduler()
+    try:
+        yield
+    finally:
+        stop_scheduler()
 
 
 app = FastAPI(

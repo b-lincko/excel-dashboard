@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -491,3 +493,82 @@ def test_reconcile_migrates_sqlite_delay_into_new_columns(workbook):
     extra = database.get_record_extra(rid)
     assert extra["delay_kind"] == "placement"
     assert extra["delay_justification"] == "API dual-write"
+
+
+def test_backup_schedule_folder_and_ratio(workbook):
+    from datetime import datetime
+
+    from app.backup import is_due, list_folders, next_run
+    from app.config import AppConfig
+    from app.main import app
+    from app.excel.service import excel_service
+
+    path, svc = workbook
+    cfg = AppConfig(
+        backup_auto_enabled=True,
+        backup_time="02:00",
+        backup_days=[5],
+        backup_ratio=2,
+        backup_start_date="2026-09-01",
+    )
+    saturday = datetime(2026, 9, 5, 2, 1)
+    assert saturday.weekday() == 5
+    assert is_due(saturday, cfg, None) is True
+    assert is_due(saturday, cfg, "2026-09-05 02:00:00") is False
+    assert is_due(datetime(2026, 9, 5, 1, 59), cfg, None) is False
+    assert is_due(datetime(2026, 9, 4, 10, 0), cfg, None) is False
+    nxt = next_run(datetime(2026, 9, 4, 10, 0), cfg)
+    assert nxt == datetime(2026, 9, 5, 2, 0)
+
+    backup_root = Path(load_config().backup_dir)
+    backup_root.mkdir(parents=True, exist_ok=True)
+    day = backup_root / "2026-09-05"
+    day.mkdir(parents=True, exist_ok=True)
+    for i in range(4):
+        (day / f"file_2026-09-05_0{i}0000_auto.xlsx").write_bytes(b"PK dummy")
+    files = sorted(day.glob("*_auto.xlsx"))
+    for i, f in enumerate(files):
+        os_time = time.time() - (10 - i)
+        os.utime(f, (os_time, os_time))
+    removed = svc.prune_backups(2, reasons=("auto", "manual"))
+    assert removed == 2
+    assert len(list(day.glob("*_auto.xlsx"))) == 2
+
+    from app import database
+
+    database.init_db()
+    excel_service.invalidate()
+    client = TestClient(app)
+    token = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    folders = client.get("/api/settings/folders", headers=headers)
+    assert folders.status_code == 200, folders.text
+    assert folders.json()["exists"] is True
+    listing = list_folders(str(backup_root))
+    assert listing["exists"] is True
+    saved = client.put(
+        "/api/settings",
+        headers=headers,
+        json={
+            "values": {
+                "backup_auto_enabled": True,
+                "backup_time": "03:30",
+                "backup_days": [0, 2, 4],
+                "backup_ratio": 5,
+                "backup_start_date": "2026-09-06",
+                "backup_dir": str(backup_root),
+            }
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["settings"]["backup_auto_enabled"] is True
+    assert body["settings"]["backup_time"] == "03:30"
+    assert body["settings"]["backup_ratio"] == 5
+    assert body["backup"]["next_run"]
+    created = client.post("/api/settings/backups", headers=headers)
+    assert created.status_code == 200, created.text
+    listed = client.get("/api/settings/backups", headers=headers)
+    assert listed.status_code == 200
+    assert listed.json()["items"]
+    assert any(i.get("reason") == "manual" for i in listed.json()["items"])

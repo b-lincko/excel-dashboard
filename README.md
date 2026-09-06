@@ -111,7 +111,7 @@ Open the UI, then sign in:
 - **Work order table** — search, sort, filter, pagination, column visibility, CSV export, inline drill-down
 - **Edit** — Save writes the Excel row, confirms, refreshes stats
 - **Audit log** — user, time, work order, field, old/new value (SQLite, not mixed into Excel)
-- **Backups** — timestamped copies under `backups/YYYY-MM-DD/` before every write
+- **Backups** — timestamped copies under the admin-selected folder (default `backups/YYYY-MM-DD/`) before every write, plus optional autobackup on a time/day schedule with retention ratio
 - **Conflict detection** — if Excel changed since you loaded the record, you get a warning instead of a silent overwrite
 - **Reports** — daily/weekly/monthly/yearly, open/overdue/closed/delay/department/technician as Excel, CSV or PDF
 - **Auth** — admin / manager / user with configurable permissions
