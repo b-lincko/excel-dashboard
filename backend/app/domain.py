@@ -246,6 +246,9 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
                 "work_type",
                 "supplier",
                 "po_number",
+                "delay_kind",
+                "delay_source",
+                "delay_justification",
             )
         ).lower()
         if q not in hay:

@@ -23,6 +23,7 @@ def sync_ping(user=Depends(require_permission("view"))):
 def refresh(user=Depends(require_permission("view"))):
     try:
         excel_service.invalidate()
+        reconcile = excel_service.reconcile_overlay(username=user.get("username") or "sync")
         records = excel_service.load(force=True)
     except ExcelUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
@@ -32,6 +33,7 @@ def refresh(user=Depends(require_permission("view"))):
     status = excel_service.status()
     status["record_count"] = len(records)
     status["hard"] = True
+    status["reconcile"] = reconcile
     return status
 
 

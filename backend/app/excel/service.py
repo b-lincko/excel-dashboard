@@ -31,6 +31,8 @@ DUE_OFFSETS = {
     "under warranty": 10,
 }
 
+DELAY_FIELDS = ("delay_kind", "delay_source", "delay_justification")
+
 
 def _temp_xlsx(directory: Path) -> Path:
     fd, name = tempfile.mkstemp(suffix=".xlsx", dir=directory)
@@ -72,6 +74,7 @@ class ExcelService:
         self._fingerprint: str = ""
         self._stale: bool = False
         self._last_error: Optional[str] = None
+        self._delay_columns_ready: bool = False
         self._lock = threading.RLock()
 
     def cfg(self) -> AppConfig:
@@ -305,6 +308,7 @@ class ExcelService:
             self._fingerprint = ""
             self._stale = False
             self._last_error = None
+            self._delay_columns_ready = False
 
     def _serve_cache(self, err: Optional[str] = None) -> list[dict[str, Any]]:
         if self._cache is None:
@@ -333,15 +337,22 @@ class ExcelService:
             try:
                 all_records: list[dict[str, Any]] = []
                 headers: list[str] = []
+                mapping_exc = self.cfg().mapping.internal_to_excel()
+                needed = [norm_header(mapping_exc.get(f, "")) for f in DELAY_FIELDS]
+                delay_ready_all = True
                 for sheet_name in self.data_sheets(wb):
                     ws = wb[sheet_name]
                     hdrs, recs = self._read_sheet_records(ws, sheet_name)
                     if hdrs:
                         headers = hdrs
+                    present = {norm_header(h) for h in hdrs}
+                    if not all(n in present for n in needed if n):
+                        delay_ready_all = False
                     all_records.extend(recs)
             finally:
                 wb.close()
             self._headers = [norm_header(h) for h in headers]
+            self._delay_columns_ready = delay_ready_all and bool(headers)
             self._cache = all_records
             self._mtime = mt
             self._fingerprint = self.fingerprint()
@@ -356,6 +367,14 @@ class ExcelService:
     def headers(self) -> list[str]:
         self.load()
         return list(self._headers)
+
+    def delay_columns_ready(self) -> bool:
+        if self._cache is None:
+            try:
+                self.load()
+            except (ExcelUnavailable, ExcelLocked):
+                return False
+        return bool(self._delay_columns_ready)
 
     def get_all(self, force: bool = False) -> list[dict[str, Any]]:
         return list(self.load(force=force))
@@ -440,6 +459,23 @@ class ExcelService:
 
     def _formula_header_set(self) -> set[str]:
         return {norm_header(c) for c in self.cfg().formula_columns}
+
+    def _ensure_mapped_headers(self, ws, headers: list[str]) -> list[str]:
+        """Append missing mapped columns at the end of the header row. Never insert/shift."""
+        mapping = self.cfg().mapping.internal_to_excel()
+        existing = {norm_header(h) for h in headers}
+        header_row = self.cfg().header_row
+        next_col = len(headers) + 1
+        new_headers = list(headers)
+        for _field, excel_col in mapping.items():
+            nh = norm_header(excel_col)
+            if not nh or nh in existing:
+                continue
+            ws.cell(header_row, next_col).value = excel_col
+            new_headers.append(excel_col)
+            existing.add(nh)
+            next_col += 1
+        return new_headers
 
     def _write_record_to_sheet(self, ws, rec: dict[str, Any], headers: list[str], row_number: int) -> None:
         mapping = self.cfg().mapping.internal_to_excel()
@@ -577,7 +613,8 @@ class ExcelService:
                     if k in allowed:
                         target[k] = v if v is not None else ""
                 ws = wb[target["_sheet"]]
-                headers = sheet_headers[target["_sheet"]]
+                headers = self._ensure_mapped_headers(ws, sheet_headers[target["_sheet"]])
+                sheet_headers[target["_sheet"]] = headers
                 self._write_record_to_sheet(ws, target, headers, int(target["_row"]))
                 tmp = _temp_xlsx(self.excel_path().parent)
                 wb.save(tmp)
@@ -642,6 +679,7 @@ class ExcelService:
                 rec["created_date"] = rec.get("created_date") or datetime.now().strftime("%Y-%m-%d %H:%M")
                 rec["status"] = rec.get("status") or "OPEN"
                 rec["_raw"] = {}
+                headers = self._ensure_mapped_headers(ws, headers)
                 row_number = self._next_row(ws, headers)
                 rec["_row"] = row_number
                 rec["_sheet"] = sheet_name
@@ -828,6 +866,132 @@ class ExcelService:
             "warning": err if err and records else live.get("warning"),
             "headers": self._headers if (available or self._headers) else [],
         }
+
+    def reconcile_overlay(self, username: str = "sync") -> dict[str, Any]:
+        """Keep Excel and SQLite delay/supplier data in both directions.
+
+        - Append Delay Type / Source / Justification headers if missing (no column shift).
+        - Newly added empty columns are filled from SQLite (migration of overlay notes).
+        - Once columns exist, Excel is source of truth including blanks.
+        - Supplier names from Excel are added to the SQLite catalog.
+        """
+        if not self.available():
+            raise ExcelUnavailable("Excel file is currently unavailable.")
+        try:
+            lock = self._file_lock()
+            lock.acquire()
+        except Timeout as exc:
+            raise ExcelLocked(
+                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+            ) from exc
+        wrote = False
+        pushed_excel = 0
+        pulled_db = 0
+        suppliers_added = 0
+        new_columns = False
+        try:
+            extras = database.get_all_record_extras()
+            original_delay = {
+                rid: {f: str(ex.get(f) or "") for f in DELAY_FIELDS} for rid, ex in extras.items()
+            }
+            known_suppliers = {s["name"].lower() for s in database.list_suppliers()}
+            wb = self._load_workbook()
+            try:
+                sheet_headers: dict[str, list[str]] = {}
+                all_records: list[dict[str, Any]] = []
+                for sheet_name in self.data_sheets(wb):
+                    ws = wb[sheet_name]
+                    hdrs, recs = self._read_sheet_records(ws, sheet_name)
+                    new_hdrs = self._ensure_mapped_headers(ws, hdrs)
+                    if new_hdrs != hdrs:
+                        wrote = True
+                        new_columns = True
+                    sheet_headers[sheet_name] = new_hdrs
+                    all_records.extend(recs)
+                dirty_ids: set[str] = set()
+                for rec in all_records:
+                    rid = str(rec.get("record_id") or "")
+                    extra = extras.get(rid) or {}
+                    for field in DELAY_FIELDS:
+                        excel_val = str(rec.get(field) or "").strip()
+                        db_val = str(extra.get(field) or "").strip()
+                        if new_columns and not excel_val and db_val:
+                            rec[field] = db_val
+                            extra[field] = db_val
+                            extras[rid] = extra
+                            dirty_ids.add(rid)
+                            pushed_excel += 1
+                        else:
+                            rec[field] = excel_val
+                            if excel_val != db_val:
+                                extra[field] = excel_val
+                                extras[rid] = extra
+                                pulled_db += 1
+                    name = str(rec.get("supplier") or "").strip()
+                    if name and name.lower() not in known_suppliers:
+                        database.add_supplier(name, created_by=username)
+                        known_suppliers.add(name.lower())
+                        suppliers_added += 1
+                if dirty_ids:
+                    wrote = True
+                    by_sheet: dict[str, list[dict[str, Any]]] = {}
+                    for rec in all_records:
+                        if str(rec.get("record_id") or "") in dirty_ids:
+                            by_sheet.setdefault(rec["_sheet"], []).append(rec)
+                    for sheet_name, recs in by_sheet.items():
+                        ws = wb[sheet_name]
+                        headers = sheet_headers[sheet_name]
+                        for rec in recs:
+                            self._write_record_to_sheet(ws, rec, headers, int(rec["_row"]))
+                if wrote:
+                    self.create_backup(reason="reconcile")
+                    tmp = _temp_xlsx(self.excel_path().parent)
+                    wb.save(tmp)
+                else:
+                    tmp = None
+            finally:
+                wb.close()
+            if wrote and tmp is not None:
+                try:
+                    self._atomic_replace(tmp)
+                except Exception:
+                    if tmp.exists():
+                        tmp.unlink(missing_ok=True)
+                    raise
+            self.invalidate()
+            records = self.load(force=True)
+            for rec in records:
+                rid = str(rec.get("record_id") or "")
+                extra = extras.get(rid) or {}
+                payload = {f: str(rec.get(f) or "") for f in DELAY_FIELDS}
+                previous = original_delay.get(rid) or {f: "" for f in DELAY_FIELDS}
+                wo = str(rec.get("work_order_id") or extra.get("work_order_id") or "")
+                if payload != previous:
+                    database.upsert_record_extra(
+                        rid,
+                        username,
+                        work_order_id=wo,
+                        delay_kind=payload["delay_kind"],
+                        delay_source=payload["delay_source"],
+                        delay_justification=payload["delay_justification"],
+                    )
+            database.set_sync_meta("last_reconcile", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            return {
+                "wrote_excel": wrote,
+                "pushed_to_excel": pushed_excel,
+                "pulled_to_db": pulled_db,
+                "suppliers_added": suppliers_added,
+                "record_count": len(records),
+            }
+        except PermissionError as exc:
+            raise ExcelLocked(
+                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+            ) from exc
+        finally:
+            try:
+                lock.release()
+            except Exception:
+                pass
 
 
 excel_service = ExcelService()

@@ -315,6 +315,12 @@ def get_record_extra(record_id: str) -> Optional[dict[str, Any]]:
         return dict(row) if row else None
 
 
+def get_all_record_extras() -> dict[str, dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM record_extras").fetchall()
+        return {str(r["record_id"]): dict(r) for r in rows}
+
+
 def get_record_extras(record_ids: list[str]) -> dict[str, dict[str, Any]]:
     ids = [str(i) for i in record_ids if i]
     if not ids:

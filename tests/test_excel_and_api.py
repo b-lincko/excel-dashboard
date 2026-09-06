@@ -365,3 +365,129 @@ def test_roles_guest_and_catalog(workbook):
     refresh = client.post("/api/sync/refresh", headers=headers)
     assert refresh.status_code == 200
     assert refresh.json().get("hard") is True
+
+
+def test_delay_fields_roundtrip_excel(workbook):
+    from openpyxl import load_workbook
+    from app import database
+
+    path, svc = workbook
+    recs = svc.get_all(force=True)
+    target = next(r for r in recs if r.get("status"))
+    rid = target["record_id"]
+    updated = svc.update_record(
+        rid,
+        {
+            "delay_kind": "placement",
+            "delay_source": "site",
+            "delay_justification": "Waiting on drawings",
+        },
+        username="pytest",
+    )
+    assert updated["delay_kind"] == "placement"
+    assert updated["delay_source"] == "site"
+    assert updated["delay_justification"] == "Waiting on drawings"
+    again = svc.get_by_id(rid)
+    assert again["delay_kind"] == "placement"
+
+    wb = load_workbook(path)
+    ws = wb[again["_sheet"]]
+    assert ws["A3"].value == "SN"
+    assert ws["T3"].value == "Link Path"
+    assert ws["U3"].value == "Delay Type"
+    assert ws["V3"].value == "Delay Source"
+    assert ws["W3"].value == "Delay Justification"
+    row = int(again["_row"])
+    assert ws.cell(row, 21).value == "placement"
+    assert ws.cell(row, 22).value == "site"
+    assert ws.cell(row, 23).value == "Waiting on drawings"
+    wb.close()
+
+    database.upsert_record_extra(
+        rid,
+        "pytest",
+        work_order_id=str(again["work_order_id"]),
+        delay_kind="delivery",
+        delay_source="supplier",
+        delay_justification="stale sqlite",
+    )
+    result = svc.reconcile_overlay("pytest")
+    extra = database.get_record_extra(rid)
+    assert extra["delay_kind"] == "placement"
+    assert extra["delay_source"] == "site"
+    assert extra["delay_justification"] == "Waiting on drawings"
+    assert result["record_count"] >= 2000
+
+
+def test_reconcile_migrates_sqlite_delay_into_new_columns(workbook):
+    from openpyxl import load_workbook
+    from app import database
+    from app.main import app
+    from app.excel.service import excel_service
+    from fastapi.testclient import TestClient
+
+    path, svc = workbook
+    recs = svc.get_all(force=True)
+    target = recs[0]
+    rid = target["record_id"]
+    database.upsert_record_extra(
+        rid,
+        "pytest",
+        work_order_id=str(target["work_order_id"]),
+        delay_kind="delivery",
+        delay_source="procurement",
+        delay_justification="Customs hold",
+    )
+    result = svc.reconcile_overlay("pytest")
+    assert result["wrote_excel"] is True
+    assert result["pushed_to_excel"] >= 1
+    again = svc.get_by_id(rid)
+    assert again["delay_kind"] == "delivery"
+    assert again["delay_source"] == "procurement"
+    assert again["delay_justification"] == "Customs hold"
+    wb = load_workbook(path)
+    for sheet_name in ("Linkco_MR_Log (SH5 & SH1)", "Linkco_MR_Log (F5)"):
+        ws = wb[sheet_name]
+        assert ws["A3"].value == "SN"
+        assert ws["T3"].value == "Link Path"
+        assert ws["U3"].value == "Delay Type"
+        assert ws["V3"].value == "Delay Source"
+        assert ws["W3"].value == "Delay Justification"
+    ws = wb[target["_sheet"]]
+    row = int(target["_row"])
+    assert ws.cell(row, 21).value == "delivery"
+    assert ws.cell(row, 22).value == "procurement"
+    assert ws.cell(row, 23).value == "Customs hold"
+    wb.close()
+
+    database.init_db()
+    excel_service.invalidate()
+    client = TestClient(app)
+    token = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    got = client.get(f"/api/work-orders/{rid}", headers=headers)
+    assert got.status_code == 200
+    item = got.json()["item"]
+    assert item["delay_kind"] == "delivery"
+    assert item["delay_justification"] == "Customs hold"
+    saved = client.put(
+        f"/api/work-orders/{rid}",
+        headers=headers,
+        json={
+            "changes": {
+                "delay_kind": "placement",
+                "delay_source": "site",
+                "delay_justification": "API dual-write",
+            },
+            "force": True,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["item"]["delay_kind"] == "placement"
+    excel_service.invalidate()
+    reloaded = excel_service.get_by_id(rid)
+    assert reloaded["delay_kind"] == "placement"
+    assert reloaded["delay_justification"] == "API dual-write"
+    extra = database.get_record_extra(rid)
+    assert extra["delay_kind"] == "placement"
+    assert extra["delay_justification"] == "API dual-write"

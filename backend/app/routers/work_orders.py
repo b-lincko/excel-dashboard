@@ -9,27 +9,29 @@ from .. import database
 from ..config import load_config
 from ..dates import to_date
 from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_for_open, today
-from ..excel.service import DUE_OFFSETS, ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
+from ..excel.service import DELAY_FIELDS, DUE_OFFSETS, ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
 from ..security import require_permission
 from ..stats import parse_query_filters
 from ..validation import validate_work_order
 
-EXTRA_FIELDS = {"delay_kind", "delay_source", "delay_justification"}
+EXTRA_FIELDS = set(DELAY_FIELDS)
 
 
-def _overlay_fields(extra: dict[str, Any] | None) -> dict[str, Any]:
+def _overlay_fields(rec: dict[str, Any], extra: dict[str, Any] | None) -> dict[str, Any]:
     extra = extra or {}
-    return {
-        "delay_kind": extra.get("delay_kind") or "",
-        "delay_source": extra.get("delay_source") or "",
-        "delay_justification": extra.get("delay_justification") or "",
-    }
+    ready = excel_service.delay_columns_ready()
+    out: dict[str, Any] = {}
+    for field in DELAY_FIELDS:
+        excel_val = str(rec.get(field) or "").strip()
+        db_val = str(extra.get(field) or "").strip()
+        out[field] = excel_val if (ready or excel_val) else db_val
+    return out
 
 
 def _with_extras(rec: dict[str, Any]) -> dict[str, Any]:
     extra = database.get_record_extra(str(rec.get("record_id") or ""))
     out = dict(rec)
-    out.update(_overlay_fields(extra))
+    out.update(_overlay_fields(rec, extra))
     return out
 
 
@@ -38,7 +40,7 @@ def _with_extras_many(recs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for rec in recs:
         item = dict(rec)
-        item.update(_overlay_fields(extras.get(str(rec.get("record_id") or ""))))
+        item.update(_overlay_fields(rec, extras.get(str(rec.get("record_id") or ""))))
         out.append(item)
     return out
 
@@ -49,6 +51,7 @@ def _split_changes(changes: dict[str, Any]) -> tuple[dict[str, Any], dict[str, A
     for key, value in (changes or {}).items():
         if key in EXTRA_FIELDS:
             extra_changes[key] = value if value is not None else ""
+            excel_changes[key] = extra_changes[key]
         else:
             excel_changes[key] = value
     return excel_changes, extra_changes

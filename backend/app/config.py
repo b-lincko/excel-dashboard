@@ -43,6 +43,9 @@ class ColumnMapping(BaseModel):
     last_updated: str = ""
     supplier: str = "Supplier Name"
     po_number: str = "PO NO #"
+    delay_kind: str = "Delay Type"
+    delay_source: str = "Delay Source"
+    delay_justification: str = "Delay Justification"
 
     def excel_to_internal(self) -> dict[str, str]:
         out: dict[str, str] = {}
