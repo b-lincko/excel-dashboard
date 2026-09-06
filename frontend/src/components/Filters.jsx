@@ -15,9 +15,18 @@ const PERIODS = [
 export default function Filters({ value, onChange, options = {}, extra }) {
   const v = value || {};
   const set = (k, val) => onChange({ ...v, [k]: val });
+  const active = Object.entries(v).filter(([, val]) => val !== undefined && val !== null && val !== "" && !(Array.isArray(val) && !val.length));
 
   return (
     <div className="card p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filters</div>
+        {active.length > 0 && (
+          <button type="button" className="text-xs text-brand-700 dark:text-cyan-300 hover:underline" onClick={() => onChange({})}>
+            Clear all
+          </button>
+        )}
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
         <div>
           <label className="lbl">Period</label>

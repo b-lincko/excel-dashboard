@@ -4,6 +4,8 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  CheckCircle2,
+  ChevronDown,
   ClipboardList,
   FileText,
   FolderOpen,
@@ -12,19 +14,20 @@ import {
   LogOut,
   Menu,
   Moon,
+  RefreshCw,
   Search,
   Settings,
   Shield,
   Sun,
-  Users,
-  CheckCircle2,
-  RefreshCw,
   Truck,
   Upload,
+  UserRound,
+  Users,
   X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
+import { useUi } from "../context/UiContext.jsx";
 import { api } from "../lib/api.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 
@@ -36,8 +39,8 @@ const NAV = [
   { to: "/closed", label: "Closed", icon: CheckCircle2, group: "Work" },
   { to: "/queue", label: "Action queue", icon: ListTodo, group: "Ops" },
   { to: "/suppliers", label: "Suppliers / PO", icon: Truck, group: "Ops" },
-  { to: "/analytics", label: "Analytics", icon: BarChart3, group: "Ops" },
-  { to: "/reports", label: "Reports", icon: FileText, group: "Ops" },
+  { to: "/analytics", label: "Analytics", icon: BarChart3, perm: "analytics", group: "Ops" },
+  { to: "/reports", label: "Reports", icon: FileText, perm: "reports", group: "Ops" },
   { to: "/audit", label: "Audit log", icon: Shield, perm: "audit", group: "Admin" },
   { to: "/users", label: "Users", icon: Users, perm: "users", group: "Admin" },
   { to: "/settings", label: "Settings", icon: Settings, perm: "settings", group: "Admin" },
@@ -56,20 +59,24 @@ const TITLES = {
   "/audit": "Audit log",
   "/users": "Users",
   "/settings": "Settings",
+  "/account": "Account",
 };
 
 export default function Layout() {
   const { user, logout, can } = useAuth();
   const { theme, toggle } = useTheme();
+  const { toast, ask } = useUi();
   const nav = useNavigate();
   const loc = useLocation();
   const [sync, setSync] = useState(null);
   const [q, setQ] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState("");
   const [menu, setMenu] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const fileRef = useRef(null);
+  const searchRef = useRef(null);
+  const accountRef = useRef(null);
 
   useEffect(() => {
     const title = Object.entries(TITLES).find(([path]) => (path === "/" ? loc.pathname === "/" : loc.pathname.startsWith(path)));
@@ -78,7 +85,32 @@ export default function Layout() {
 
   useEffect(() => {
     setMenu(false);
+    setAccountOpen(false);
   }, [loc.pathname]);
+
+  useEffect(() => {
+    function onKey(e) {
+      const tag = (e.target?.tagName || "").toLowerCase();
+      const typing = tag === "input" || tag === "textarea" || tag === "select" || e.target?.isContentEditable;
+      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+      if (e.key === "Escape") {
+        setMenu(false);
+        setAccountOpen(false);
+      }
+    }
+    function onClick(e) {
+      if (accountRef.current && !accountRef.current.contains(e.target)) setAccountOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onClick);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onClick);
+    };
+  }, []);
 
   async function loadSync() {
     try {
@@ -122,16 +154,15 @@ export default function Layout() {
     e.target.value = "";
     if (!file) return;
     setUploading(true);
-    setUploadMsg("");
     try {
       const fd = new FormData();
       fd.append("file", file);
       const res = await api.upload("/api/sync/upload", fd);
       setSync(res.sync);
       window.dispatchEvent(new CustomEvent("woms:data", { detail: res.sync }));
-      setUploadMsg(`Scanned ${res.sync?.record_count ?? 0} rows`);
+      toast(`Workbook scanned · ${res.sync?.record_count ?? 0} rows`, "success");
     } catch (err) {
-      setUploadMsg(err.message || "Upload failed");
+      toast(err.message || "Upload failed", "error");
     } finally {
       setUploading(false);
     }
@@ -143,11 +174,20 @@ export default function Layout() {
       const next = await api.post("/api/sync/refresh");
       setSync(next);
       window.dispatchEvent(new CustomEvent("woms:data", { detail: next }));
+      toast("Refreshed from Excel", "success");
     } catch (e) {
       setSync((prev) => ({ ...(prev || {}), stale: true, warning: e.message }));
+      toast(e.message || "Refresh failed", "error");
     } finally {
       setRefreshing(false);
     }
+  }
+
+  async function signOut() {
+    const ok = await ask({ title: "Sign out?", body: "You will need your password to continue.", confirmLabel: "Sign out" });
+    if (!ok) return;
+    await logout();
+    nav("/login");
   }
 
   const items = NAV.filter((n) => !n.perm || can(n.perm));
@@ -172,7 +212,7 @@ export default function Layout() {
           <X size={18} />
         </button>
       </div>
-      <nav className="px-3 flex-1 space-y-4 overflow-y-auto">
+      <nav className="px-3 flex-1 space-y-4 overflow-y-auto" aria-label="Main">
         {groups.map((g) => (
           <div key={g.group}>
             <div className="px-3 mb-1 text-[10px] uppercase tracking-wider text-slate-500">{g.group}</div>
@@ -197,10 +237,12 @@ export default function Layout() {
         ))}
       </nav>
       <div className="p-4 border-t border-white/5">
-        <div className="text-xs text-slate-400 mb-1 truncate">{user?.full_name}</div>
+        <NavLink to="/account" className="block text-xs text-slate-400 mb-1 truncate hover:text-white">
+          {user?.full_name || user?.username}
+        </NavLink>
         <div className="flex items-center justify-between">
           <span className="text-[11px] uppercase tracking-wider text-cyan-300/80">{user?.role}</span>
-          <button className="btn-ghost !text-slate-400 !px-2 !py-1" onClick={logout} title="Sign out" aria-label="Sign out">
+          <button className="btn-ghost !text-slate-400 !px-2 !py-1" onClick={signOut} title="Sign out" aria-label="Sign out">
             <LogOut size={16} />
           </button>
         </div>
@@ -210,6 +252,9 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen flex bg-slate-50 dark:bg-ink-900">
+      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-3 focus:rounded-lg focus:bg-white focus:px-3 focus:py-2">
+        Skip to content
+      </a>
       {menu && <button className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setMenu(false)} aria-label="Close menu overlay" />}
       <aside className="hidden lg:flex w-[250px] shrink-0 bg-ink-900 text-slate-200 flex-col border-r border-white/5">{sidebar}</aside>
       <aside
@@ -233,9 +278,11 @@ export default function Layout() {
           >
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
+              ref={searchRef}
+              id="global-search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search MRs, technicians, PO, remarks…"
+              placeholder="Search MRs, technicians, PO, remarks…  /"
               className="pl-9"
               aria-label="Search work orders"
             />
@@ -276,20 +323,36 @@ export default function Layout() {
                 </button>
               </>
             )}
-            {uploadMsg && (
-              <span className="hidden xl:inline max-w-[180px] truncate text-slate-500" title={uploadMsg}>
-                {uploadMsg}
-              </span>
-            )}
             <button className="btn-ghost !px-2" onClick={refresh} title="Refresh from Excel" aria-label="Refresh from Excel">
               <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
             </button>
             <button className="btn-ghost !px-2" onClick={toggle} title="Toggle theme" aria-label="Toggle theme">
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>
+            <div className="relative" ref={accountRef}>
+              <button
+                className="btn-ghost !px-2 inline-flex items-center gap-1"
+                onClick={() => setAccountOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={accountOpen}
+              >
+                <UserRound size={16} />
+                <ChevronDown size={12} className="hidden sm:block" />
+              </button>
+              {accountOpen && (
+                <div role="menu" className="absolute right-0 mt-2 w-52 card p-1 z-30">
+                  <button className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-white/5" onClick={() => nav("/account")}>
+                    Account
+                  </button>
+                  <button className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-white/5" onClick={signOut}>
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
-        <main className="flex-1 overflow-auto p-4 sm:p-6">
+        <main id="main" className="flex-1 overflow-auto p-4 sm:p-6">
           <ErrorBoundary>
             <Outlet />
           </ErrorBoundary>

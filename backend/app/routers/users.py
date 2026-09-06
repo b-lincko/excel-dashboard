@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 class UserCreate(BaseModel):
     username: str
-    password: str = Field(min_length=4)
+    password: str = Field(min_length=6)
     full_name: str = ""
     email: str = ""
     role: str = "user"

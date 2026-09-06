@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user',
     is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    last_login TEXT
 );
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,6 +92,9 @@ def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
         count = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        if "last_login" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
         if count == 0:
             for u in DEFAULT_USERS:
                 conn.execute(
@@ -128,9 +132,14 @@ def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
 def list_users() -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
-            "SELECT id, username, full_name, email, role, is_active, created_at FROM users ORDER BY id"
+            "SELECT id, username, full_name, email, role, is_active, created_at, last_login FROM users ORDER BY id"
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def touch_login(user_id: int) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (now_iso(), user_id))
 
 
 def create_user(username: str, full_name: str, email: str, password: str, role: str) -> dict[str, Any]:

@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import database
 from ..security import create_token, get_current_user, require_permission, verify_password
@@ -25,12 +25,36 @@ def login(body: LoginRequest):
     if not user.get("is_active"):
         raise HTTPException(status_code=403, detail="Account is disabled")
     token = create_token(user)
+    database.touch_login(user["id"])
+    user = database.get_user_by_id(user["id"]) or user
     database.add_audit(user["username"], "login", details="User signed in")
     return {
         "access_token": token,
         "token_type": "bearer",
         "user": public_user(user),
     }
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
+
+
+@router.post("/password")
+def change_password(body: PasswordChange, user=Depends(get_current_user)):
+    if not verify_password(body.current_password, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if body.current_password == body.new_password:
+        raise HTTPException(status_code=400, detail="New password must be different")
+    database.update_user(user["id"], password=body.new_password)
+    database.add_audit(user["username"], "password_change", details="User changed password")
+    return {"ok": True}
+
+
+@router.post("/logout")
+def logout(user=Depends(get_current_user)):
+    database.add_audit(user["username"], "logout", details="User signed out")
+    return {"ok": True}
 
 
 @router.get("/me")
@@ -67,4 +91,6 @@ def public_user(user: dict) -> dict:
         "email": user.get("email"),
         "role": user["role"],
         "is_active": bool(user.get("is_active")),
+        "last_login": user.get("last_login"),
+        "created_at": user.get("created_at"),
     }

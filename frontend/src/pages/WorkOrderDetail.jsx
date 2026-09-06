@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api } from "../lib/api.js";
+import { api, qs } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useUi } from "../context/UiContext.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 
 const FIELDS = [
@@ -38,6 +39,7 @@ export default function WorkOrderDetail() {
   const isNew = !id;
   const nav = useNavigate();
   const { can } = useAuth();
+  const { toast, ask } = useUi();
   const [form, setForm] = useState({});
   const [original, setOriginal] = useState({});
   const [options, setOptions] = useState({});
@@ -47,6 +49,12 @@ export default function WorkOrderDetail() {
   const [conflict, setConflict] = useState(null);
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState(null);
+  const [history, setHistory] = useState([]);
+
+  const dirty = useMemo(
+    () => FIELDS.some(([key]) => String(form[key] ?? "") !== String(original[key] ?? "")),
+    [form, original]
+  );
 
   useEffect(() => {
     api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
@@ -61,14 +69,45 @@ export default function WorkOrderDetail() {
         })
         .catch((e) => setError(e.message));
     } else {
-      setForm({
+      const initial = {
         status: "OPEN",
         priority: "MEDIUM",
         created_date: new Date().toISOString().slice(0, 16).replace("T", " "),
         department: "SH5-SH1",
-      });
+      };
+      setForm(initial);
+      setOriginal(initial);
     }
   }, [id, isNew]);
+
+  useEffect(() => {
+    if (isNew || !form.work_order_id || !can("audit")) return;
+    api
+      .get(`/api/audit${qs({ work_order_id: form.work_order_id, limit: 25 })}`)
+      .then((d) => setHistory(d.items || []))
+      .catch(() => {});
+  }, [form.work_order_id, isNew, can]);
+
+  useEffect(() => {
+    const onLeave = (e) => {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [dirty]);
+
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (can("edit") && !busy) save(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   function setField(k, v) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -83,6 +122,7 @@ export default function WorkOrderDetail() {
       if (isNew) {
         const d = await api.post("/api/work-orders", { data: form });
         setSuccess("Material request created and written to Excel.");
+        toast("Saved to Excel", "success");
         nav(`/work-orders/${encodeURIComponent(d.item.record_id || d.item.work_order_id)}`);
       } else {
         const skip = new Set([
@@ -113,6 +153,7 @@ export default function WorkOrderDetail() {
         setMeta(d.item);
         setSyncToken(d.sync_token);
         setSuccess("Excel workbook updated successfully.");
+        toast("Excel updated", "success");
       }
     } catch (e) {
       if (e.status === 409) {
@@ -131,11 +172,31 @@ export default function WorkOrderDetail() {
     }
   }
 
+  async function goBack() {
+    if (dirty) {
+      const ok = await ask({
+        title: "Discard unsaved changes?",
+        body: "Edits on this page have not been written to Excel.",
+        confirmLabel: "Discard",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    nav(-1);
+  }
+
   async function remove() {
-    if (!confirm(`Delete ${form.work_order_id || id} from the Excel workbook? A backup will be created first.`)) return;
+    const ok = await ask({
+      title: `Delete ${form.work_order_id || id}?`,
+      body: "This removes the row from the Excel workbook. A backup is written first.",
+      confirmLabel: "Delete from Excel",
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       await api.del(`/api/work-orders/${encodeURIComponent(id)}`);
+      toast("Deleted from Excel", "success");
       nav("/work-orders");
     } catch (e) {
       setError(e.message);
@@ -148,7 +209,7 @@ export default function WorkOrderDetail() {
     <div className="max-w-5xl mx-auto space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <button className="text-sm text-slate-500 mb-1" onClick={() => nav(-1)}>
+          <button className="text-sm text-slate-500 mb-1" onClick={goBack}>
             ← Back
           </button>
           <h1 className="text-2xl font-bold tracking-tight">
@@ -161,6 +222,7 @@ export default function WorkOrderDetail() {
             {form.department && <span className="text-xs text-slate-500">{form.department}</span>}
             {meta?.is_overdue && <StatusBadge value="Overdue" />}
             {meta?.aging_days != null && <span className="text-xs text-slate-500">Age {meta.aging_days} days</span>}
+            {dirty && <span className="text-xs text-amber-700 dark:text-amber-300">Unsaved changes</span>}
           </div>
         </div>
         <div className="flex gap-2">
@@ -170,7 +232,7 @@ export default function WorkOrderDetail() {
             </button>
           )}
           {can("edit") && (
-            <button className="btn-primary" onClick={() => save(false)} disabled={busy}>
+            <button className="btn-primary" onClick={() => save(false)} disabled={busy || (!isNew && !dirty)}>
               {busy ? "Saving to Excel…" : "Save to Excel"}
             </button>
           )}
@@ -242,8 +304,39 @@ export default function WorkOrderDetail() {
       </div>
       {!isNew && (
         <p className="text-xs text-slate-400">
-          Saving updates the matching row in file.xlsx (SN, due-date and hyperlink formulas are left untouched). A backup is written first.
+          Saving updates the matching row in file.xlsx (SN, due-date and hyperlink formulas are left untouched). A backup is written first. Ctrl/⌘+S to save.
         </p>
+      )}
+      {!isNew && can("audit") && (
+        <div className="card overflow-hidden">
+          <div className="px-4 py-3 font-semibold">Recent changes</div>
+          {history.length ? (
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>User</th>
+                  <th>Field</th>
+                  <th>Old</th>
+                  <th>New</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((r) => (
+                  <tr key={r.id} className="!cursor-default">
+                    <td className="font-mono text-xs">{r.created_at}</td>
+                    <td>{r.username}</td>
+                    <td>{r.field || r.action}</td>
+                    <td className="max-w-[200px] truncate text-slate-500">{r.old_value}</td>
+                    <td className="max-w-[200px] truncate">{r.new_value || r.details}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="px-4 pb-4 text-sm text-slate-500">No audit events for this work order yet.</div>
+          )}
+        </div>
       )}
     </div>
   );

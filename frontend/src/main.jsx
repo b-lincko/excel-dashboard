@@ -5,6 +5,7 @@ import App from "./App.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
+import { UiProvider } from "./context/UiContext.jsx";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -12,9 +13,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <ErrorBoundary>
       <BrowserRouter>
         <ThemeProvider>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
+          <UiProvider>
+            <AuthProvider>
+              <App />
+            </AuthProvider>
+          </UiProvider>
         </ThemeProvider>
       </BrowserRouter>
     </ErrorBoundary>

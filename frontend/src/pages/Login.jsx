@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 
@@ -9,13 +9,18 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const expired = useMemo(() => {
+    const reason = sessionStorage.getItem("woms_auth_reason");
+    if (reason === "expired") sessionStorage.removeItem("woms_auth_reason");
+    return reason === "expired";
+  }, []);
 
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
     setError("");
     try {
-      await login(username, password);
+      await login(username.trim(), password);
       nav("/");
     } catch (err) {
       setError(err.message || "Sign in failed");
@@ -55,6 +60,11 @@ export default function Login() {
         <form onSubmit={submit} className="w-full max-w-sm card p-8">
           <h2 className="text-xl font-bold">Sign in</h2>
           <p className="text-sm text-slate-500 mt-1 mb-6">Use your WOMS account to continue.</p>
+          {expired && !error && (
+            <div className="mb-4 rounded-lg bg-amber-50 text-amber-800 text-sm px-3 py-2 dark:bg-amber-500/10 dark:text-amber-200">
+              Your session expired. Sign in again to continue.
+            </div>
+          )}
           {error && (
             <div className="mb-4 rounded-lg bg-rose-50 text-rose-700 text-sm px-3 py-2 dark:bg-rose-500/10 dark:text-rose-300">
               {error}
@@ -74,6 +84,7 @@ export default function Login() {
             autoFocus
             autoComplete="username"
             name="username"
+            required
           />
           <label className="lbl">Password</label>
           <input
@@ -83,12 +94,13 @@ export default function Login() {
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             name="password"
+            required
           />
           <button className="btn-primary w-full" disabled={busy}>
             {busy ? "Signing in…" : "Sign in"}
           </button>
           <div className="mt-6 text-xs text-slate-500 space-y-1">
-            <div className="font-semibold text-slate-600 dark:text-slate-300">Demo accounts</div>
+            <div className="font-semibold text-slate-600 dark:text-slate-300">Built-in accounts</div>
             <div>admin / admin123 — full access</div>
             <div>manager / manager123 — edit & reports</div>
             <div>user / user123 — view & update</div>

@@ -81,9 +81,22 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
   const hadRows = useRef(false);
 
   useEffect(() => {
-    setFilters(fromSearch(loc.search, presetFlag));
+    const next = fromSearch(loc.search, presetFlag);
+    setFilters(next);
+    setQ(next.q || "");
     setPage(1);
   }, [loc.search, presetFlag]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setFilters((f) => {
+        if ((f.q || "") === q) return f;
+        setPage(1);
+        return { ...f, q };
+      });
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [q]);
 
   useEffect(() => {
     api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
@@ -200,6 +213,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
         value={filters}
         onChange={(v) => {
           setFilters(v);
+          if (!v.q) setQ("");
           setPage(1);
         }}
         options={options}

@@ -3,6 +3,12 @@ import { api, getToken, setToken } from "../lib/api.js";
 
 const AuthContext = createContext(null);
 
+const ROLE_PERMS = {
+  admin: ["view", "edit", "create", "delete", "reports", "analytics", "settings", "users", "audit", "backup"],
+  manager: ["view", "edit", "create", "reports", "analytics", "audit"],
+  user: ["view", "edit", "reports"],
+};
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -40,10 +46,16 @@ export function AuthProvider({ children }) {
     const data = await api.post("/api/auth/login", { username, password });
     setToken(data.access_token);
     setUser(data.user);
+    sessionStorage.removeItem("woms_auth_reason");
     return data.user;
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      if (getToken()) await api.post("/api/auth/logout");
+    } catch {
+      /* token may already be invalid */
+    }
     setToken(null);
     setUser(null);
   }
@@ -51,12 +63,7 @@ export function AuthProvider({ children }) {
   const can = (perm) => {
     if (!user) return false;
     if (user.role === "admin") return true;
-    const map = {
-      admin: ["view", "edit", "create", "delete", "reports", "analytics", "settings", "users", "audit", "backup"],
-      manager: ["view", "edit", "create", "reports", "analytics", "audit"],
-      user: ["view", "edit", "reports"],
-    };
-    return (map[user.role] || []).includes(perm);
+    return (ROLE_PERMS[user.role] || []).includes(perm);
   };
 
   const value = useMemo(() => ({ user, loading, login, logout, can }), [user, loading]);

@@ -8,31 +8,40 @@ export function setToken(token) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
-async function request(path, { method = "GET", body, headers, raw } = {}) {
+async function request(path, { method = "GET", body, headers, raw, timeoutMs = 60000 } = {}) {
   const token = getToken();
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? window.setTimeout(() => ctrl.abort(), timeoutMs) : null;
   let res;
   try {
     res = await fetch(path, {
-    method,
-    headers: {
-      ...(body && !raw ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...headers,
-    },
-    body: body && !raw ? JSON.stringify(body) : body,
-  });
+      method,
+      headers: {
+        ...(body && !raw ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...headers,
+      },
+      body: body && !raw ? JSON.stringify(body) : body,
+      signal: ctrl?.signal,
+    });
   } catch (e) {
+    const aborted = e?.name === "AbortError";
     const err = new Error(
-      "API is not running on port 8000. Keep the “Linkco MR API” window open (run.bat starts it)."
+      aborted
+        ? "The request timed out. Try again."
+        : "API is not running on port 8000. Keep the “Linkco MR API” window open (run.bat starts it)."
     );
     err.status = 0;
-    err.offline = true;
+    err.offline = !aborted;
     err.cause = e;
     throw err;
+  } finally {
+    if (timer) window.clearTimeout(timer);
   }
   if (res.status === 401) {
     setToken(null);
     if (!path.includes("/api/auth/login")) {
+      sessionStorage.setItem("woms_auth_reason", "expired");
       window.dispatchEvent(new Event("woms:unauthorized"));
     }
   }
@@ -60,7 +69,7 @@ export const api = {
   post: (path, body) => request(path, { method: "POST", body }),
   put: (path, body) => request(path, { method: "PUT", body }),
   del: (path) => request(path, { method: "DELETE" }),
-  upload: (path, formData) => request(path, { method: "POST", body: formData, raw: true }),
+  upload: (path, formData) => request(path, { method: "POST", body: formData, raw: true, timeoutMs: 120000 }),
   download: async (path, filename) => {
     const token = getToken();
     const res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });

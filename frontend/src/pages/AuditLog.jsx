@@ -6,12 +6,17 @@ export default function AuditLog() {
   const [total, setTotal] = useState(0);
   const [wo, setWo] = useState("");
   const [user, setUser] = useState("");
+  const [loading, setLoading] = useState(true);
 
   function load() {
-    api.get(`/api/audit${qs({ work_order_id: wo, username: user, limit: 300 })}`).then((d) => {
-      setItems(d.items || []);
-      setTotal(d.total || 0);
-    });
+    setLoading(true);
+    api
+      .get(`/api/audit${qs({ work_order_id: wo, username: user, limit: 300 })}`)
+      .then((d) => {
+        setItems(d.items || []);
+        setTotal(d.total || 0);
+      })
+      .finally(() => setLoading(false));
   }
   useEffect(load, []);
 
@@ -21,13 +26,39 @@ export default function AuditLog() {
         <h1 className="text-2xl font-bold tracking-tight">Audit log</h1>
         <p className="text-sm text-slate-500">{total} events stored separately from the Excel workbook.</p>
       </div>
-      <div className="flex gap-3">
+      <form
+        className="flex flex-wrap gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          load();
+        }}
+      >
         <input placeholder="Work order ID" value={wo} onChange={(e) => setWo(e.target.value)} className="max-w-xs" />
         <input placeholder="Username" value={user} onChange={(e) => setUser(e.target.value)} className="max-w-xs" />
-        <button className="btn-primary" onClick={load}>
+        <button className="btn-primary" type="submit">
           Filter
         </button>
-      </div>
+        {(wo || user) && (
+          <button
+            type="button"
+            className="btn-outline"
+            onClick={() => {
+              setWo("");
+              setUser("");
+              setLoading(true);
+              api
+                .get(`/api/audit${qs({ limit: 300 })}`)
+                .then((d) => {
+                  setItems(d.items || []);
+                  setTotal(d.total || 0);
+                })
+                .finally(() => setLoading(false));
+            }}
+          >
+            Clear
+          </button>
+        )}
+      </form>
       <div className="card overflow-hidden">
         <table className="data">
           <thead>
@@ -53,6 +84,13 @@ export default function AuditLog() {
                 <td className="max-w-[200px] truncate">{r.new_value || r.details}</td>
               </tr>
             ))}
+            {!loading && !items.length && (
+              <tr className="!cursor-default">
+                <td colSpan={7} className="text-center text-slate-400 py-10">
+                  No audit events match these filters.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

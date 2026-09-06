@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useUi } from "../context/UiContext.jsx";
 
 export default function Settings() {
   const { can } = useAuth();
+  const { toast, ask } = useUi();
   const [cfg, setCfg] = useState(null);
   const [sync, setSync] = useState(null);
   const [backups, setBackups] = useState([]);
-  const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   function load() {
     api.get("/api/settings").then((d) => {
@@ -21,13 +23,30 @@ export default function Settings() {
 
   async function save() {
     setError("");
+    setSaving(true);
     try {
       const d = await api.put("/api/settings", { values: cfg });
       setCfg(d.settings);
-      setMsg("Configuration saved.");
+      toast("Configuration saved", "success");
     } catch (e) {
       setError(e.message);
+    } finally {
+      setSaving(false);
     }
+  }
+
+  async function restore(b) {
+    const ok = await ask({
+      title: "Restore this backup?",
+      body: `${b.name}\nThe current workbook will be copied aside first.`,
+      confirmLabel: "Restore",
+      danger: true,
+    });
+    if (!ok) return;
+    await api.post("/api/settings/backups/restore", { path: b.path });
+    load();
+    toast("Backup restored", "success");
+    window.dispatchEvent(new CustomEvent("woms:data"));
   }
 
   if (!cfg) return <div className="text-sm text-slate-500">Loading settings…</div>;
@@ -40,7 +59,6 @@ export default function Settings() {
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
         <p className="text-sm text-slate-500">Excel location, column mapping and business rules.</p>
       </div>
-      {msg && <div className="text-sm text-emerald-700">{msg}</div>}
       {error && <div className="text-sm text-rose-600">{error}</div>}
 
       <div className="card p-5 space-y-3">
@@ -69,7 +87,7 @@ export default function Settings() {
           </div>
         </div>
         <div className="text-xs text-slate-500">
-          Status: {sync?.synchronized ? "✓ Synchronized" : "Not synchronized"} · {sync?.record_count} records · last write {sync?.last_write || "—"}
+          Status: {sync?.synchronized ? "Synchronized" : "Not synchronized"} · {sync?.record_count} records · last write {sync?.last_write || "—"}
         </div>
       </div>
 
@@ -97,8 +115,8 @@ export default function Settings() {
       </div>
 
       {can("settings") && (
-        <button className="btn-primary" onClick={save}>
-          Save configuration
+        <button className="btn-primary" onClick={save} disabled={saving}>
+          {saving ? "Saving…" : "Save configuration"}
         </button>
       )}
 
@@ -111,6 +129,7 @@ export default function Settings() {
               onClick={async () => {
                 await api.post("/api/settings/backups");
                 load();
+                toast("Backup created", "success");
               }}
             >
               Create backup now
@@ -132,20 +151,19 @@ export default function Settings() {
                   <td>{b.modified}</td>
                   <td>{Math.round(b.size / 1024)} KB</td>
                   <td>
-                    <button
-                      className="btn-outline !py-1 !px-2 text-xs"
-                      onClick={async () => {
-                        if (!confirm("Restore this backup? The current workbook will be copied aside first.")) return;
-                        await api.post("/api/settings/backups/restore", { path: b.path });
-                        load();
-                        setMsg("Backup restored.");
-                      }}
-                    >
+                    <button className="btn-outline !py-1 !px-2 text-xs" onClick={() => restore(b)}>
                       Restore
                     </button>
                   </td>
                 </tr>
               ))}
+              {!backups.length && (
+                <tr className="!cursor-default">
+                  <td colSpan={4} className="text-center text-slate-400 py-8">
+                    No backups yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
