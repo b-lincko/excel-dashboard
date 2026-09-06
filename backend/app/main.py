@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from . import database
 from .config import DATA_DIR
 from .excel.service import excel_service
-from .routers import audit, auth, dashboard, reports, settings, sync, users, work_orders
+from .routers import audit, auth, dashboard, ops, reports, settings, sync, users, work_orders
 
 app = FastAPI(
     title="Work Order Management System",
@@ -29,6 +29,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(work_orders.router)
 app.include_router(dashboard.router)
+app.include_router(ops.router)
 app.include_router(reports.router)
 app.include_router(audit.router)
 app.include_router(users.router)

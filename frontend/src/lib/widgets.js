@@ -40,6 +40,8 @@ export const CATALOG = [
 export const DEFAULT_LAYOUT = [
   { id: "progress", type: "progress", span: "full" },
   { id: "kpis_today", type: "kpis_today", span: "full" },
+  { id: "action_queue", type: "action_queue", span: "full" },
+  { id: "supplier_kpis", type: "supplier_kpis", span: "full" },
   { id: "kpis_totals", type: "kpis_totals", span: "full" },
   { id: "mindmap", type: "mindmap", span: "full" },
   { id: "chart_last_days", type: "chart_last_days", span: "2" },

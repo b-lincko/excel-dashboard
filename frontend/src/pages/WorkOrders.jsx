@@ -43,6 +43,8 @@ function fromSearch(search, presetFlag) {
     "assigned_to",
     "work_type",
     "delay_reason",
+    "supplier",
+    "issue",
     "flag",
     "aging",
     "reason",

@@ -60,6 +60,59 @@ def is_overdue(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optiona
     return due < (on or today())
 
 
+def is_ntp(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    return "ntp" in _norm(rec.get("status"))
+
+
+def is_on_hold(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    return "hold" in _norm(rec.get("status"))
+
+
+def is_delivered(rec: dict[str, Any]) -> bool:
+    return _norm(rec.get("issue") or rec.get("delay_reason")) == "delivered"
+
+
+def has_po(rec: dict[str, Any]) -> bool:
+    return bool(str(rec.get("po_number") or "").strip())
+
+
+def is_pending_po(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    return is_open(rec, cfg) and has_po(rec) and not is_delivered(rec)
+
+
+def is_awaiting_po(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    return is_open(rec, cfg) and not has_po(rec) and not is_delivered(rec)
+
+
+def eta_date(rec: dict[str, Any]) -> Optional[date]:
+    return to_date(rec.get("closed_date"))
+
+
+def is_eta_late(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optional[date] = None) -> bool:
+    if is_closed(rec, cfg) or is_delivered(rec):
+        return False
+    eta = eta_date(rec)
+    if not eta:
+        return False
+    return eta < (on or today())
+
+
+def is_due_this_week(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    if is_closed(rec, cfg):
+        return False
+    due = to_date(rec.get("due_date"))
+    if not due:
+        return False
+    t = today()
+    iso = t.isocalendar()
+    start, end = week_bounds(int(iso[0]), int(iso[1]))
+    return t <= due <= end.date()
+
+
+def is_created_today(rec: dict[str, Any]) -> bool:
+    return to_date(rec.get("created_date")) == today()
+
+
 def aging_days(rec: dict[str, Any], on: Optional[date] = None) -> Optional[int]:
     created = to_date(rec.get("created_date"))
     if not created:
@@ -115,6 +168,10 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
         return False
     if not in_list("delay_reason", filters.get("delay_reason")):
         return False
+    if not in_list("supplier", filters.get("supplier")):
+        return False
+    if not in_list("issue", filters.get("issue")):
+        return False
 
     bucket = filters.get("aging")
     if bucket:
@@ -134,6 +191,22 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
     if flag == "in_progress" and not is_in_progress(rec, cfg):
         return False
     if flag == "cancelled" and not is_cancelled(rec, cfg):
+        return False
+    if flag == "ntp" and not is_ntp(rec, cfg):
+        return False
+    if flag == "on_hold" and not is_on_hold(rec, cfg):
+        return False
+    if flag == "due_week" and not is_due_this_week(rec, cfg):
+        return False
+    if flag == "eta_late" and not is_eta_late(rec, cfg):
+        return False
+    if flag == "pending_po" and not is_pending_po(rec, cfg):
+        return False
+    if flag == "awaiting_po" and not is_awaiting_po(rec, cfg):
+        return False
+    if flag == "delivered" and not is_delivered(rec):
+        return False
+    if flag == "created_today" and not is_created_today(rec):
         return False
 
     q = (filters.get("q") or "").strip().lower()
@@ -253,4 +326,13 @@ def annotate(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> dict[str, 
         if due:
             out["days_overdue"] = (today() - due).days
     out["open_reason"] = reason_for_open(rec) if out["is_open"] else ""
+    out["is_ntp"] = is_ntp(rec, cfg)
+    out["is_on_hold"] = is_on_hold(rec, cfg)
+    out["is_delivered"] = is_delivered(rec)
+    out["is_pending_po"] = is_pending_po(rec, cfg)
+    out["is_awaiting_po"] = is_awaiting_po(rec, cfg)
+    out["is_eta_late"] = is_eta_late(rec, cfg)
+    out["is_due_this_week"] = is_due_this_week(rec, cfg)
+    eta = eta_date(rec)
+    out["days_to_eta"] = (eta - today()).days if eta else None
     return out

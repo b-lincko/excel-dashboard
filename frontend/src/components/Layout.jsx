@@ -8,6 +8,7 @@ import {
   FileText,
   FolderOpen,
   LayoutDashboard,
+  ListTodo,
   LogOut,
   Moon,
   Search,
@@ -17,6 +18,7 @@ import {
   Users,
   CheckCircle2,
   RefreshCw,
+  Truck,
   Upload,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -29,6 +31,8 @@ const NAV = [
   { to: "/open", label: "Open Orders", icon: FolderOpen },
   { to: "/overdue", label: "Overdue", icon: AlertTriangle },
   { to: "/closed", label: "Closed Orders", icon: CheckCircle2 },
+  { to: "/queue", label: "Action queue", icon: ListTodo },
+  { to: "/suppliers", label: "Suppliers / PO", icon: Truck },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/reports", label: "Reports", icon: FileText },
   { to: "/audit", label: "Audit Log", icon: Shield, perm: "audit" },

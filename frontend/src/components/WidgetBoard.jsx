@@ -61,7 +61,7 @@ function spanClass(span) {
   return "lg:col-span-1";
 }
 
-function GroupTable({ title, rows, onRow, columns }) {
+function GroupTable({ title, rows, onRow, columns, showRate = true }) {
   return (
     <div className="card overflow-hidden h-full">
       <div className="px-4 py-3 font-semibold border-b border-slate-100 dark:border-white/5">{title}</div>
@@ -81,8 +81,8 @@ function GroupTable({ title, rows, onRow, columns }) {
                 <td>{r.total}</td>
                 <td>{r.open}</td>
                 <td>{r.closed}</td>
-                {"overdue" in r ? <td className={r.overdue ? "text-rose-600 font-semibold" : ""}>{r.overdue}</td> : null}
-                {"completion_rate" in r ? <td>{r.completion_rate}%</td> : null}
+                <td className={r.overdue ? "text-rose-600 font-semibold" : ""}>{r.overdue}</td>
+                {showRate ? <td>{r.completion_rate}%</td> : null}
               </tr>
             ))}
           </tbody>
@@ -143,6 +143,30 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
             <KPICard label="Overdue" value={k.overdue} icon={AlertTriangle} accent="rose" onClick={() => go({ flag: "overdue" })} />
           </div>
         );
+      case "action_queue": {
+        const o = data?.ops || {};
+        return (
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            <KPICard label="Overdue" value={o.overdue} icon={AlertTriangle} accent="rose" onClick={() => go({ flag: "overdue" })} />
+            <KPICard label="UNDER NTP" value={o.ntp} icon={Ban} accent="amber" onClick={() => go({ flag: "ntp" })} />
+            <KPICard label="ON HOLD" value={o.on_hold} icon={Hourglass} accent="amber" onClick={() => go({ flag: "on_hold" })} />
+            <KPICard label="Due this week" value={o.due_this_week} icon={Timer} accent="sky" onClick={() => go({ flag: "due_week" })} />
+            <KPICard label="Jobs in today" value={o.created_today} icon={ClipboardList} accent="brand" onClick={() => go({ flag: "created_today" })} />
+            <KPICard label="ETA missed" value={o.eta_late} icon={Truck} accent="rose" onClick={() => go({ flag: "eta_late" })} />
+          </div>
+        );
+      }
+      case "supplier_kpis": {
+        const o = data?.ops || {};
+        return (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KPICard label="Suppliers" value={o.suppliers} icon={ClipboardList} accent="brand" onClick={() => nav("/suppliers")} />
+            <KPICard label="Pending POs" value={o.pending_po} icon={Truck} accent="sky" onClick={() => go({ flag: "pending_po" })} />
+            <KPICard label="Awaiting PO" value={o.awaiting_po} icon={Hourglass} accent="amber" onClick={() => go({ flag: "awaiting_po" })} />
+            <KPICard label="ETA missed" value={o.eta_late} icon={AlertTriangle} accent="rose" onClick={() => go({ flag: "eta_late" })} />
+          </div>
+        );
+      }
       case "kpis_totals":
         return (
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">

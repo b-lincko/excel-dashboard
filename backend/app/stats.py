@@ -23,6 +23,7 @@ from .domain import (
     today,
 )
 from .excel.service import excel_service
+from .ops import ops_counts
 
 _DASH_LOCK = threading.Lock()
 _DASH_CACHE: dict[str, Any] = {"token": "", "key": "", "payload": None}
@@ -486,7 +487,7 @@ def _filter_key(filters: dict[str, Any]) -> str:
 
 
 def _options_from(records: list[dict[str, Any]]) -> dict[str, list[str]]:
-    fields = ["status", "priority", "department", "location", "assigned_to", "work_type", "delay_reason", "issue"]
+    fields = ["status", "priority", "department", "location", "assigned_to", "work_type", "delay_reason", "issue", "supplier"]
     out: dict[str, list[str]] = {}
     for field in fields:
         vals = {str(r.get(field)).strip() for r in records if str(r.get(field) or "").strip()}
@@ -525,6 +526,7 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
         "last_days": last_days(all_records, 14),
         "trend": trend(all_records, 12),
         "recent": [annotate(r, cfg) for r in recent],
+        "ops": ops_counts(records),
         "options": _options_from(all_records),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "as_of": t.isoformat(),
@@ -560,6 +562,8 @@ def parse_query_filters(params: dict[str, Any]) -> dict[str, Any]:
         "assigned_to": as_list(params.get("assigned_to")),
         "work_type": as_list(params.get("work_type")),
         "delay_reason": as_list(params.get("delay_reason")),
+        "supplier": as_list(params.get("supplier")),
+        "issue": as_list(params.get("issue")),
         "flag": params.get("flag") or "",
         "aging": params.get("aging") or "",
         "reason": params.get("reason") or "",

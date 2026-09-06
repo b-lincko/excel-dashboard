@@ -98,3 +98,33 @@ table.data tbody tr {
 .widget-edit {
   @apply rounded-2xl ring-1 ring-dashed ring-brand-400/80 p-1;
 }
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  main {
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+  .print-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  body {
+    background: white !important;
+  }
+  .card {
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0 !important;
+  }
+}

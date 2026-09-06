@@ -58,6 +58,8 @@ def list_work_orders(
     assigned_to: Optional[str] = None,
     work_type: Optional[str] = None,
     delay_reason: Optional[str] = None,
+    supplier: Optional[str] = None,
+    issue: Optional[str] = None,
     flag: Optional[str] = None,
     aging: Optional[str] = None,
     reason: Optional[str] = None,

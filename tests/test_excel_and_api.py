@@ -211,6 +211,38 @@ def test_ping_and_week_filter(workbook):
     assert weekly.json()["kpis"]["total"] == week.json()["total"]
 
 
+def test_ops_queue_and_suppliers(workbook):
+    from app.main import app
+    from app import database
+    from app.excel.service import excel_service
+    from app.domain import is_ntp, is_open, is_overdue, is_pending_po
+
+    database.init_db()
+    excel_service.invalidate()
+    _, svc = workbook
+    recs = svc.get_all(force=True)
+    client = TestClient(app)
+    token = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    queue = client.get("/api/ops/queue", headers=headers)
+    assert queue.status_code == 200
+    body = queue.json()
+    assert body["counts"]["overdue"] == sum(1 for r in recs if is_overdue(r))
+    assert body["counts"]["ntp"] == sum(1 for r in recs if is_ntp(r) and is_open(r))
+    assert "overdue" in body["queues"]
+    ntp = client.get("/api/work-orders?flag=ntp&page_size=5", headers=headers)
+    assert ntp.status_code == 200
+    assert ntp.json()["total"] == body["counts"]["ntp"]
+    suppliers = client.get("/api/ops/suppliers", headers=headers)
+    assert suppliers.status_code == 200
+    sbody = suppliers.json()
+    assert sbody["kpis"]["pending_po"] == sum(1 for r in recs if is_pending_po(r))
+    assert sbody["suppliers"]
+    pending = client.get("/api/work-orders?flag=pending_po&page_size=5", headers=headers)
+    assert pending.status_code == 200
+    assert pending.json()["total"] == sbody["kpis"]["pending_po"]
+
+
 def test_preserve_other_sheets(workbook):
     from openpyxl import load_workbook
     from openpyxl.worksheet.formula import ArrayFormula

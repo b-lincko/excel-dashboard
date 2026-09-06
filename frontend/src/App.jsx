@@ -6,6 +6,8 @@ import Dashboard from "./pages/Dashboard.jsx";
 import WorkOrders from "./pages/WorkOrders.jsx";
 import WorkOrderDetail from "./pages/WorkOrderDetail.jsx";
 import Analytics from "./pages/Analytics.jsx";
+import ActionQueue from "./pages/ActionQueue.jsx";
+import Suppliers from "./pages/Suppliers.jsx";
 import Reports from "./pages/Reports.jsx";
 import Settings from "./pages/Settings.jsx";
 import AuditLog from "./pages/AuditLog.jsx";
@@ -49,6 +51,8 @@ export default function App() {
         <Route path="closed" element={<WorkOrders presetFlag="closed" title="Closed Work Orders" />} />
         <Route path="pending" element={<WorkOrders presetFlag="pending" title="Pending Work Orders" />} />
         <Route path="analytics" element={<Analytics />} />
+        <Route path="queue" element={<ActionQueue />} />
+        <Route path="suppliers" element={<Suppliers />} />
         <Route path="reports" element={<Reports />} />
         <Route path="audit" element={<AuditLog />} />
         <Route path="users" element={<Users />} />
