@@ -1,3 +1,5 @@
+name: linkco-mr
+
 services:
   woms:
     build: .
