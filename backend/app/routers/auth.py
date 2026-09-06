@@ -11,6 +11,7 @@ from ..security import (
     GUEST_PAGES,
     VALID_ROLES,
     create_token,
+    editable_fields,
     get_current_user,
     parse_extra_permissions,
     require_permission,
@@ -107,4 +108,5 @@ def public_user(user: dict) -> dict:
         "extra_permissions": extra,
         "guest_pages": GUEST_PAGES,
         "roles": sorted(VALID_ROLES),
+        "editable_fields": editable_fields(user),
     }

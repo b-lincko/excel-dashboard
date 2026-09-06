@@ -51,7 +51,7 @@ export default function WorkOrderDetail() {
   const { id } = useParams();
   const isNew = !id;
   const nav = useNavigate();
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const { toast, ask } = useUi();
   const [form, setForm] = useState({});
   const [original, setOriginal] = useState({});
@@ -70,6 +70,9 @@ export default function WorkOrderDetail() {
   const [fileNote, setFileNote] = useState("");
   const [watching, setWatching] = useState(false);
   const [watchers, setWatchers] = useState([]);
+  const [editable, setEditable] = useState(null);
+  const [chat, setChat] = useState([]);
+  const [chatBody, setChatBody] = useState("");
   const attachRef = useRef(null);
 
   const dirty = useMemo(() => {
@@ -80,6 +83,12 @@ export default function WorkOrderDetail() {
   const dueDays = dueOffsets[String(form.work_type || "").trim().toLowerCase()];
   const readOnly = isNew ? !can("create") : !can("edit");
   const canSave = isNew ? can("create") : can("edit");
+  function fieldLocked(key, lock) {
+    if (lock || readOnly) return true;
+    if (isNew) return false;
+    if (!editable) return false;
+    return !editable.includes(key);
+  }
 
   useEffect(() => {
     api
@@ -87,6 +96,7 @@ export default function WorkOrderDetail() {
       .then((d) => {
         setOptions(d.options || {});
         if (d.due_offsets) setDueOffsets(d.due_offsets);
+        if (d.editable_fields) setEditable(d.editable_fields);
       })
       .catch(() => {});
     if (!isNew) {
@@ -105,6 +115,10 @@ export default function WorkOrderDetail() {
               setWatching(!!w.watching);
               setWatchers(w.watchers || []);
             })
+            .catch(() => {});
+          api
+            .get(`/api/work-orders/${encodeURIComponent(rid)}/chat`)
+            .then((c) => setChat(c.items || []))
             .catch(() => {});
         })
         .catch((e) => setError(e.message));
@@ -358,7 +372,7 @@ export default function WorkOrderDetail() {
             <label className="lbl">{label}</label>
             {type === "textarea" ? (
               <>
-                <textarea rows={3} value={form[key] || ""} disabled={readOnly} onChange={(e) => setField(key, e.target.value)} />
+                <textarea rows={3} value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)} />
                 {key === "remarks" && (
                   <p className="text-[11px] text-slate-500 mt-1">Type @username in remarks to ping that person. Followers are notified on save.</p>
                 )}
@@ -373,7 +387,7 @@ export default function WorkOrderDetail() {
               </select>
             ) : type === "supplier" ? (
               <div className="space-y-2">
-                <select value={form.supplier || ""} disabled={readOnly} onChange={(e) => setField("supplier", e.target.value)}>
+                <select value={form.supplier || ""} disabled={fieldLocked("supplier")} onChange={(e) => setField("supplier", e.target.value)}>
                   <option value="">—</option>
                   {(options.supplier || []).map((o) => (
                     <option key={o} value={o}>
@@ -381,12 +395,12 @@ export default function WorkOrderDetail() {
                     </option>
                   ))}
                 </select>
-                {!readOnly && !addingSupplier && (
+                {!fieldLocked("supplier") && !addingSupplier && (
                   <button type="button" className="btn-outline !py-1 !px-2 text-xs" onClick={() => setAddingSupplier(true)}>
                     + Add supplier
                   </button>
                 )}
-                {addingSupplier && !readOnly && (
+                {addingSupplier && !fieldLocked("supplier") && (
                   <div className="flex gap-2">
                     <input
                       value={newSupplier}
@@ -404,7 +418,7 @@ export default function WorkOrderDetail() {
                 )}
               </div>
             ) : ["status", "priority", "assigned_to", "work_type", "issue"].includes(type) ? (
-              <select value={form[key] || ""} disabled={readOnly} onChange={(e) => setField(key, e.target.value)}>
+              <select value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)}>
                 <option value="">—</option>
                 {(options[type] || []).map((o) => (
                   <option key={o} value={o}>
@@ -415,14 +429,14 @@ export default function WorkOrderDetail() {
             ) : type === "datetime" ? (
               <input
                 type="datetime-local"
-                disabled={lock || readOnly}
+                disabled={fieldLocked(key, lock)}
                 value={toInput(form[key])}
                 onChange={(e) => setField(key, fromInput(e.target.value))}
               />
             ) : (
               <input
                 value={form[key] || ""}
-                disabled={(lock && !isNew) || readOnly}
+                disabled={(lock && !isNew) || fieldLocked(key)}
                 onChange={(e) => setField(key, e.target.value)}
               />
             )}
@@ -447,7 +461,7 @@ export default function WorkOrderDetail() {
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <label className="lbl">Delay type</label>
-              <select value={form.delay_kind || ""} disabled={readOnly} onChange={(e) => setField("delay_kind", e.target.value)}>
+              <select value={form.delay_kind || ""} disabled={fieldLocked("delay_kind")} onChange={(e) => setField("delay_kind", e.target.value)}>
                 <option value="">—</option>
                 <option value="placement">Placement delay</option>
                 <option value="delivery">Delivery delay</option>
@@ -455,7 +469,7 @@ export default function WorkOrderDetail() {
             </div>
             <div>
               <label className="lbl">Delay source</label>
-              <select value={form.delay_source || ""} disabled={readOnly} onChange={(e) => setField("delay_source", e.target.value)}>
+              <select value={form.delay_source || ""} disabled={fieldLocked("delay_source")} onChange={(e) => setField("delay_source", e.target.value)}>
                 <option value="">—</option>
                 <option value="site">Site</option>
                 <option value="procurement">Procurement</option>
@@ -467,11 +481,52 @@ export default function WorkOrderDetail() {
               <textarea
                 rows={3}
                 value={form.delay_justification || ""}
-                disabled={readOnly}
+                disabled={fieldLocked("delay_justification")}
                 onChange={(e) => setField("delay_justification", e.target.value)}
               />
             </div>
           </div>
+        </div>
+      )}
+      {!isNew && (
+        <div className="card p-5 space-y-3">
+          <div>
+            <div className="font-semibold">Work-order chat</div>
+            <p className="text-xs text-slate-500">Thread is tied to this MR. Followers and @mentions are notified. Messages stay in the app, not Excel.</p>
+          </div>
+          <div className="max-h-64 overflow-y-auto space-y-2">
+            {chat.map((m) => (
+              <div key={m.id} className={`text-sm ${m.username === user?.username ? "text-right" : ""}`}>
+                <div className="text-[11px] text-slate-500">
+                  {m.username} · {m.created_at}
+                </div>
+                <div className={`inline-block rounded-2xl px-3 py-1.5 whitespace-pre-wrap ${m.username === user?.username ? "bg-brand-700 text-white" : "bg-slate-100 dark:bg-white/5"}`}>
+                  {m.body}
+                </div>
+              </div>
+            ))}
+            {!chat.length && <div className="text-sm text-slate-500">No messages yet.</div>}
+          </div>
+          <form
+            className="flex gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const text = chatBody.trim();
+              if (!text) return;
+              try {
+                const d = await api.post(`/api/work-orders/${encodeURIComponent(id)}/chat`, { body: text });
+                setChat((prev) => [...prev, d.item]);
+                setChatBody("");
+              } catch (err) {
+                setError(err.message);
+              }
+            }}
+          >
+            <input value={chatBody} onChange={(e) => setChatBody(e.target.value)} placeholder="Message this MR… @username to ping" autoComplete="off" />
+            <button className="btn-primary" disabled={!chatBody.trim()}>
+              Send
+            </button>
+          </form>
         </div>
       )}
       {!isNew && (

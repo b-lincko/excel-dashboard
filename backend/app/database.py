@@ -154,6 +154,22 @@ CREATE TABLE IF NOT EXISTS saved_views (
     filters TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS handovers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    department TEXT,
+    shift TEXT,
+    notes TEXT,
+    snapshot TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS queue_seen (
+    record_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (record_id, username)
+);
+CREATE INDEX IF NOT EXISTS idx_seen_record ON queue_seen(record_id);
 """
 
 DEFAULT_USERS = [
@@ -209,6 +225,12 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
         if "extra_permissions" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN extra_permissions TEXT")
+        chat_cols = {r[1] for r in conn.execute("PRAGMA table_info(chat_threads)")}
+        if "record_id" not in chat_cols:
+            conn.execute("ALTER TABLE chat_threads ADD COLUMN record_id TEXT")
+        if "work_order_id" not in chat_cols:
+            conn.execute("ALTER TABLE chat_threads ADD COLUMN work_order_id TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_record ON chat_threads(record_id)")
         general = conn.execute("SELECT id FROM chat_threads WHERE kind = 'channel' AND title = 'General'").fetchone()
         if not general:
             conn.execute(
@@ -582,7 +604,7 @@ def list_chat_threads(username: str) -> list[dict[str, Any]]:
                       (SELECT COUNT(*) FROM chat_messages m WHERE m.thread_id = t.id) AS message_count
                FROM chat_threads t
                LEFT JOIN chat_members cm ON cm.thread_id = t.id AND cm.username = ?
-               WHERE t.kind = 'channel' OR cm.username IS NOT NULL
+               WHERE t.kind IN ('channel', 'work_order') OR cm.username IS NOT NULL
                ORDER BY COALESCE(last_at, t.created_at) DESC""",
             (username,),
         ).fetchall()
@@ -607,16 +629,24 @@ def user_can_access_thread(thread_id: int, username: str) -> bool:
     thread = get_chat_thread(thread_id)
     if not thread:
         return False
-    if thread.get("kind") == "channel":
+    if thread.get("kind") in {"channel", "work_order"}:
         return True
     return username in (thread.get("members") or [])
 
 
-def create_chat_thread(kind: str, title: str, created_by: str, members: Optional[list[str]] = None) -> dict[str, Any]:
+def create_chat_thread(
+    kind: str,
+    title: str,
+    created_by: str,
+    members: Optional[list[str]] = None,
+    record_id: str = "",
+    work_order_id: str = "",
+) -> dict[str, Any]:
     with connect() as conn:
         cur = conn.execute(
-            "INSERT INTO chat_threads (kind, title, created_at, created_by) VALUES (?, ?, ?, ?)",
-            (kind, title, now_iso(), created_by),
+            """INSERT INTO chat_threads (kind, title, created_at, created_by, record_id, work_order_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (kind, title, now_iso(), created_by, record_id or None, work_order_id or None),
         )
         tid = int(cur.lastrowid)
         people = set(members or [])
@@ -648,6 +678,23 @@ def get_or_create_dm(username: str, other: str) -> dict[str, Any]:
             assert item is not None
             return item
     return create_chat_thread("direct", title, username, [a, b])
+
+
+def get_or_create_wo_thread(record_id: str, work_order_id: str, created_by: str) -> dict[str, Any]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        raise ValueError("record_id is required")
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM chat_threads WHERE kind = 'work_order' AND record_id = ?",
+            (rid,),
+        ).fetchone()
+        if row:
+            item = get_chat_thread(int(row["id"]))
+            assert item is not None
+            return item
+    wo = str(work_order_id or "").strip() or rid
+    return create_chat_thread("work_order", f"WO {wo}", created_by, record_id=rid, work_order_id=wo)
 
 
 def add_chat_message(thread_id: int, username: str, body: str) -> dict[str, Any]:
@@ -985,6 +1032,89 @@ def delete_saved_view(view_id: int, username: str, *, admin: bool = False) -> bo
                 (view_id, username),
             )
         return cur.rowcount > 0
+
+
+def create_handover(
+    username: str,
+    notes: str,
+    snapshot: dict[str, Any],
+    department: str = "",
+    shift: str = "",
+) -> dict[str, Any]:
+    payload = json.dumps(snapshot or {}, default=str)
+    with connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO handovers (username, department, shift, notes, snapshot, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (username, department or "", shift or "", notes or "", payload, now_iso()),
+        )
+        hid = int(cur.lastrowid)
+    item = get_handover(hid)
+    assert item is not None
+    return item
+
+
+def get_handover(handover_id: int) -> Optional[dict[str, Any]]:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM handovers WHERE id = ?", (handover_id,)).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    try:
+        item["snapshot"] = json.loads(item.get("snapshot") or "{}")
+    except json.JSONDecodeError:
+        item["snapshot"] = {}
+    return item
+
+
+def list_handovers(limit: int = 30) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit or 30), 100))
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM handovers ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["snapshot"] = json.loads(item.get("snapshot") or "{}")
+        except json.JSONDecodeError:
+            item["snapshot"] = {}
+        out.append(item)
+    return out
+
+
+def mark_queue_seen(record_id: str, username: str) -> dict[str, Any]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        raise ValueError("record_id is required")
+    ts = now_iso()
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO queue_seen (record_id, username, seen_at) VALUES (?, ?, ?)
+               ON CONFLICT(record_id, username) DO UPDATE SET seen_at = excluded.seen_at""",
+            (rid, username, ts),
+        )
+    return {"record_id": rid, "username": username, "seen_at": ts}
+
+
+def list_queue_seen(record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+    ids = [str(i) for i in record_ids if i]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT record_id, username, seen_at FROM queue_seen WHERE record_id IN ({placeholders}) ORDER BY seen_at",
+            ids,
+        ).fetchall()
+    out: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        out.setdefault(str(row["record_id"]), []).append(
+            {"username": row["username"], "seen_at": row["seen_at"]}
+        )
+    return out
 
 
 # Ensure schema exists for scripts/tests that never hit FastAPI startup.

@@ -164,6 +164,47 @@ export default function Settings() {
           />
           <p className="text-[11px] text-slate-500 mt-1">Default extra days when a type is missing: {cfg.due_offset_default_days ?? 14}. Excel due-date formulas are not overwritten.</p>
         </div>
+        <div>
+          <label className="lbl">Required fields by status</label>
+          <textarea
+            rows={4}
+            disabled={!can("settings")}
+            value={Object.entries(cfg.status_required_fields || {})
+              .map(([k, v]) => `${k}: ${(v || []).join(", ")}`)
+              .join("\n")}
+            onChange={(e) => {
+              const next = {};
+              e.target.value.split("\n").forEach((line) => {
+                const [k, v] = line.split(":");
+                if (!k || v == null) return;
+                const fields = v.split(",").map((s) => s.trim()).filter(Boolean);
+                if (fields.length) next[k.trim()] = fields;
+              });
+              setCfg({ ...cfg, status_required_fields: next });
+            }}
+          />
+          <p className="text-[11px] text-slate-500 mt-1">Example: PLACED: po_number. Uses internal field names from the mapping above.</p>
+        </div>
+        <div>
+          <label className="lbl">Who can edit which fields</label>
+          <textarea
+            rows={4}
+            disabled={!can("settings")}
+            value={Object.entries(cfg.field_edit_roles || {})
+              .map(([k, v]) => `${k}: ${(v || []).join(", ")}`)
+              .join("\n")}
+            onChange={(e) => {
+              const next = {};
+              e.target.value.split("\n").forEach((line) => {
+                const [k, v] = line.split(":");
+                if (!k || v == null) return;
+                next[k.trim()] = v.split(",").map((s) => s.trim()).filter(Boolean);
+              });
+              setCfg({ ...cfg, field_edit_roles: next });
+            }}
+          />
+          <p className="text-[11px] text-slate-500 mt-1">Example: supplier: admin, manager. Fields not listed can be edited by anyone with edit permission. Admin always can.</p>
+        </div>
       </div>
 
       {can("settings") && (
@@ -180,6 +221,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
   const [listing, setListing] = useState(null);
   const [busy, setBusy] = useState(false);
   const [newFolder, setNewFolder] = useState("");
+  const [rowRestore, setRowRestore] = useState(null);
   const days = cfg.backup_days?.length ? cfg.backup_days : [0, 1, 2, 3, 4, 5, 6];
 
   async function openBrowse(path) {
@@ -359,9 +401,17 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
               <td>{b.modified}</td>
               <td>{Math.round(b.size / 1024)} KB</td>
               <td>
-                <button className="btn-outline !py-1 !px-2 text-xs" onClick={() => onRestore(b)}>
-                  Restore
-                </button>
+                <div className="flex gap-1 justify-end">
+                  <button className="btn-outline !py-1 !px-2 text-xs" onClick={() => onRestore(b)}>
+                    Restore file
+                  </button>
+                  <button
+                    className="btn-outline !py-1 !px-2 text-xs"
+                    onClick={() => setRowRestore({ path: b.path, name: b.name, record_id: "", work_order_id: "", site: "", preview: null, busy: false })}
+                  >
+                    Restore row
+                  </button>
+                </div>
               </td>
             </tr>
           ))}
@@ -424,6 +474,123 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
                 }}
               >
                 Use this folder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rowRestore && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => setRowRestore(null)}>
+          <div className="card w-full max-w-lg p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="font-semibold">Restore one row from {rowRestore.name}</div>
+            <p className="text-xs text-slate-500">
+              Matches live Excel by record id, then WO # + site. Only mapped data fields are written; formula columns are skipped. The current workbook is backed up first.
+            </p>
+            <div>
+              <label className="lbl">Record id</label>
+              <input
+                value={rowRestore.record_id}
+                onChange={(e) => setRowRestore({ ...rowRestore, record_id: e.target.value })}
+                placeholder="SH5-SH1:12"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="lbl">IM WO #</label>
+                <input
+                  value={rowRestore.work_order_id}
+                  onChange={(e) => setRowRestore({ ...rowRestore, work_order_id: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="lbl">Site</label>
+                <input
+                  value={rowRestore.site}
+                  onChange={(e) => setRowRestore({ ...rowRestore, site: e.target.value })}
+                  placeholder="F5"
+                />
+              </div>
+            </div>
+            {rowRestore.preview && (
+              <div className="max-h-48 overflow-auto rounded-lg border border-slate-200 dark:border-white/10 text-sm">
+                {!(rowRestore.preview.diffs || []).length ? (
+                  <div className="px-3 py-4 text-slate-500">No mapped field differences.</div>
+                ) : (
+                  <table className="data">
+                    <thead>
+                      <tr>
+                        <th>Field</th>
+                        <th>Live</th>
+                        <th>Backup</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rowRestore.preview.diffs.map((d) => (
+                        <tr key={d.field} className="!cursor-default">
+                          <td>{d.field}</td>
+                          <td className="max-w-[140px] truncate text-slate-500">{d.current || "—"}</td>
+                          <td className="max-w-[140px] truncate">{d.backup || "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {!rowRestore.preview.matched_live && (
+                  <div className="px-3 py-2 text-xs text-rose-600">That row is not in the live workbook.</div>
+                )}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button className="btn-ghost" type="button" onClick={() => setRowRestore(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn-outline"
+                type="button"
+                disabled={rowRestore.busy || !(rowRestore.record_id || rowRestore.work_order_id)}
+                onClick={async () => {
+                  setRowRestore({ ...rowRestore, busy: true });
+                  try {
+                    const d = await api.post("/api/settings/backups/preview-row", {
+                      path: rowRestore.path,
+                      record_id: rowRestore.record_id,
+                      work_order_id: rowRestore.work_order_id,
+                      site: rowRestore.site,
+                    });
+                    setRowRestore((prev) => ({ ...prev, preview: d, busy: false }));
+                  } catch (e) {
+                    toast(e.message, "error");
+                    setRowRestore((prev) => ({ ...prev, busy: false }));
+                  }
+                }}
+              >
+                Preview
+              </button>
+              <button
+                className="btn-primary"
+                type="button"
+                disabled={rowRestore.busy || !rowRestore.preview?.matched_live}
+                onClick={async () => {
+                  setRowRestore({ ...rowRestore, busy: true });
+                  try {
+                    const d = await api.post("/api/settings/backups/restore-row", {
+                      path: rowRestore.path,
+                      record_id: rowRestore.record_id,
+                      work_order_id: rowRestore.work_order_id,
+                      site: rowRestore.site,
+                    });
+                    toast(d.unchanged ? "Row already matches the backup" : "Row restored from backup", "success");
+                    setRowRestore(null);
+                    onReload();
+                    window.dispatchEvent(new CustomEvent("woms:data"));
+                  } catch (e) {
+                    toast(e.message, "error");
+                    setRowRestore((prev) => ({ ...prev, busy: false }));
+                  }
+                }}
+              >
+                Restore row
               </button>
             </div>
           </div>

@@ -1,9 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import StatusBadge from "./StatusBadge.jsx";
 
-export default function OpsTable({ title, subtitle, rows, columns, empty, onRow, viewAll }) {
+export default function OpsTable({ title, subtitle, rows, columns, empty, onRow, viewAll, seen, onSeen }) {
   const nav = useNavigate();
-  const cols = columns || [
+  const baseCols = columns || [
     ["work_order_id", "IM WO #"],
     ["description", "Material"],
     ["department", "Site"],
@@ -14,6 +14,7 @@ export default function OpsTable({ title, subtitle, rows, columns, empty, onRow,
     ["due_date", "Due"],
     ["aging_days", "Age"],
   ];
+  const cols = seen ? [...baseCols, ["_seen", "Seen"]] : baseCols;
 
   function open(r) {
     if (onRow) return onRow(r);
@@ -61,6 +62,15 @@ export default function OpsTable({ title, subtitle, rows, columns, empty, onRow,
                       ) : (
                         "—"
                       )
+                    ) : k === "_seen" ? (
+                      <div className="flex items-center gap-2 no-print" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" className="btn-outline !py-0.5 !px-2 text-[11px]" onClick={() => onSeen?.(r)}>
+                          Mark seen
+                        </button>
+                        <span className="text-[11px] text-slate-500 truncate max-w-[120px]">
+                          {(r.seen_by || []).map((s) => s.username).join(", ") || "—"}
+                        </span>
+                      </div>
                     ) : (
                       r[k] ?? "—"
                     )}

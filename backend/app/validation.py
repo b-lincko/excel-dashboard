@@ -7,6 +7,10 @@ from .dates import parse_date
 from .domain import is_closed, is_open
 
 
+def _norm(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
 def validate_work_order(data: dict[str, Any], partial: bool = False) -> list[str]:
     cfg = load_config()
     errors: list[str] = []
@@ -41,4 +45,17 @@ def validate_work_order(data: dict[str, Any], partial: bool = False) -> list[str
                 errors.append("A closed/completed work order should have a completion or closing date.")
         if is_open(dummy, cfg) and closed and not cfg.allow_open_with_close_date:
             errors.append("An open work order should not have a closing date.")
+
+    required_map = getattr(cfg, "status_required_fields", None) or {}
+    needed: list[str] = []
+    if status:
+        for key, fields in required_map.items():
+            if _norm(key) == _norm(status):
+                needed = [str(f).strip() for f in (fields or []) if str(f).strip()]
+                break
+        labels = cfg.mapping.model_dump() if hasattr(cfg, "mapping") else {}
+        for field in needed:
+            if not str(data.get(field) or "").strip():
+                label = field if field not in labels else field
+                errors.append(f"Status {status} requires {label}.")
     return errors

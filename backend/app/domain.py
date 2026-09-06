@@ -86,6 +86,15 @@ def is_delivered(rec: dict[str, Any]) -> bool:
     return _norm(rec.get("issue") or rec.get("delay_reason")) == "delivered"
 
 
+def is_waiting_supplier(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    """Open MR still with a supplier (or delay source = supplier), not delivered."""
+    if is_closed(rec, cfg) or is_delivered(rec):
+        return False
+    if _norm(rec.get("delay_source")) == "supplier":
+        return True
+    return bool(str(rec.get("supplier") or "").strip()) and is_open(rec, cfg)
+
+
 def has_po(rec: dict[str, Any]) -> bool:
     return bool(str(rec.get("po_number") or "").strip())
 

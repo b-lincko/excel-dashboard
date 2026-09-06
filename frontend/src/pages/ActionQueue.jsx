@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Ban, Bell, CalendarClock, ClipboardList, PauseCircle, Printer, Truck } from "lucide-react";
 import { api, qs } from "../lib/api.js";
 import { goSearch, useLiveReload } from "../lib/live.js";
+import { useUi } from "../context/UiContext.jsx";
 import KPICard from "../components/KPICard.jsx";
 import OpsTable from "../components/OpsTable.jsx";
 import Filters from "../components/Filters.jsx";
@@ -117,10 +118,31 @@ const SECTIONS = [
 export default function ActionQueue() {
   const nav = useNavigate();
   const tick = useLiveReload();
+  const { toast } = useUi();
   const [filters, setFilters] = useState({});
   const [options, setOptions] = useState({});
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  async function markSeen(row) {
+    const rid = row.record_id || row.work_order_id;
+    if (!rid) return;
+    try {
+      const d = await api.post("/api/ops/seen", { record_id: rid });
+      setData((prev) => {
+        if (!prev?.queues) return prev;
+        const next = { ...prev, queues: {} };
+        Object.entries(prev.queues).forEach(([key, rows]) => {
+          next.queues[key] = (rows || []).map((r) =>
+            (r.record_id || r.work_order_id) === rid ? { ...r, seen_by: d.seen_by || [] } : r
+          );
+        });
+        return next;
+      });
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  }
 
   useEffect(() => {
     api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
@@ -186,6 +208,8 @@ export default function ActionQueue() {
           subtitle={s.hint}
           rows={data?.queues?.[s.id] || []}
           columns={s.cols}
+          seen
+          onSeen={markSeen}
           viewAll={() => go({ flag: s.flag })}
         />
       ))}

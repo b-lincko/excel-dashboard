@@ -28,6 +28,8 @@ from .domain import (
     is_pending_po,
     is_po_issued,
     is_rfq_sent,
+    is_status_open,
+    is_waiting_supplier,
     matches_filters,
     today,
 )
@@ -69,6 +71,7 @@ SLIM_KEYS = (
     "delay_kind",
     "on_time",
     "po_stage",
+    "seen_by",
 )
 
 
@@ -134,6 +137,19 @@ def queue_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     pending_po = _sort_date([r for r in records if is_pending_po(r, cfg)], "created_date", False)
     due_soon = _sort_date([r for r in records if is_due_soon(r, cfg)], "due_date", False)
 
+    queues = {
+        "overdue": _take(overdue, cfg),
+        "ntp": _take(ntp, cfg),
+        "on_hold": _take(on_hold, cfg),
+        "due_this_week": _take(due_week, cfg),
+        "due_soon": _take(due_soon, cfg),
+        "created_today": _take(created_today, cfg),
+        "done_today": _take(done_today, cfg),
+        "eta_late": _take(eta_late, cfg),
+        "pending_po": _take(pending_po, cfg),
+    }
+    _attach_seen(queues)
+
     return {
         "as_of": t.isoformat(),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -152,17 +168,42 @@ def queue_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
             "eta_late": len(eta_late),
             "pending_po": len(pending_po),
         },
-        "queues": {
-            "overdue": _take(overdue, cfg),
-            "ntp": _take(ntp, cfg),
-            "on_hold": _take(on_hold, cfg),
-            "due_this_week": _take(due_week, cfg),
-            "due_soon": _take(due_soon, cfg),
-            "created_today": _take(created_today, cfg),
-            "done_today": _take(done_today, cfg),
-            "eta_late": _take(eta_late, cfg),
-            "pending_po": _take(pending_po, cfg),
+        "queues": queues,
+    }
+
+
+def _attach_seen(queues: dict[str, list[dict[str, Any]]]) -> None:
+    ids: list[str] = []
+    for items in queues.values():
+        for rec in items:
+            rid = str(rec.get("record_id") or "")
+            if rid:
+                ids.append(rid)
+    seen = database.list_queue_seen(ids)
+    for items in queues.values():
+        for rec in items:
+            rec["seen_by"] = seen.get(str(rec.get("record_id") or ""), [])
+
+
+def handover_snapshot(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    cfg = load_config()
+    records = _filtered(excel_service.get_all(), filters or {})
+    still_open = _sort_date([r for r in records if is_status_open(r, cfg)], "created_date", False)
+    waiting_ntp = _sort_date([r for r in records if is_ntp(r) and is_open(r, cfg)], "created_date", False)
+    waiting_supplier = _sort_date([r for r in records if is_waiting_supplier(r, cfg)], "created_date", False)
+    return {
+        "as_of": today().isoformat(),
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "sync_token": excel_service.sync_token(),
+        "count": len(records),
+        "counts": {
+            "still_open": len(still_open),
+            "waiting_ntp": len(waiting_ntp),
+            "waiting_supplier": len(waiting_supplier),
         },
+        "still_open": _take(still_open, cfg, 40),
+        "waiting_ntp": _take(waiting_ntp, cfg, 40),
+        "waiting_supplier": _take(waiting_supplier, cfg, 40),
     }
 
 

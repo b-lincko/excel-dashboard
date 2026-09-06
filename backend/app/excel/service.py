@@ -488,6 +488,272 @@ class ExcelService:
             shutil.copy2(src, self.excel_path())
         self.invalidate()
 
+    def _resolve_backup(self, backup_path: str) -> Path:
+        src = Path(backup_path).expanduser().resolve()
+        root = self.backup_dir().resolve()
+        try:
+            inside = src.is_relative_to(root)
+        except AttributeError:
+            inside = str(src).startswith(str(root))
+        if not inside or not src.is_file():
+            raise FileNotFoundError("Backup file not found")
+        return src
+
+    def records_from_path(self, path: Path) -> list[dict[str, Any]]:
+        wb = load_workbook(path, data_only=False, read_only=True)
+        try:
+            recs: list[dict[str, Any]] = []
+            for sheet_name in self.data_sheets(wb):
+                _, rows = self._read_sheet_records(wb[sheet_name], sheet_name)
+                recs.extend(rows)
+            return recs
+        finally:
+            wb.close()
+
+    def match_record(
+        self,
+        recs: list[dict[str, Any]],
+        record_id: str = "",
+        work_order_id: str = "",
+        site: str = "",
+    ) -> Optional[dict[str, Any]]:
+        rid = str(record_id or "").strip()
+        if rid:
+            hit = next((r for r in recs if str(r.get("record_id") or "") == rid), None)
+            if hit:
+                return hit
+        wo = str(work_order_id or "").strip()
+        site_key = str(site or "").strip()
+        if wo and site_key:
+            hits = [
+                r
+                for r in recs
+                if str(r.get("work_order_id") or "").strip() == wo
+                and str(r.get("department") or r.get("_site") or "").strip() == site_key
+            ]
+            if len(hits) == 1:
+                return hits[0]
+        if wo:
+            hits = [r for r in recs if str(r.get("work_order_id") or "").strip() == wo]
+            if len(hits) == 1:
+                return hits[0]
+        return None
+
+    def preview_restore_row(
+        self,
+        backup_path: str,
+        record_id: str = "",
+        work_order_id: str = "",
+        site: str = "",
+    ) -> dict[str, Any]:
+        src = self._resolve_backup(backup_path)
+        backup_recs = self.records_from_path(src)
+        backup = self.match_record(backup_recs, record_id, work_order_id, site)
+        if not backup:
+            raise KeyError("That row was not found in the backup workbook.")
+        live = self.match_record(
+            self.get_all(),
+            str(backup.get("record_id") or record_id or ""),
+            str(backup.get("work_order_id") or work_order_id or ""),
+            str(backup.get("department") or backup.get("_site") or site or ""),
+        )
+        fields = [k for k in self.cfg().mapping.model_dump().keys() if k != "due_date"]
+        diffs = []
+        for field in fields:
+            current = "" if not live else ("" if live.get(field) is None else str(live.get(field)))
+            previous = "" if backup.get(field) is None else str(backup.get(field))
+            if current != previous:
+                diffs.append({"field": field, "current": current, "backup": previous})
+        keys = ["record_id", "work_order_id", "department", "_site", "_sheet", "_row", *fields]
+        slim = lambda rec: {k: rec.get(k) for k in keys} if rec else None
+        return {
+            "backup": slim(backup),
+            "current": slim(live),
+            "diffs": diffs,
+            "matched_live": bool(live),
+        }
+
+    def restore_row_from_backup(
+        self,
+        backup_path: str,
+        username: str,
+        record_id: str = "",
+        work_order_id: str = "",
+        site: str = "",
+    ) -> dict[str, Any]:
+        preview = self.preview_restore_row(backup_path, record_id, work_order_id, site)
+        live = preview.get("current")
+        if not live:
+            raise KeyError("That work order is not in the live workbook, so a single row cannot be restored.")
+        changes = {d["field"]: d["backup"] for d in preview.get("diffs") or []}
+        if not changes:
+            return {"item": self.get_by_id(str(live.get("record_id"))), "unchanged": True, "preview": preview}
+        updated = self.update_record(str(live.get("record_id")), changes, username=username, force=True)
+        return {"item": updated, "unchanged": False, "preview": preview, "restored_fields": list(changes)}
+
+    def health_scan(self, sample: int = 40) -> dict[str, Any]:
+        """Raw sheet scan — includes blank WO IDs that the normal reader skips."""
+        from ..domain import is_open
+
+        cfg = self.cfg()
+        sample = max(1, min(int(sample or 40), 200))
+        formula_headers = self._formula_header_set()
+        mapping = cfg.mapping.excel_to_internal()
+        missing_id: list[dict[str, Any]] = []
+        blank_assign: list[dict[str, Any]] = []
+        blank_status: list[dict[str, Any]] = []
+        overwritten: list[dict[str, Any]] = []
+        missing_formula: list[dict[str, Any]] = []
+        duplicates: list[dict[str, Any]] = []
+        counts = {
+            "missing_id": 0,
+            "blank_assign": 0,
+            "blank_status": 0,
+            "overwritten_formula": 0,
+            "missing_formula": 0,
+            "duplicate_id": 0,
+        }
+        seen_ids: dict[tuple[str, str], int] = {}
+        scanned = 0
+        sheets = 0
+        if not self.available():
+            raise ExcelUnavailable("Excel file is currently unavailable.")
+        wb = self._load_workbook(data_only=False, read_only=True)
+        try:
+            for sheet_name in self.data_sheets(wb):
+                sheets += 1
+                ws = wb[sheet_name]
+                site = self.site_label(sheet_name)
+                header_row = cfg.header_row
+                start = cfg.data_start_row
+                headers: list[str] = []
+                id_header = None
+                assign_header = None
+                status_header = None
+                empty_streak = 0
+                max_col = 40
+                for idx, row in enumerate(ws.iter_rows(min_row=header_row, max_col=max_col), start=header_row):
+                    if idx == header_row:
+                        headers = []
+                        for col_i, cell in enumerate(row, start=1):
+                            headers.append(str(cell.value) if cell.value is not None else f"Column{col_i}")
+                        while headers and headers[-1].startswith("Column"):
+                            headers.pop()
+                        max_col = max(len(headers), 1)
+                        for h in headers:
+                            field = mapping.get(norm_header(h))
+                            if field == "work_order_id":
+                                id_header = h
+                            elif field == "assigned_to":
+                                assign_header = h
+                            elif field == "status":
+                                status_header = h
+                        continue
+                    if idx < start:
+                        continue
+                    raw: dict[str, Any] = {}
+                    empty = True
+                    for header, cell in zip(headers, row):
+                        raw[header] = cell.value
+                        if _cell_plain(cell.value) not in (None, ""):
+                            empty = False
+                    if empty:
+                        empty_streak += 1
+                        if empty_streak > 80:
+                            break
+                        continue
+                    empty_streak = 0
+                    scanned += 1
+                    wo_plain = _cell_plain(raw.get(id_header)) if id_header else None
+                    wo_text = "" if wo_plain in (None, "") else str(wo_plain).strip()
+                    rec_id = f"{site}:{idx}"
+                    if not wo_text:
+                        counts["missing_id"] += 1
+                        if len(missing_id) < sample:
+                            missing_id.append({"record_id": rec_id, "sheet": sheet_name, "site": site, "row": idx})
+                    else:
+                        key = (sheet_name, wo_text)
+                        if key in seen_ids:
+                            counts["duplicate_id"] += 1
+                            if len(duplicates) < sample:
+                                duplicates.append(
+                                    {
+                                        "work_order_id": wo_text,
+                                        "sheet": sheet_name,
+                                        "site": site,
+                                        "rows": [seen_ids[key], idx],
+                                    }
+                                )
+                        else:
+                            seen_ids[key] = idx
+                        status_plain = _cell_plain(raw.get(status_header)) if status_header else None
+                        status_text = "" if status_plain in (None, "") else str(status_plain).strip()
+                        if not status_text:
+                            counts["blank_status"] += 1
+                            if len(blank_status) < sample:
+                                blank_status.append(
+                                    {
+                                        "record_id": rec_id,
+                                        "work_order_id": wo_text,
+                                        "site": site,
+                                        "row": idx,
+                                    }
+                                )
+                        if is_open({"status": status_text}, cfg):
+                            assign_plain = _cell_plain(raw.get(assign_header)) if assign_header else None
+                            assign_text = "" if assign_plain in (None, "") else str(assign_plain).strip()
+                            if not assign_text:
+                                counts["blank_assign"] += 1
+                                if len(blank_assign) < sample:
+                                    blank_assign.append(
+                                        {
+                                            "record_id": rec_id,
+                                            "work_order_id": wo_text,
+                                            "site": site,
+                                            "row": idx,
+                                            "status": status_text,
+                                        }
+                                    )
+                    for header, cell in zip(headers, row):
+                        if norm_header(header) not in formula_headers:
+                            continue
+                        val = cell.value
+                        if _is_formula(val):
+                            continue
+                        plain = _cell_plain(val)
+                        item = {
+                            "record_id": rec_id,
+                            "work_order_id": wo_text,
+                            "sheet": sheet_name,
+                            "site": site,
+                            "row": idx,
+                            "column": header,
+                        }
+                        if plain in (None, ""):
+                            counts["missing_formula"] += 1
+                            if len(missing_formula) < sample:
+                                missing_formula.append(item)
+                        else:
+                            counts["overwritten_formula"] += 1
+                            if len(overwritten) < sample:
+                                overwritten.append({**item, "value": str(plain)[:80]})
+        finally:
+            wb.close()
+        return {
+            "scanned_rows": scanned,
+            "sheets": sheets,
+            "sample": sample,
+            "counts": counts,
+            "issues": {
+                "missing_id": missing_id,
+                "blank_assign": blank_assign,
+                "blank_status": blank_status,
+                "overwritten_formula": overwritten,
+                "missing_formula": missing_formula,
+                "duplicate_id": duplicates,
+            },
+        }
+
     def _file_lock(self, timeout: float = 90.0):
         return FileLock(str(self.lock_path()), timeout=timeout)
 

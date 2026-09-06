@@ -126,7 +126,21 @@ def post_message(thread_id: int, body: ChatMessageIn, user=Depends(require_permi
     if not text:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
     item = database.add_chat_message(thread_id, user["username"], text)
-    notify.fanout_mentions(user["username"], text, thread_id=thread_id)
+    thread = database.get_chat_thread(thread_id) or {}
+    pinged = notify.fanout_mentions(
+        user["username"],
+        text,
+        thread_id=thread_id,
+        record_id=str(thread.get("record_id") or ""),
+        work_order_id=str(thread.get("work_order_id") or ""),
+    )
+    if thread.get("kind") == "work_order" and thread.get("record_id"):
+        notify.notify_watchers(
+            user["username"],
+            {"record_id": thread.get("record_id"), "work_order_id": thread.get("work_order_id")},
+            f"{user['username']} commented on {thread.get('title') or thread.get('work_order_id')}",
+            skip=set(pinged),
+        )
     return {"item": item}
 
 

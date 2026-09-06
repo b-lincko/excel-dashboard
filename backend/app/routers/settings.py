@@ -54,6 +54,9 @@ def list_backups(user=Depends(require_permission("backup"))):
 
 class RestoreRequest(BaseModel):
     path: str
+    record_id: Optional[str] = None
+    work_order_id: Optional[str] = None
+    site: Optional[str] = None
 
 
 @router.post("/backups/restore")
@@ -65,6 +68,44 @@ def restore_backup(body: RestoreRequest, user=Depends(require_permission("backup
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return {"restored": True, "sync": excel_service.status()}
+
+
+@router.post("/backups/preview-row")
+def preview_restore_row(body: RestoreRequest, user=Depends(require_permission("backup"))):
+    try:
+        return excel_service.preview_restore_row(
+            body.path,
+            record_id=body.record_id or "",
+            work_order_id=body.work_order_id or "",
+            site=body.site or "",
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/backups/restore-row")
+def restore_backup_row(body: RestoreRequest, user=Depends(require_permission("backup"))):
+    if not (body.record_id or body.work_order_id):
+        raise HTTPException(status_code=400, detail="Provide a record id or work order number.")
+    try:
+        result = excel_service.restore_row_from_backup(
+            body.path,
+            username=user["username"],
+            record_id=body.record_id or "",
+            work_order_id=body.work_order_id or "",
+            site=body.site or "",
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {**result, "sync": excel_service.status()}
 
 
 @router.post("/backups")

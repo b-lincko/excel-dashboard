@@ -11,7 +11,7 @@ from ..config import load_config
 from ..dates import to_date
 from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_for_open, today
 from ..excel.service import DELAY_FIELDS, DUE_OFFSETS, ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
-from ..security import require_permission
+from ..security import editable_fields, forbidden_fields, require_permission
 from ..stats import parse_query_filters
 from ..validation import validate_work_order
 
@@ -232,6 +232,9 @@ def options(user=Depends(require_permission("view"))):
         "due_offset_default_days": cfg.due_offset_default_days,
         "delay_kinds": ["placement", "delivery"],
         "delay_sources": ["site", "procurement", "supplier"],
+        "editable_fields": editable_fields(user, cfg),
+        "status_required_fields": getattr(cfg, "status_required_fields", None) or {},
+        "field_edit_roles": getattr(cfg, "field_edit_roles", None) or {},
     }
 
 
@@ -248,6 +251,12 @@ def bulk_update(body: BulkUpdate, user=Depends(require_permission("edit"))):
         changes["remarks"] = remark
     if not changes:
         raise HTTPException(status_code=400, detail="Choose an assignee, a status, or a remark.")
+    blocked = forbidden_fields(user, changes)
+    if blocked:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Your role cannot edit: {', '.join(blocked)}.",
+        )
     try:
         result = excel_service.update_records(
             body.ids,
@@ -309,6 +318,12 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
     if not rec:
         raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
     excel_changes, extra_changes = _split_changes(body.changes)
+    blocked = forbidden_fields(user, {**excel_changes, **extra_changes})
+    if blocked:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Your role cannot edit: {', '.join(blocked)}.",
+        )
     merged = {**{k: rec.get(k) for k in load_config().mapping.model_dump().keys()}, **excel_changes}
     errors = validate_work_order(merged, partial=False)
     if errors:
@@ -428,6 +443,63 @@ def work_order_sheet(wo_id: str, user=Depends(require_permission("view"))):
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="WO_{name}.pdf"'},
     )
+
+
+class ChatBody(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+
+
+@router.get("/{wo_id}/chat")
+def work_order_chat(wo_id: str, after: int = 0, limit: int = 200, user=Depends(require_permission("view"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    thread = database.get_or_create_wo_thread(
+        str(rec.get("record_id") or ""),
+        str(rec.get("work_order_id") or ""),
+        user["username"],
+    )
+    items = database.list_chat_messages(int(thread["id"]), after_id=after, limit=limit)
+    return {"thread": thread, "items": items}
+
+
+@router.post("/{wo_id}/chat")
+def post_work_order_chat(wo_id: str, body: ChatBody, user=Depends(require_permission("view"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    text = (body.body or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+    thread = database.get_or_create_wo_thread(
+        str(rec.get("record_id") or ""),
+        str(rec.get("work_order_id") or ""),
+        user["username"],
+    )
+    item = database.add_chat_message(int(thread["id"]), user["username"], text)
+    pinged = notify.fanout_mentions(
+        user["username"],
+        text,
+        record_id=str(rec.get("record_id") or ""),
+        work_order_id=str(rec.get("work_order_id") or ""),
+        thread_id=int(thread["id"]),
+    )
+    notify.notify_watchers(
+        user["username"],
+        rec,
+        f"{user['username']} commented on {rec.get('work_order_id') or wo_id}",
+        skip=set(pinged),
+    )
+    return {"thread": thread, "item": item}
+
+
+@router.post("/{wo_id}/seen")
+def mark_seen(wo_id: str, user=Depends(require_permission("view"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    item = database.mark_queue_seen(str(rec.get("record_id") or wo_id), user["username"])
+    return {"item": item, "seen_by": database.list_queue_seen([item["record_id"]]).get(item["record_id"], [])}
 
 
 @router.delete("/{wo_id}")

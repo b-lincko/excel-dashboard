@@ -27,6 +27,8 @@ import {
   MessageSquare,
   FolderKanban,
   UserCheck,
+  ClipboardCheck,
+  FileWarning,
   X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -45,6 +47,7 @@ const NAV = [
   { to: "/closed", label: "Closed", icon: CheckCircle2, group: "Work", page: "closed" },
   { to: "/queue", label: "Action queue", icon: ListTodo, group: "Ops", page: "queue" },
   { to: "/alerts", label: "SLA alerts", icon: Bell, group: "Ops", page: "alerts" },
+  { to: "/handover", label: "Handover", icon: ClipboardCheck, group: "Ops", page: "handover" },
   { to: "/suppliers", label: "Suppliers / PO", icon: Truck, group: "Ops", page: "suppliers" },
   { to: "/analytics", label: "Analytics", icon: BarChart3, perm: "analytics", group: "Ops", page: "analytics" },
   { to: "/reports", label: "Reports", icon: FileText, perm: "reports", group: "Ops", page: "reports" },
@@ -66,6 +69,8 @@ const TITLES = {
   "/closed": "Closed orders",
   "/queue": "Action queue",
   "/alerts": "SLA alerts",
+  "/handover": "Handover",
+  "/health": "Excel health",
   "/suppliers": "Suppliers",
   "/analytics": "Analytics",
   "/reports": "Reports",

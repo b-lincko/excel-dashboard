@@ -32,6 +32,8 @@ GUEST_PAGES = [
     "projects",
     "import",
     "performance",
+    "handover",
+    "health",
 ]
 ALL_PERMS = [
     "view",
@@ -163,3 +165,67 @@ def optional_user(token: Optional[str] = Depends(oauth2_optional)) -> Optional[d
         return get_current_user(token)
     except HTTPException:
         return None
+
+
+def field_edit_roles(cfg=None) -> dict[str, list[str]]:
+    cfg = cfg or load_config()
+    raw = getattr(cfg, "field_edit_roles", None) or {}
+    out: dict[str, list[str]] = {}
+    for key, roles in raw.items():
+        name = str(key or "").strip()
+        if not name:
+            continue
+        if isinstance(roles, str):
+            values = [r.strip() for r in roles.split(",") if r.strip()]
+        else:
+            values = [str(r).strip() for r in (roles or []) if str(r).strip()]
+        out[name] = values
+    return out
+
+
+def can_edit_field(user: dict[str, Any], field: str, cfg=None) -> bool:
+    role = str((user or {}).get("role") or "").strip().lower()
+    if role == "admin":
+        return True
+    if "edit" not in user_permissions(user or {}):
+        return False
+    mapping = field_edit_roles(cfg)
+    wanted = str(field or "").strip()
+    roles = mapping.get(wanted)
+    if roles is None:
+        for key, values in mapping.items():
+            if key.lower() == wanted.lower():
+                roles = values
+                break
+    if roles is None:
+        return True
+    allowed = {str(r).strip().lower() for r in roles}
+    return role in allowed
+
+
+def forbidden_fields(user: dict[str, Any], changes: dict[str, Any], cfg=None) -> list[str]:
+    blocked: list[str] = []
+    for key in changes or {}:
+        if str(key).startswith("_") or key in {"record_id", "department"}:
+            continue
+        if not can_edit_field(user, key, cfg):
+            blocked.append(key)
+    return blocked
+
+
+def editable_fields(user: dict[str, Any], cfg=None) -> list[str]:
+    cfg = cfg or load_config()
+    fields = list(cfg.mapping.model_dump().keys()) + [
+        "delay_kind",
+        "delay_source",
+        "delay_justification",
+    ]
+    seen: set[str] = set()
+    out: list[str] = []
+    for field in fields:
+        if field in seen:
+            continue
+        seen.add(field)
+        if can_edit_field(user, field, cfg):
+            out.append(field)
+    return out
