@@ -312,6 +312,15 @@ class ExcelService:
 
     def _serve_cache(self, err: Optional[str] = None) -> list[dict[str, Any]]:
         if self._cache is None:
+            try:
+                cached = database.load_wo_cache()
+            except Exception:
+                cached = []
+            if cached:
+                self._cache = cached
+                self._stale = True
+                self._last_error = err
+                return self._cache
             raise ExcelUnavailable(err or "Excel file is currently unavailable.")
         self._stale = True
         self._last_error = err
@@ -362,6 +371,10 @@ class ExcelService:
             database.set_sync_meta("mtime", self.mtime_iso() or "")
             database.set_sync_meta("token", self._fingerprint)
             database.set_sync_meta("count", str(len(all_records)))
+            try:
+                database.replace_wo_cache(all_records, self._fingerprint)
+            except Exception as exc:
+                print(f"[WOMS] SQLite work-order cache write skipped: {exc}")
             return all_records
 
     def headers(self) -> list[str]:
@@ -780,6 +793,149 @@ class ExcelService:
             self.invalidate()
             database.add_audit(username, "delete", work_order_id=str(wo_id), details="Deleted material request")
             database.set_sync_meta("last_write", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        except PermissionError as exc:
+            raise ExcelLocked(
+                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+            ) from exc
+        finally:
+            try:
+                lock.release()
+            except Exception:
+                pass
+
+    def import_rows(self, rows: list[dict[str, Any]], username: str) -> dict[str, Any]:
+        """Append or update Excel rows from a mapped import. Excel remains source of truth."""
+        if not self.available():
+            raise ExcelUnavailable("Excel file is currently unavailable.")
+        cleaned: list[dict[str, Any]] = []
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            item = {k: v for k, v in raw.items() if v not in (None, "")}
+            if item.get("work_order_id") or item.get("description") or item.get("remarks"):
+                cleaned.append(item)
+        if not cleaned:
+            return {"created": 0, "updated": 0, "skipped": 0, "total": 0, "errors": ["No usable rows in the import file."]}
+        try:
+            lock = self._file_lock()
+            lock.acquire()
+        except Timeout as exc:
+            raise ExcelLocked(
+                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+            ) from exc
+        created = 0
+        updated = 0
+        skipped = 0
+        errors: list[str] = []
+        try:
+            self.create_backup(reason="import")
+            wb = self._load_workbook()
+            try:
+                sheet_headers: dict[str, list[str]] = {}
+                all_records: list[dict[str, Any]] = []
+                for sheet_name in self.data_sheets(wb):
+                    hdrs, recs = self._read_sheet_records(wb[sheet_name], sheet_name)
+                    sheet_headers[sheet_name] = hdrs
+                    all_records.extend(recs)
+                by_rid = {str(r.get("record_id")): r for r in all_records}
+                by_wo_site: dict[tuple[str, str], list[dict[str, Any]]] = {}
+                by_wo: dict[str, list[dict[str, Any]]] = {}
+                for rec in all_records:
+                    wo = str(rec.get("work_order_id") or "").strip()
+                    site = str(rec.get("department") or rec.get("_site") or "")
+                    if wo:
+                        by_wo_site.setdefault((wo, site), []).append(rec)
+                        by_wo.setdefault(wo, []).append(rec)
+                labels = self.cfg().worksheet_labels
+                allowed = set(self.cfg().mapping.model_dump().keys())
+                for idx, data in enumerate(cleaned, start=1):
+                    try:
+                        target = None
+                        rid = str(data.get("record_id") or "").strip()
+                        wo_id = str(data.get("work_order_id") or "").strip()
+                        site = str(data.get("department") or data.get("_site") or "").strip()
+                        if rid and rid in by_rid:
+                            target = by_rid[rid]
+                        elif wo_id and site and len(by_wo_site.get((wo_id, site), [])) == 1:
+                            target = by_wo_site[(wo_id, site)][0]
+                        elif wo_id and len(by_wo.get(wo_id, [])) == 1:
+                            target = by_wo[wo_id][0]
+                        if target:
+                            for k, v in data.items():
+                                if k.startswith("_") or k in {"record_id", "department"}:
+                                    continue
+                                if k in allowed:
+                                    target[k] = v if v is not None else ""
+                            ws = wb[target["_sheet"]]
+                            headers = self._ensure_mapped_headers(ws, sheet_headers[target["_sheet"]])
+                            sheet_headers[target["_sheet"]] = headers
+                            self._write_record_to_sheet(ws, target, headers, int(target["_row"]))
+                            updated += 1
+                            continue
+                        sheet_name = None
+                        for sn, lab in labels.items():
+                            if site in {sn, lab}:
+                                sheet_name = sn
+                                break
+                        if not sheet_name:
+                            sheet_name = self.data_sheets(wb)[0]
+                        ws = wb[sheet_name]
+                        headers = self._ensure_mapped_headers(ws, sheet_headers.get(sheet_name) or [])
+                        sheet_headers[sheet_name] = headers
+                        rec = {k: "" for k in self.cfg().mapping.model_dump().keys()}
+                        rec.update({k: v for k, v in data.items() if not str(k).startswith("_")})
+                        if not str(rec.get("work_order_id") or "").strip():
+                            rec["work_order_id"] = self._next_id(all_records, sheet_name)
+                        rec["created_date"] = rec.get("created_date") or datetime.now().strftime("%Y-%m-%d %H:%M")
+                        rec["status"] = rec.get("status") or "OPEN"
+                        row_number = self._next_row(ws, headers)
+                        rec["_row"] = row_number
+                        rec["_sheet"] = sheet_name
+                        rec["_site"] = self.site_label(sheet_name)
+                        rec["record_id"] = self.record_id(sheet_name, row_number)
+                        rec["department"] = rec.get("department") or rec["_site"]
+                        template_row = max(self.cfg().data_start_row, row_number - 1)
+                        self._copy_row_formulas(ws, template_row, row_number, headers)
+                        self._write_record_to_sheet(ws, rec, headers, row_number)
+                        all_records.append(rec)
+                        by_rid[rec["record_id"]] = rec
+                        wo = str(rec.get("work_order_id") or "")
+                        if wo:
+                            by_wo.setdefault(wo, []).append(rec)
+                            by_wo_site.setdefault((wo, rec["department"]), []).append(rec)
+                        created += 1
+                    except Exception as exc:
+                        skipped += 1
+                        errors.append(f"Row {idx}: {exc}")
+                        if len(errors) >= 25:
+                            errors.append("Further row errors omitted.")
+                            break
+                tmp = _temp_xlsx(self.excel_path().parent)
+                wb.save(tmp)
+            finally:
+                wb.close()
+            try:
+                self._atomic_replace(tmp)
+            except Exception:
+                if tmp.exists():
+                    tmp.unlink(missing_ok=True)
+                raise
+            self.invalidate()
+            records = self.load(force=True)
+            database.add_audit(
+                username,
+                "import",
+                details=f"Imported {created} new and {updated} updated material requests",
+            )
+            database.set_sync_meta("last_write", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            database.set_sync_meta("last_write_user", username)
+            return {
+                "created": created,
+                "updated": updated,
+                "skipped": skipped,
+                "total": len(records),
+                "errors": errors,
+            }
         except PermissionError as exc:
             raise ExcelLocked(
                 "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."

@@ -15,6 +15,10 @@ const Settings = lazy(() => import("./pages/Settings.jsx"));
 const AuditLog = lazy(() => import("./pages/AuditLog.jsx"));
 const Users = lazy(() => import("./pages/Users.jsx"));
 const Account = lazy(() => import("./pages/Account.jsx"));
+const Performance = lazy(() => import("./pages/Performance.jsx"));
+const Chat = lazy(() => import("./pages/Chat.jsx"));
+const Projects = lazy(() => import("./pages/Projects.jsx"));
+const ImportData = lazy(() => import("./pages/ImportData.jsx"));
 
 function Fallback() {
   return <div className="text-sm text-slate-500 py-10 text-center">Loading…</div>;
@@ -96,6 +100,10 @@ export default function App() {
         <Route path="users" element={<Lazy perm="users"><Users /></Lazy>} />
         <Route path="settings" element={<Lazy perm="settings"><Settings /></Lazy>} />
         <Route path="account" element={<Lazy><Account /></Lazy>} />
+        <Route path="performance" element={<Lazy perm="analytics" page="performance"><Performance /></Lazy>} />
+        <Route path="chat" element={<Lazy page="chat"><Chat /></Lazy>} />
+        <Route path="projects" element={<Lazy page="projects"><Projects /></Lazy>} />
+        <Route path="import" element={<Lazy perm="edit" page="import"><ImportData /></Lazy>} />
         <Route path="*" element={<NotFound />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

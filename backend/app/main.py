@@ -13,7 +13,7 @@ from . import database
 from .backup import start_scheduler, stop_scheduler
 from .config import DATA_DIR
 from .excel.service import excel_service
-from .routers import audit, auth, catalog, dashboard, ops, reports, settings, sync, users, work_orders
+from .routers import audit, auth, catalog, collab, dashboard, files, ops, reports, settings, sync, users, work_orders
 
 
 def _boot() -> None:
@@ -83,6 +83,8 @@ app.include_router(audit.router)
 app.include_router(users.router)
 app.include_router(settings.router)
 app.include_router(sync.router)
+app.include_router(collab.router)
+app.include_router(files.router)
 
 
 @app.get("/api/health")
@@ -92,6 +94,7 @@ def health():
         "ok": True,
         "excel": live.get("synchronized"),
         "records": live.get("record_count"),
+        "cache": database.wo_cache_count(),
         "error": live.get("error"),
         "stale": live.get("stale"),
     }

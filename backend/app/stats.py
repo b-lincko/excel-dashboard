@@ -235,6 +235,55 @@ def group_by(records: list[dict[str, Any]], field: str, limit: Optional[int] = N
     return rows
 
 
+def employee_performance(records: list[dict[str, Any]]) -> dict[str, Any]:
+    cfg = load_config()
+    groups: dict[str, list] = defaultdict(list)
+    for rec in records:
+        groups[str(rec.get("assigned_to") or "Unassigned")].append(rec)
+    rows = []
+    for name, recs in groups.items():
+        closed = [r for r in recs if is_closed(r, cfg)]
+        open_ = [r for r in recs if is_open(r, cfg)]
+        overdue = [r for r in recs if is_overdue(r, cfg)]
+        placed = [r for r in recs if is_placed(r, cfg)]
+        pending = [r for r in recs if is_pending(r, cfg)]
+        closing = [c for c in (closing_days(r) for r in closed) if c is not None]
+        aging = [a for a in (aging_days(r) for r in open_) if a is not None]
+        rows.append(
+            {
+                "name": name,
+                "total": len(recs),
+                "open": len([r for r in recs if is_status_open(r, cfg)]),
+                "outstanding": len(open_),
+                "placed": len(placed),
+                "pending": len(pending),
+                "closed": len(closed),
+                "overdue": len(overdue),
+                "completion_rate": round((len(closed) / len(recs) * 100) if recs else 0, 1),
+                "average_closing_days": round(mean(closing), 1) if closing else None,
+                "average_aging_days": round(mean(aging), 1) if aging else None,
+                "oldest_open_days": max(aging) if aging else 0,
+            }
+        )
+    rows.sort(key=lambda x: (-x["overdue"], -x["outstanding"], x["name"].lower()))
+    return {
+        "employees": rows,
+        "kpis": kpis(records),
+        "workload": [
+            {
+                "name": r["name"],
+                "open": r["open"],
+                "placed": r["placed"],
+                "closed": r["closed"],
+                "overdue": r["overdue"],
+                "outstanding": r["outstanding"],
+            }
+            for r in rows[:30]
+        ],
+        "completion": [{"name": r["name"], "completion_rate": r["completion_rate"]} for r in rows[:30]],
+    }
+
+
 def weekly(records: list[dict[str, Any]], year: int, week: int) -> dict[str, Any]:
     cfg = load_config()
     start, end = week_bounds(year, week)

@@ -27,6 +27,10 @@ GUEST_PAGES = [
     "suppliers",
     "analytics",
     "reports",
+    "chat",
+    "projects",
+    "import",
+    "performance",
 ]
 ALL_PERMS = [
     "view",
@@ -39,6 +43,7 @@ ALL_PERMS = [
     "users",
     "audit",
     "backup",
+    "import",
     *GUEST_PAGES,
 ]
 

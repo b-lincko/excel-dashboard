@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, qs } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -66,6 +66,9 @@ export default function WorkOrderDetail() {
   const [dueOffsets, setDueOffsets] = useState(DUE_OFFSET_FALLBACK);
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [newSupplier, setNewSupplier] = useState("");
+  const [files, setFiles] = useState([]);
+  const [fileNote, setFileNote] = useState("");
+  const attachRef = useRef(null);
 
   const dirty = useMemo(() => {
     const keys = [...FIELDS.map(([key]) => key), ...EXTRA_KEYS];
@@ -428,6 +431,72 @@ export default function WorkOrderDetail() {
               />
             </div>
           </div>
+        </div>
+      )}
+      {!isNew && (
+        <div className="card p-5 space-y-3">
+          <div>
+            <div className="font-semibold">Attachments</div>
+            <p className="text-xs text-slate-500">PDFs and screenshots stay in the app database, not Excel. They can be linked to this work order or a remark note.</p>
+          </div>
+          <ul className="space-y-2">
+            {files.map((f) => (
+              <li key={f.id} className="flex items-center justify-between gap-3 text-sm">
+                <div className="min-w-0">
+                  <button className="text-brand-700 hover:underline truncate" type="button" onClick={() => api.download(`/api/files/${f.id}`, f.filename)}>
+                    {f.filename}
+                  </button>
+                  <div className="text-[11px] text-slate-500">
+                    {f.kind} · {f.created_by} · {f.created_at}
+                    {f.note ? ` · ${f.note}` : ""}
+                  </div>
+                </div>
+                {can("edit") && (
+                  <button
+                    type="button"
+                    className="btn-outline !py-1 !px-2 text-xs"
+                    onClick={async () => {
+                      await api.del(`/api/files/${f.id}`);
+                      setFiles((prev) => prev.filter((x) => x.id !== f.id));
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </li>
+            ))}
+            {!files.length && <li className="text-sm text-slate-500">No files yet.</li>}
+          </ul>
+          {can("edit") && (
+            <div className="space-y-2">
+              <input value={fileNote} onChange={(e) => setFileNote(e.target.value)} placeholder="Optional remark / caption" />
+              <input
+                ref={attachRef}
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,application/pdf,image/*"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  const fd = new FormData();
+                  fd.append("file", file);
+                  fd.append("note", fileNote);
+                  try {
+                    const d = await api.upload(`/api/work-orders/${encodeURIComponent(id)}/files`, fd);
+                    setFiles((prev) => [d.item, ...prev]);
+                    setFileNote("");
+                    toast("File attached", "success");
+                  } catch (err) {
+                    setError(err.message);
+                  }
+                }}
+              />
+              <button type="button" className="btn-outline" onClick={() => attachRef.current?.click()}>
+                Attach PDF or screenshot
+              </button>
+            </div>
+          )}
         </div>
       )}
       {!isNew && (

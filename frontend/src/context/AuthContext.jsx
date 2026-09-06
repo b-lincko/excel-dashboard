@@ -11,7 +11,22 @@ const ROLE_PERMS = {
   guest: ["view"],
 };
 
-export const GUEST_PAGES = ["dashboard", "work_orders", "open", "placed", "overdue", "closed", "queue", "suppliers", "analytics", "reports"];
+export const GUEST_PAGES = [
+  "dashboard",
+  "work_orders",
+  "open",
+  "placed",
+  "overdue",
+  "closed",
+  "queue",
+  "suppliers",
+  "analytics",
+  "reports",
+  "chat",
+  "projects",
+  "import",
+  "performance",
+];
 
 const PAGE_PATHS = {
   dashboard: "/",
@@ -24,6 +39,10 @@ const PAGE_PATHS = {
   suppliers: "/suppliers",
   analytics: "/analytics",
   reports: "/reports",
+  chat: "/chat",
+  projects: "/projects",
+  import: "/import",
+  performance: "/performance",
 };
 
 export function firstPath(user) {
@@ -99,7 +118,7 @@ export function AuthProvider({ children }) {
     if (!user) return false;
     if (user.role === "admin") return true;
     if (user.role === "guest") return !page || can(page);
-    if (["analytics", "reports", "audit", "users", "settings"].includes(page)) return can(page);
+    if (["analytics", "reports", "audit", "users", "settings", "performance"].includes(page)) return can(page === "performance" ? "analytics" : page);
     return can("view");
   };
 

@@ -11,6 +11,7 @@ from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
 from ..security import require_permission
 from ..stats import (
     dashboard_payload,
+    employee_performance,
     filtered,
     group_by,
     kpis,
@@ -117,3 +118,11 @@ def get_departments(user=Depends(require_permission("view"))):
 @router.get("/employees")
 def get_employees(user=Depends(require_permission("view"))):
     return group_by(_records(), "assigned_to")
+
+
+@router.get("/performance")
+def get_performance(user=Depends(require_permission("analytics"))):
+    recs = _records()
+    payload = employee_performance(recs)
+    payload["sync"] = excel_service.ping()
+    return payload

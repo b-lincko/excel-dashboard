@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -57,6 +58,74 @@ CREATE TABLE IF NOT EXISTS record_extras (
     updated_at TEXT,
     updated_by TEXT
 );
+CREATE TABLE IF NOT EXISTS wo_cache (
+    record_id TEXT PRIMARY KEY,
+    work_order_id TEXT,
+    payload TEXT NOT NULL,
+    fingerprint TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_wo_cache_wo ON wo_cache(work_order_id);
+CREATE TABLE IF NOT EXISTS attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_id TEXT NOT NULL,
+    work_order_id TEXT,
+    filename TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    mime TEXT,
+    size INTEGER,
+    kind TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_att_record ON attachments(record_id);
+CREATE TABLE IF NOT EXISTS chat_threads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL DEFAULT 'channel',
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT
+);
+CREATE TABLE IF NOT EXISTS chat_members (
+    thread_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    PRIMARY KEY (thread_id, username)
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_msg ON chat_messages(thread_id, id);
+CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    owner TEXT,
+    description TEXT,
+    start_date TEXT,
+    due_date TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT
+);
+CREATE TABLE IF NOT EXISTS project_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    assignee TEXT,
+    due_date TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_links (
+    project_id INTEGER NOT NULL,
+    record_id TEXT NOT NULL,
+    PRIMARY KEY (project_id, record_id)
+);
 """
 
 DEFAULT_USERS = [
@@ -112,6 +181,12 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
         if "extra_permissions" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN extra_permissions TEXT")
+        general = conn.execute("SELECT id FROM chat_threads WHERE kind = 'channel' AND title = 'General'").fetchone()
+        if not general:
+            conn.execute(
+                "INSERT INTO chat_threads (kind, title, created_at, created_by) VALUES ('channel', 'General', ?, 'system')",
+                (now_iso(),),
+            )
         if count == 0:
             for u in DEFAULT_USERS:
                 conn.execute(
@@ -366,6 +441,352 @@ def upsert_record_extra(
     extra = get_record_extra(record_id)
     assert extra is not None
     return extra
+
+
+def replace_wo_cache(records: list[dict[str, Any]], fingerprint: str = "") -> int:
+    ts = now_iso()
+    rows: list[tuple[str, str, str, str, str]] = []
+    for rec in records:
+        rid = str(rec.get("record_id") or "")
+        if not rid:
+            continue
+        rows.append(
+            (
+                rid,
+                str(rec.get("work_order_id") or ""),
+                json.dumps(rec, default=str),
+                fingerprint,
+                ts,
+            )
+        )
+    with connect() as conn:
+        conn.execute("DELETE FROM wo_cache")
+        conn.executemany(
+            """INSERT INTO wo_cache (record_id, work_order_id, payload, fingerprint, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            rows,
+        )
+        conn.execute(
+            "INSERT INTO sync_meta (key, value) VALUES ('cache_count', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(len(rows)),),
+        )
+        conn.execute(
+            "INSERT INTO sync_meta (key, value) VALUES ('cache_fingerprint', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (fingerprint,),
+        )
+    return len(rows)
+
+
+def load_wo_cache() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute("SELECT payload FROM wo_cache").fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            out.append(payload)
+    return out
+
+
+def wo_cache_count() -> int:
+    with connect() as conn:
+        row = conn.execute("SELECT COUNT(*) AS c FROM wo_cache").fetchone()
+        return int(row["c"] if row else 0)
+
+
+def add_attachment(
+    record_id: str,
+    filename: str,
+    stored_name: str,
+    mime: str,
+    size: int,
+    created_by: str,
+    work_order_id: str = "",
+    kind: str = "file",
+    note: str = "",
+) -> dict[str, Any]:
+    with connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO attachments
+               (record_id, work_order_id, filename, stored_name, mime, size, kind, note, created_at, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (record_id, work_order_id, filename, stored_name, mime, size, kind, note, now_iso(), created_by),
+        )
+        aid = cur.lastrowid
+    item = get_attachment(int(aid))
+    assert item is not None
+    return item
+
+
+def list_attachments(record_id: str) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM attachments WHERE record_id = ? ORDER BY id DESC",
+            (record_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_attachment(attachment_id: int) -> Optional[dict[str, Any]]:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM attachments WHERE id = ?", (attachment_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def delete_attachment(attachment_id: int) -> Optional[dict[str, Any]]:
+    item = get_attachment(attachment_id)
+    if not item:
+        return None
+    with connect() as conn:
+        conn.execute("DELETE FROM attachments WHERE id = ?", (attachment_id,))
+    return item
+
+
+def list_chat_threads(username: str) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            """SELECT t.*,
+                      (SELECT body FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_body,
+                      (SELECT created_at FROM chat_messages m WHERE m.thread_id = t.id ORDER BY m.id DESC LIMIT 1) AS last_at,
+                      (SELECT COUNT(*) FROM chat_messages m WHERE m.thread_id = t.id) AS message_count
+               FROM chat_threads t
+               LEFT JOIN chat_members cm ON cm.thread_id = t.id AND cm.username = ?
+               WHERE t.kind = 'channel' OR cm.username IS NOT NULL
+               ORDER BY COALESCE(last_at, t.created_at) DESC""",
+            (username,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_chat_thread(thread_id: int) -> Optional[dict[str, Any]]:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM chat_threads WHERE id = ?", (thread_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        members = conn.execute(
+            "SELECT username FROM chat_members WHERE thread_id = ? ORDER BY username",
+            (thread_id,),
+        ).fetchall()
+        item["members"] = [m["username"] for m in members]
+        return item
+
+
+def user_can_access_thread(thread_id: int, username: str) -> bool:
+    thread = get_chat_thread(thread_id)
+    if not thread:
+        return False
+    if thread.get("kind") == "channel":
+        return True
+    return username in (thread.get("members") or [])
+
+
+def create_chat_thread(kind: str, title: str, created_by: str, members: Optional[list[str]] = None) -> dict[str, Any]:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO chat_threads (kind, title, created_at, created_by) VALUES (?, ?, ?, ?)",
+            (kind, title, now_iso(), created_by),
+        )
+        tid = int(cur.lastrowid)
+        people = set(members or [])
+        people.add(created_by)
+        for name in people:
+            if name:
+                conn.execute(
+                    "INSERT OR IGNORE INTO chat_members (thread_id, username) VALUES (?, ?)",
+                    (tid, name),
+                )
+    item = get_chat_thread(tid)
+    assert item is not None
+    return item
+
+
+def get_or_create_dm(username: str, other: str) -> dict[str, Any]:
+    a, b = sorted([username, other])
+    title = f"{a} · {b}"
+    with connect() as conn:
+        row = conn.execute(
+            """SELECT t.id FROM chat_threads t
+               JOIN chat_members m1 ON m1.thread_id = t.id AND m1.username = ?
+               JOIN chat_members m2 ON m2.thread_id = t.id AND m2.username = ?
+               WHERE t.kind = 'direct'""",
+            (a, b),
+        ).fetchone()
+        if row:
+            item = get_chat_thread(int(row["id"]))
+            assert item is not None
+            return item
+    return create_chat_thread("direct", title, username, [a, b])
+
+
+def add_chat_message(thread_id: int, username: str, body: str) -> dict[str, Any]:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO chat_messages (thread_id, username, body, created_at) VALUES (?, ?, ?, ?)",
+            (thread_id, username, body, now_iso()),
+        )
+        mid = int(cur.lastrowid)
+        row = conn.execute("SELECT * FROM chat_messages WHERE id = ?", (mid,)).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def list_chat_messages(thread_id: int, after_id: int = 0, limit: int = 200) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit or 200), 500))
+    with connect() as conn:
+        if after_id:
+            rows = conn.execute(
+                "SELECT * FROM chat_messages WHERE thread_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+                (thread_id, after_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT * FROM (
+                     SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY id DESC LIMIT ?
+                   ) AS recent ORDER BY id ASC""",
+                (thread_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_projects() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            """SELECT p.*,
+                      (SELECT COUNT(*) FROM project_tasks t WHERE t.project_id = p.id) AS task_count,
+                      (SELECT COUNT(*) FROM project_tasks t WHERE t.project_id = p.id AND t.status = 'done') AS done_count,
+                      (SELECT COUNT(*) FROM project_links l WHERE l.project_id = p.id) AS wo_count
+               FROM projects p ORDER BY p.id DESC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def create_project(
+    name: str,
+    created_by: str,
+    status: str = "active",
+    owner: str = "",
+    description: str = "",
+    start_date: str = "",
+    due_date: str = "",
+) -> dict[str, Any]:
+    with connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO projects (name, status, owner, description, start_date, due_date, created_at, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (name, status or "active", owner, description, start_date, due_date, now_iso(), created_by),
+        )
+        pid = int(cur.lastrowid)
+    item = get_project(pid)
+    assert item is not None
+    return item
+
+
+def get_project(project_id: int) -> Optional[dict[str, Any]]:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["tasks"] = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM project_tasks WHERE project_id = ? ORDER BY id", (project_id,)
+            ).fetchall()
+        ]
+        item["links"] = [
+            dict(r) for r in conn.execute("SELECT * FROM project_links WHERE project_id = ?", (project_id,)).fetchall()
+        ]
+        return item
+
+
+def update_project(project_id: int, **fields: Any) -> Optional[dict[str, Any]]:
+    allowed = {"name", "status", "owner", "description", "start_date", "due_date"}
+    sets = []
+    values: list[Any] = []
+    for k, v in fields.items():
+        if k not in allowed or v is None:
+            continue
+        sets.append(f"{k} = ?")
+        values.append(v)
+    if sets:
+        values.append(project_id)
+        with connect() as conn:
+            conn.execute(f"UPDATE projects SET {', '.join(sets)} WHERE id = ?", values)
+    return get_project(project_id)
+
+
+def delete_project(project_id: int) -> bool:
+    with connect() as conn:
+        conn.execute("DELETE FROM project_tasks WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM project_links WHERE project_id = ?", (project_id,))
+        cur = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        return cur.rowcount > 0
+
+
+def add_project_task(
+    project_id: int,
+    title: str,
+    assignee: str = "",
+    due_date: str = "",
+    notes: str = "",
+    status: str = "open",
+) -> dict[str, Any]:
+    with connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO project_tasks (project_id, title, status, assignee, due_date, notes, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (project_id, title, status or "open", assignee, due_date, notes, now_iso()),
+        )
+        tid = int(cur.lastrowid)
+        row = conn.execute("SELECT * FROM project_tasks WHERE id = ?", (tid,)).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def update_project_task(task_id: int, **fields: Any) -> Optional[dict[str, Any]]:
+    allowed = {"title", "status", "assignee", "due_date", "notes"}
+    sets = []
+    values: list[Any] = []
+    for k, v in fields.items():
+        if k not in allowed or v is None:
+            continue
+        sets.append(f"{k} = ?")
+        values.append(v)
+    if not sets:
+        with connect() as conn:
+            row = conn.execute("SELECT * FROM project_tasks WHERE id = ?", (task_id,)).fetchone()
+            return dict(row) if row else None
+    values.append(task_id)
+    with connect() as conn:
+        conn.execute(f"UPDATE project_tasks SET {', '.join(sets)} WHERE id = ?", values)
+        row = conn.execute("SELECT * FROM project_tasks WHERE id = ?", (task_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def delete_project_task(task_id: int) -> bool:
+    with connect() as conn:
+        cur = conn.execute("DELETE FROM project_tasks WHERE id = ?", (task_id,))
+        return cur.rowcount > 0
+
+
+def link_project_wo(project_id: int, record_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO project_links (project_id, record_id) VALUES (?, ?)",
+            (project_id, record_id),
+        )
+
+
+def unlink_project_wo(project_id: int, record_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM project_links WHERE project_id = ? AND record_id = ?",
+            (project_id, record_id),
+        )
 
 
 # Ensure schema exists for scripts/tests that never hit FastAPI startup.

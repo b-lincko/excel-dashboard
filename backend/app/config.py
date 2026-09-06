@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
 BACKUP_DIR = ROOT / "backups"
 DB_PATH = DATA_DIR / "woms.db"
+ATTACHMENTS_DIR = DATA_DIR / "attachments"
 CONFIG_PATH = DATA_DIR / "app_config.json"
 DEFAULT_EXCEL = ROOT / "file.xlsx"
 

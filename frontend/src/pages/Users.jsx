@@ -14,6 +14,10 @@ const PAGE_LABELS = {
   suppliers: "Suppliers / PO",
   analytics: "Analytics",
   reports: "Reports",
+  chat: "Chat",
+  projects: "Projects",
+  import: "Import",
+  performance: "Performance",
 };
 
 const emptyForm = { username: "", password: "", full_name: "", email: "", role: "user", extra_permissions: ["dashboard"] };
