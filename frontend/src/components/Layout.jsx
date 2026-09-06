@@ -175,9 +175,10 @@ export default function Layout() {
     setRefreshing(true);
     try {
       const next = await api.post("/api/sync/refresh");
+      clearDashCache();
       setSync(next);
       window.dispatchEvent(new CustomEvent("woms:data", { detail: next }));
-      toast("Refreshed from Excel", "success");
+      toast("Hard refresh from Excel", "success");
     } catch (e) {
       setSync((prev) => ({ ...(prev || {}), stale: true, warning: e.message }));
       toast(e.message || "Refresh failed", "error");
@@ -331,8 +332,14 @@ export default function Layout() {
                 </button>
               </>
             )}
-            <button className="btn-ghost !px-2" onClick={refresh} title="Refresh from Excel" aria-label="Refresh from Excel">
+            <button
+              className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs whitespace-nowrap"
+              onClick={refresh}
+              title="Reload the workbook from disk and drop cached KPIs"
+              aria-label="Hard refresh from Excel"
+            >
               <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
+              <span className="hidden md:inline">{refreshing ? "Refreshing…" : "Hard refresh"}</span>
             </button>
             <button className="btn-ghost !px-2" onClick={toggle} title="Toggle theme" aria-label="Toggle theme">
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}

@@ -17,7 +17,7 @@ class SettingsUpdate(BaseModel):
 
 
 @router.get("")
-def get_settings(user=Depends(require_permission("view"))):
+def get_settings(user=Depends(require_permission("settings"))):
     cfg = load_config()
     data = cfg.model_dump()
     if user["role"] != "admin":

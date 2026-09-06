@@ -108,10 +108,33 @@ export default function Settings() {
       </div>
 
       <div className="card p-5 grid md:grid-cols-2 gap-3">
+        <ListField label="Open KPI statuses" value={cfg.status_open_values} onChange={(v) => setCfg({ ...cfg, status_open_values: v })} disabled={!can("settings")} />
+        <ListField label="Placed statuses" value={cfg.placed_statuses} onChange={(v) => setCfg({ ...cfg, placed_statuses: v })} disabled={!can("settings")} />
         <ListField label="Closed statuses" value={cfg.closed_statuses} onChange={(v) => setCfg({ ...cfg, closed_statuses: v })} disabled={!can("settings")} />
         <ListField label="Pending statuses" value={cfg.pending_statuses} onChange={(v) => setCfg({ ...cfg, pending_statuses: v })} disabled={!can("settings")} />
         <ListField label="In-progress statuses" value={cfg.in_progress_statuses} onChange={(v) => setCfg({ ...cfg, in_progress_statuses: v })} disabled={!can("settings")} />
         <ListField label="Cancelled statuses" value={cfg.cancelled_statuses} onChange={(v) => setCfg({ ...cfg, cancelled_statuses: v })} disabled={!can("settings")} />
+        <div className="md:col-span-2">
+          <label className="lbl">Due-date offsets (purchase type: days)</label>
+          <textarea
+            rows={6}
+            disabled={!can("settings")}
+            value={Object.entries(cfg.due_offsets || {})
+              .map(([k, v]) => `${k}: ${v}`)
+              .join("\n")}
+            onChange={(e) => {
+              const next = {};
+              e.target.value.split("\n").forEach((line) => {
+                const [k, v] = line.split(":");
+                if (!k || v == null) return;
+                const days = Number(String(v).trim());
+                if (Number.isFinite(days)) next[k.trim().toLowerCase()] = days;
+              });
+              setCfg({ ...cfg, due_offsets: next });
+            }}
+          />
+          <p className="text-[11px] text-slate-500 mt-1">Default extra days when a type is missing: {cfg.due_offset_default_days ?? 14}. Excel due-date formulas are not overwritten.</p>
+        </div>
       </div>
 
       {can("settings") && (

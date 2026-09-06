@@ -73,7 +73,8 @@ export default function WorkOrderDetail() {
   }, [form, original]);
   const isPending = PENDING_STATUSES.has(String(form.status || "").trim().toLowerCase());
   const dueDays = dueOffsets[String(form.work_type || "").trim().toLowerCase()];
-  const readOnly = !can("edit") && !isNew;
+  const readOnly = isNew ? !can("create") : !can("edit");
+  const canSave = isNew ? can("create") : can("edit");
 
   useEffect(() => {
     api
@@ -127,7 +128,7 @@ export default function WorkOrderDetail() {
     function onKey(e) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        if (can("edit") && !busy) save(false);
+        if (canSave && !busy) save(false);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -201,8 +202,9 @@ export default function WorkOrderDetail() {
         setOriginal(d.item);
         setMeta(d.item);
         setSyncToken(d.sync_token);
-        setSuccess("Excel workbook updated successfully.");
-        toast("Excel updated", "success");
+        const extraOnly = Object.keys(changes).length > 0 && Object.keys(changes).every((k) => EXTRA_KEYS.includes(k));
+        setSuccess(extraOnly ? "Delay notes saved in the app database." : "Excel workbook updated successfully.");
+        toast(extraOnly ? "Delay notes saved" : "Excel updated", "success");
       }
     } catch (e) {
       if (e.status === 409) {
@@ -280,9 +282,9 @@ export default function WorkOrderDetail() {
               Delete
             </button>
           )}
-          {can("edit") && (
+          {canSave && (
             <button className="btn-primary" onClick={() => save(false)} disabled={busy || (!isNew && !dirty)}>
-              {busy ? "Saving to Excel…" : "Save to Excel"}
+              {busy ? "Saving…" : isNew ? "Create in Excel" : "Save to Excel"}
             </button>
           )}
         </div>
@@ -316,17 +318,49 @@ export default function WorkOrderDetail() {
           <div key={key} className={type === "textarea" ? "md:col-span-2" : ""}>
             <label className="lbl">{label}</label>
             {type === "textarea" ? (
-              <textarea rows={3} value={form[key] || ""} onChange={(e) => setField(key, e.target.value)} />
+              <textarea rows={3} value={form[key] || ""} disabled={readOnly} onChange={(e) => setField(key, e.target.value)} />
             ) : type === "site" ? (
-              <select value={form[key] || ""} onChange={(e) => setField(key, e.target.value)} disabled={!isNew}>
+              <select value={form[key] || ""} onChange={(e) => setField(key, e.target.value)} disabled={!isNew || readOnly}>
                 {(options.department || ["SH5-SH1", "F5"]).map((o) => (
                   <option key={o} value={o}>
                     {o}
                   </option>
                 ))}
               </select>
+            ) : type === "supplier" ? (
+              <div className="space-y-2">
+                <select value={form.supplier || ""} disabled={readOnly} onChange={(e) => setField("supplier", e.target.value)}>
+                  <option value="">—</option>
+                  {(options.supplier || []).map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+                {!readOnly && !addingSupplier && (
+                  <button type="button" className="btn-outline !py-1 !px-2 text-xs" onClick={() => setAddingSupplier(true)}>
+                    + Add supplier
+                  </button>
+                )}
+                {addingSupplier && !readOnly && (
+                  <div className="flex gap-2">
+                    <input
+                      value={newSupplier}
+                      onChange={(e) => setNewSupplier(e.target.value)}
+                      placeholder="New supplier name"
+                      autoFocus
+                    />
+                    <button type="button" className="btn-primary !py-1 !px-2 text-xs" onClick={addSupplier} disabled={busy}>
+                      Add
+                    </button>
+                    <button type="button" className="btn-outline !py-1 !px-2 text-xs" onClick={() => setAddingSupplier(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : ["status", "priority", "assigned_to", "work_type", "issue"].includes(type) ? (
-              <select value={form[key] || ""} onChange={(e) => setField(key, e.target.value)}>
+              <select value={form[key] || ""} disabled={readOnly} onChange={(e) => setField(key, e.target.value)}>
                 <option value="">—</option>
                 {(options[type] || []).map((o) => (
                   <option key={o} value={o}>
@@ -337,23 +371,68 @@ export default function WorkOrderDetail() {
             ) : type === "datetime" ? (
               <input
                 type="datetime-local"
-                disabled={lock}
+                disabled={lock || readOnly}
                 value={toInput(form[key])}
                 onChange={(e) => setField(key, fromInput(e.target.value))}
               />
             ) : (
               <input
                 value={form[key] || ""}
-                disabled={lock && !isNew}
+                disabled={(lock && !isNew) || readOnly}
                 onChange={(e) => setField(key, e.target.value)}
               />
+            )}
+            {key === "due_date" && (
+              <p className="text-[11px] text-slate-500 mt-1">
+                {dueDays != null
+                  ? `From purchase type “${form.work_type || "—"}”: +${dueDays} day${dueDays === 1 ? "" : "s"} after MR received. Excel formula is not overwritten.`
+                  : "Direct Cash +3, Local PO +5, International +10, Service +10, Consumable +2, Emergency +0, Under Warranty +10, Alternative +10."}
+              </p>
             )}
           </div>
         ))}
       </div>
+      {isPending && (
+        <div className="card p-5 space-y-3">
+          <div>
+            <div className="font-semibold">Delay (pending only)</div>
+            <p className="text-xs text-slate-500">
+              Placement delay, delivery delay and justification. Source: site, procurement or supplier. Stored in the app database, not Excel.
+            </p>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <label className="lbl">Delay type</label>
+              <select value={form.delay_kind || ""} disabled={readOnly} onChange={(e) => setField("delay_kind", e.target.value)}>
+                <option value="">—</option>
+                <option value="placement">Placement delay</option>
+                <option value="delivery">Delivery delay</option>
+              </select>
+            </div>
+            <div>
+              <label className="lbl">Delay source</label>
+              <select value={form.delay_source || ""} disabled={readOnly} onChange={(e) => setField("delay_source", e.target.value)}>
+                <option value="">—</option>
+                <option value="site">Site</option>
+                <option value="procurement">Procurement</option>
+                <option value="supplier">Supplier</option>
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="lbl">Delay justification</label>
+              <textarea
+                rows={3}
+                value={form.delay_justification || ""}
+                disabled={readOnly}
+                onChange={(e) => setField("delay_justification", e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
       {!isNew && (
         <p className="text-xs text-slate-400">
-          Saving updates the matching row in file.xlsx (SN, due-date and hyperlink formulas are left untouched). A backup is written first. Ctrl/⌘+S to save.
+          Saving updates the matching row in file.xlsx (SN, due-date and hyperlink formulas are left untouched). Delay notes stay in the app database. A backup is written first. Ctrl/⌘+S to save.
         </p>
       )}
       {!isNew && can("audit") && (

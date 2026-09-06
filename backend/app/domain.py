@@ -333,6 +333,8 @@ def annotate(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> dict[str, 
     out.pop("_raw", None)
     out["is_closed"] = is_closed(rec, cfg)
     out["is_open"] = is_open(rec, cfg)
+    out["is_status_open"] = is_status_open(rec, cfg)
+    out["is_placed"] = is_placed(rec, cfg)
     out["is_overdue"] = is_overdue(rec, cfg)
     out["is_pending"] = is_pending(rec, cfg)
     out["is_in_progress"] = is_in_progress(rec, cfg)

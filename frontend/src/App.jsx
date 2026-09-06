@@ -81,7 +81,7 @@ export default function App() {
       >
         <Route index element={<Perm page="dashboard"><Dashboard /></Perm>} />
         <Route path="work-orders" element={<Perm page="work_orders"><WorkOrders /></Perm>} />
-        <Route path="work-orders/new" element={<WorkOrderDetail />} />
+        <Route path="work-orders/new" element={<Perm perm="create"><WorkOrderDetail /></Perm>} />
         <Route path="work-orders/:id" element={<WorkOrderDetail />} />
         <Route path="open" element={<Perm page="open"><WorkOrders presetFlag="open" title="Open work orders" /></Perm>} />
         <Route path="placed" element={<Perm page="placed"><WorkOrders presetFlag="placed" title="Placed work orders" /></Perm>} />
