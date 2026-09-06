@@ -42,6 +42,21 @@ CREATE TABLE IF NOT EXISTS sync_meta (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_wo ON audit_log(work_order_id);
 CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at);
+CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    created_at TEXT NOT NULL,
+    created_by TEXT
+);
+CREATE TABLE IF NOT EXISTS record_extras (
+    record_id TEXT PRIMARY KEY,
+    work_order_id TEXT,
+    delay_kind TEXT,
+    delay_source TEXT,
+    delay_justification TEXT,
+    updated_at TEXT,
+    updated_by TEXT
+);
 """
 
 DEFAULT_USERS = [
@@ -95,6 +110,8 @@ def init_db() -> None:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
         if "last_login" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
+        if "extra_permissions" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN extra_permissions TEXT")
         if count == 0:
             for u in DEFAULT_USERS:
                 conn.execute(
@@ -132,7 +149,8 @@ def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
 def list_users() -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
-            "SELECT id, username, full_name, email, role, is_active, created_at, last_login FROM users ORDER BY id"
+            """SELECT id, username, full_name, email, role, is_active, created_at, last_login, extra_permissions
+               FROM users ORDER BY id"""
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -142,12 +160,19 @@ def touch_login(user_id: int) -> None:
         conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (now_iso(), user_id))
 
 
-def create_user(username: str, full_name: str, email: str, password: str, role: str) -> dict[str, Any]:
+def create_user(
+    username: str,
+    full_name: str,
+    email: str,
+    password: str,
+    role: str,
+    extra_permissions: Optional[str] = None,
+) -> dict[str, Any]:
     with connect() as conn:
         cur = conn.execute(
-            """INSERT INTO users (username, full_name, email, password_hash, role, is_active, created_at)
-               VALUES (?, ?, ?, ?, ?, 1, ?)""",
-            (username, full_name, email, hash_password(password), role, now_iso()),
+            """INSERT INTO users (username, full_name, email, password_hash, role, is_active, created_at, extra_permissions)
+               VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+            (username, full_name, email, hash_password(password), role, now_iso(), extra_permissions),
         )
         uid = cur.lastrowid
     user = get_user_by_id(uid)
@@ -156,7 +181,7 @@ def create_user(username: str, full_name: str, email: str, password: str, role: 
 
 
 def update_user(user_id: int, **fields: Any) -> Optional[dict[str, Any]]:
-    allowed = {"full_name", "email", "role", "is_active", "password"}
+    allowed = {"full_name", "email", "role", "is_active", "password", "extra_permissions"}
     sets = []
     values: list[Any] = []
     for k, v in fields.items():
@@ -249,6 +274,92 @@ def set_sync_meta(key: str, value: str) -> None:
             "INSERT INTO sync_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
+
+
+def list_suppliers() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, name, created_at, created_by FROM suppliers ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def add_supplier(name: str, created_by: str = "") -> dict[str, Any]:
+    cleaned = " ".join((name or "").split())
+    if not cleaned:
+        raise ValueError("Supplier name is required")
+    with connect() as conn:
+        existing = conn.execute(
+            "SELECT id, name, created_at, created_by FROM suppliers WHERE name = ? COLLATE NOCASE",
+            (cleaned,),
+        ).fetchone()
+        if existing:
+            return dict(existing)
+        conn.execute(
+            "INSERT INTO suppliers (name, created_at, created_by) VALUES (?, ?, ?)",
+            (cleaned, now_iso(), created_by),
+        )
+        row = conn.execute(
+            "SELECT id, name, created_at, created_by FROM suppliers WHERE name = ? COLLATE NOCASE",
+            (cleaned,),
+        ).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def get_record_extra(record_id: str) -> Optional[dict[str, Any]]:
+    if not record_id:
+        return None
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM record_extras WHERE record_id = ?", (record_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_record_extras(record_ids: list[str]) -> dict[str, dict[str, Any]]:
+    ids = [str(i) for i in record_ids if i]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM record_extras WHERE record_id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        return {str(r["record_id"]): dict(r) for r in rows}
+
+
+def upsert_record_extra(
+    record_id: str,
+    username: str,
+    work_order_id: str = "",
+    delay_kind: Optional[str] = None,
+    delay_source: Optional[str] = None,
+    delay_justification: Optional[str] = None,
+) -> dict[str, Any]:
+    current = get_record_extra(record_id) or {}
+    kind = delay_kind if delay_kind is not None else current.get("delay_kind") or ""
+    source = delay_source if delay_source is not None else current.get("delay_source") or ""
+    justification = (
+        delay_justification if delay_justification is not None else current.get("delay_justification") or ""
+    )
+    wo = work_order_id or current.get("work_order_id") or ""
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO record_extras
+               (record_id, work_order_id, delay_kind, delay_source, delay_justification, updated_at, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(record_id) DO UPDATE SET
+                 work_order_id = excluded.work_order_id,
+                 delay_kind = excluded.delay_kind,
+                 delay_source = excluded.delay_source,
+                 delay_justification = excluded.delay_justification,
+                 updated_at = excluded.updated_at,
+                 updated_by = excluded.updated_by""",
+            (record_id, wo, kind, source, justification, now_iso(), username),
+        )
+    extra = get_record_extra(record_id)
+    assert extra is not None
+    return extra
 
 
 # Ensure schema exists for scripts/tests that never hit FastAPI startup.

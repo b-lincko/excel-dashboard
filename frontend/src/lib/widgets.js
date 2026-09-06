@@ -10,6 +10,7 @@ export const KPI_METRICS = [
   { id: "overdue", label: "Overdue", accent: "rose", source: "kpis", click: { flag: "overdue" } },
   { id: "total", label: "Total MRs", accent: "brand", source: "kpis", click: {} },
   { id: "open", label: "Open", accent: "sky", source: "kpis", click: { flag: "open" } },
+  { id: "placed", label: "Placed", accent: "indigo", source: "kpis", click: { flag: "placed" } },
   { id: "closed", label: "Closed", accent: "emerald", source: "kpis", click: { flag: "closed" } },
   { id: "pending", label: "Pending / NTP", accent: "amber", source: "kpis", click: { flag: "pending" } },
   { id: "completion_rate", label: "Completion rate", accent: "emerald", source: "kpis", suffix: "%" },
@@ -34,6 +35,7 @@ export const CHART_STYLES = [
 export const GROUP_METRICS = [
   { id: "total", label: "Total" },
   { id: "open", label: "Open" },
+  { id: "placed", label: "Placed" },
   { id: "closed", label: "Closed" },
   { id: "overdue", label: "Overdue" },
   { id: "completion_rate", label: "Completion %" },
@@ -147,6 +149,14 @@ export function writeDashCache(data) {
     sessionStorage.setItem(DASH_CACHE_KEY, JSON.stringify(data));
   } catch {
     /* quota */
+  }
+}
+
+export function clearDashCache() {
+  try {
+    sessionStorage.removeItem(DASH_CACHE_KEY);
+  } catch {
+    /* ignore */
   }
 }
 

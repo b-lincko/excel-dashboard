@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from . import database
 from .config import DATA_DIR
 from .excel.service import excel_service
-from .routers import audit, auth, dashboard, ops, reports, settings, sync, users, work_orders
+from .routers import audit, auth, catalog, dashboard, ops, reports, settings, sync, users, work_orders
 
 
 def _boot() -> None:
@@ -64,6 +64,7 @@ async def security_headers(request: Request, call_next):
 
 app.include_router(auth.router)
 app.include_router(work_orders.router)
+app.include_router(catalog.router)
 app.include_router(dashboard.router)
 app.include_router(ops.router)
 app.include_router(reports.router)

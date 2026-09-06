@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.config import AppConfig, save_config, load_config  # noqa: E402
 from app.dates import parse_date  # noqa: E402
-from app.domain import is_closed, is_open, is_overdue  # noqa: E402
+from app.domain import is_closed, is_open, is_overdue, is_placed, is_status_open  # noqa: E402
 from app.excel.service import ExcelService  # noqa: E402
 from app.stats import kpis  # noqa: E402
 from app.validation import validate_work_order  # noqa: E402
@@ -68,8 +68,10 @@ def test_kpis_match_records(workbook):
     k = kpis(recs)
     assert k["total"] == len(recs)
     assert k["closed"] == sum(1 for r in recs if is_closed(r))
-    assert k["open"] == sum(1 for r in recs if is_open(r))
-    assert k["open"] + k["closed"] == k["total"]
+    assert k["open"] == sum(1 for r in recs if is_status_open(r))
+    assert k["placed"] == sum(1 for r in recs if is_placed(r))
+    assert k["open"] + k["closed"] <= k["total"]
+    assert k["open"] + k["placed"] + k["closed"] <= k["total"]
     assert k["overdue"] == sum(1 for r in recs if is_overdue(r))
     assert 0 <= k["completion_rate"] <= 100
 
@@ -102,6 +104,10 @@ def test_create_appends_row(workbook):
     recs = svc.get_all(force=True)
     assert len(recs) == before + 1
     assert sum(1 for r in recs if r["record_id"] == created["record_id"]) == 1
+    created_d = parse_date(created["created_date"])
+    due_d = parse_date(created["due_date"])
+    assert created_d and due_d
+    assert (due_d.date() - created_d.date()).days == 5
 
 
 def test_validation_close_before_create():
@@ -262,3 +268,100 @@ def test_preserve_other_sheets(workbook):
     assert str(ws["A4"].value).startswith("=")
     assert isinstance(ws["H4"].value, ArrayFormula) or str(ws["H4"].value).startswith("=")
     wb.close()
+
+
+def test_due_offsets_by_purchase_type(workbook):
+    from datetime import timedelta
+
+    _, svc = workbook
+    recs = svc.get_all(force=True)
+    expected = {
+        "direct cash": 3,
+        "local po": 5,
+        "international": 10,
+        "service": 10,
+        "consumable": 2,
+        "emergency": 0,
+        "under warranty": 10,
+        "alternative": 10,
+    }
+    checked = 0
+    for rec in recs:
+        ptype = str(rec.get("work_type") or "").strip().lower()
+        if ptype not in expected:
+            continue
+        created = parse_date(rec.get("created_date"))
+        due = parse_date(rec.get("due_date"))
+        if not created or not due:
+            continue
+        assert due.date() == (created + timedelta(days=expected[ptype])).date()
+        checked += 1
+        if checked >= 40:
+            break
+    assert checked >= 10
+
+
+def test_roles_guest_and_catalog(workbook):
+    import uuid
+
+    from app.main import app
+    from app import database
+    from app.excel.service import excel_service
+    from app.stats import invalidate_dash_cache
+
+    database.init_db()
+    excel_service.invalidate()
+    invalidate_dash_cache()
+    client = TestClient(app)
+    admin = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"}).json()
+    headers = {"Authorization": f"Bearer {admin['access_token']}"}
+    me = admin["user"]
+    assert "view" in me["permissions"]
+    guest_name = f"guestkpi_{uuid.uuid4().hex[:8]}"
+    reader_name = f"readerkpi_{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        "/api/users",
+        headers=headers,
+        json={
+            "username": guest_name,
+            "password": "guest123",
+            "role": "guest",
+            "extra_permissions": ["queue", "open"],
+        },
+    )
+    assert created.status_code == 200, created.text
+    guest = client.post("/api/auth/login", json={"username": guest_name, "password": "guest123"})
+    assert guest.status_code == 200
+    guser = guest.json()["user"]
+    assert guser["role"] == "guest"
+    assert "queue" in guser["permissions"]
+    assert "open" in guser["permissions"]
+    assert "users" not in guser["permissions"]
+    gheaders = {"Authorization": f"Bearer {guest.json()['access_token']}"}
+    forbidden = client.get("/api/users", headers=gheaders)
+    assert forbidden.status_code == 403
+    viewed = client.get("/api/work-orders?flag=open&page_size=5", headers=gheaders)
+    assert viewed.status_code == 200
+    readonly = client.post(
+        "/api/users",
+        headers=headers,
+        json={"username": reader_name, "password": "readonly123", "role": "readonly"},
+    )
+    assert readonly.status_code == 200
+    assert "edit" not in readonly.json()["item"]["permissions"]
+    supplier = client.post("/api/catalog/suppliers", headers=headers, json={"name": "Test Supplier KPI"})
+    assert supplier.status_code == 200, supplier.text
+    listed = client.get("/api/catalog/suppliers", headers=headers)
+    assert listed.status_code == 200
+    assert any(n.lower() == "test supplier kpi" for n in listed.json()["names"])
+    recs_open = client.get("/api/work-orders?flag=open&page_size=1", headers=headers)
+    recs_placed = client.get("/api/work-orders?flag=placed&page_size=1", headers=headers)
+    assert recs_open.status_code == 200
+    assert recs_placed.status_code == 200
+    dash = client.get("/api/dashboard", headers=headers)
+    k = dash.json()["kpis"]
+    assert recs_open.json()["total"] == k["open"]
+    assert recs_placed.json()["total"] == k["placed"]
+    refresh = client.post("/api/sync/refresh", headers=headers)
+    assert refresh.status_code == 200
+    assert refresh.json().get("hard") is True

@@ -7,7 +7,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import database
-from ..security import create_token, get_current_user, require_permission, verify_password
+from ..security import (
+    GUEST_PAGES,
+    VALID_ROLES,
+    create_token,
+    get_current_user,
+    parse_extra_permissions,
+    require_permission,
+    user_permissions,
+    verify_password,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -84,6 +93,7 @@ def save_layout(body: LayoutBody, user=Depends(require_permission("view"))):
 
 
 def public_user(user: dict) -> dict:
+    extra = parse_extra_permissions(user)
     return {
         "id": user["id"],
         "username": user["username"],
@@ -93,4 +103,8 @@ def public_user(user: dict) -> dict:
         "is_active": bool(user.get("is_active")),
         "last_login": user.get("last_login"),
         "created_at": user.get("created_at"),
+        "permissions": user_permissions(user),
+        "extra_permissions": extra,
+        "guest_pages": GUEST_PAGES,
+        "roles": sorted(VALID_ROLES),
     }

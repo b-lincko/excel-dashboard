@@ -18,6 +18,8 @@ from .domain import (
     is_open,
     is_overdue,
     is_pending,
+    is_placed,
+    is_status_open,
     matches_filters,
     reason_for_open,
     today,
@@ -38,13 +40,15 @@ def kpis(records: list[dict[str, Any]]) -> dict[str, Any]:
     cfg = load_config()
     total = len(records)
     closed = [r for r in records if is_closed(r, cfg)]
-    open_ = [r for r in records if is_open(r, cfg)]
+    open_ = [r for r in records if is_status_open(r, cfg)]
+    placed = [r for r in records if is_placed(r, cfg)]
+    outstanding = [r for r in records if is_open(r, cfg)]
     overdue = [r for r in records if is_overdue(r, cfg)]
     pending = [r for r in records if is_pending(r, cfg)]
     in_prog = [r for r in records if is_in_progress(r, cfg)]
     closing = [closing_days(r) for r in closed]
     closing = [c for c in closing if c is not None]
-    aging = [aging_days(r) for r in open_]
+    aging = [aging_days(r) for r in outstanding]
     aging = [a for a in aging if a is not None]
     t = today()
     created_today = [r for r in records if to_date(r.get("created_date")) == t]
@@ -70,13 +74,15 @@ def kpis(records: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     blockades = [
         r
-        for r in open_
+        for r in outstanding
         if str(r.get("status") or "").strip().upper() in {"UNDER NTP", "ON HOLD", "OPEN"}
         or is_overdue(r, cfg)
     ]
     return {
         "total": total,
         "open": len(open_),
+        "placed": len(placed),
+        "outstanding": len(outstanding),
         "closed": len(closed),
         "pending": len(pending),
         "overdue": len(overdue),
@@ -89,8 +95,15 @@ def kpis(records: list[dict[str, Any]]) -> dict[str, Any]:
         "done_today": len(done_today),
         "delivered_today": len(delivered_today),
         "blockades": len(blockades),
-        "progress_open": round((len(in_prog) / len(open_) * 100) if open_ else 0, 1),
+        "progress_open": round((len(in_prog) / len(outstanding) * 100) if outstanding else 0, 1),
     }
+
+
+def invalidate_dash_cache() -> None:
+    with _DASH_LOCK:
+        _DASH_CACHE["payload"] = None
+        _DASH_CACHE["token"] = ""
+        _DASH_CACHE["key"] = ""
 
 
 def today_activity(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -459,9 +472,9 @@ def mindmap(
                 "id": "blockades",
                 "label": "Blockades",
                 "value": k["blockades"],
-                "filter": {"flag": "open"},
+                "filter": {"flag": "outstanding"},
                 "children": [
-                    {"id": f"st:{b['name']}", "label": b["name"], "value": b["value"], "filter": {"flag": "open", "status": b["name"]}}
+                    {"id": f"st:{b['name']}", "label": b["name"], "value": b["value"], "filter": {"flag": "outstanding", "status": b["name"]}}
                     for b in blockade_rows
                 ],
             },

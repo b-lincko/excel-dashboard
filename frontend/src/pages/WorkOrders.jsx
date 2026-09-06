@@ -222,12 +222,31 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
         extra={
           <div>
             <label className="lbl">Search</label>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && load()}
-              placeholder="ID, description, technician…"
-            />
+            <div className="flex gap-2">
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    setFilters((f) => ({ ...f, q }));
+                    setPage(1);
+                    load();
+                  }
+                }}
+                placeholder="ID, description, technician…"
+              />
+              <button
+                type="button"
+                className="btn-outline whitespace-nowrap"
+                onClick={() => {
+                  setFilters((f) => ({ ...f, q }));
+                  setPage(1);
+                  load();
+                }}
+              >
+                Hard search
+              </button>
+            </div>
           </div>
         }
       />

@@ -5,6 +5,19 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 
+const EXTRA_KEYS = ["delay_kind", "delay_source", "delay_justification"];
+const PENDING_STATUSES = new Set(["open", "under ntp", "on hold"]);
+const DUE_OFFSET_FALLBACK = {
+  "direct cash": 3,
+  "local po": 5,
+  international: 10,
+  service: 10,
+  consumable: 2,
+  emergency: 0,
+  "under warranty": 10,
+  alternative: 10,
+};
+
 const FIELDS = [
   ["work_order_id", "IM Work Order #", "text", true],
   ["department", "Site", "site"],
@@ -18,7 +31,7 @@ const FIELDS = [
   ["completion_date", "IM WO Completion", "datetime"],
   ["scheduled_date", "Date of PO / Expected PO / RFQ Sent", "datetime"],
   ["closed_date", "ETA / Expected RFQ Response", "datetime"],
-  ["supplier", "Supplier Name", "text"],
+  ["supplier", "Supplier Name", "supplier"],
   ["po_number", "PO NO #", "text"],
   ["issue", "Delivery Status", "issue"],
   ["description", "Required Material Details", "textarea"],
@@ -50,14 +63,26 @@ export default function WorkOrderDetail() {
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState(null);
   const [history, setHistory] = useState([]);
+  const [dueOffsets, setDueOffsets] = useState(DUE_OFFSET_FALLBACK);
+  const [addingSupplier, setAddingSupplier] = useState(false);
+  const [newSupplier, setNewSupplier] = useState("");
 
-  const dirty = useMemo(
-    () => FIELDS.some(([key]) => String(form[key] ?? "") !== String(original[key] ?? "")),
-    [form, original]
-  );
+  const dirty = useMemo(() => {
+    const keys = [...FIELDS.map(([key]) => key), ...EXTRA_KEYS];
+    return keys.some((key) => String(form[key] ?? "") !== String(original[key] ?? ""));
+  }, [form, original]);
+  const isPending = PENDING_STATUSES.has(String(form.status || "").trim().toLowerCase());
+  const dueDays = dueOffsets[String(form.work_type || "").trim().toLowerCase()];
+  const readOnly = !can("edit") && !isNew;
 
   useEffect(() => {
-    api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
+    api
+      .get("/api/work-orders/options")
+      .then((d) => {
+        setOptions(d.options || {});
+        if (d.due_offsets) setDueOffsets(d.due_offsets);
+      })
+      .catch(() => {});
     if (!isNew) {
       api
         .get(`/api/work-orders/${encodeURIComponent(id)}`)
@@ -113,6 +138,28 @@ export default function WorkOrderDetail() {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
+  async function addSupplier() {
+    const name = newSupplier.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      const d = await api.post("/api/catalog/suppliers", { name });
+      const added = d.item?.name || name;
+      setOptions((o) => ({
+        ...o,
+        supplier: Array.from(new Set([...(o.supplier || []), added])).sort((a, b) => a.localeCompare(b)),
+      }));
+      setField("supplier", added);
+      setNewSupplier("");
+      setAddingSupplier(false);
+      toast(`Supplier “${added}” added`, "success");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function save(force = false) {
     setBusy(true);
     setError("");
@@ -128,6 +175,8 @@ export default function WorkOrderDetail() {
         const skip = new Set([
           "is_closed",
           "is_open",
+          "is_status_open",
+          "is_placed",
           "is_overdue",
           "is_pending",
           "is_in_progress",

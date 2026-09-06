@@ -162,18 +162,32 @@ class ExcelService:
         self._apply_due_date(internal)
         return internal
 
+    def _due_offsets(self) -> dict[str, int]:
+        cfg = self.cfg()
+        offsets = dict(DUE_OFFSETS)
+        extra = getattr(cfg, "due_offsets", None) or {}
+        for key, days in extra.items():
+            try:
+                offsets[str(key).strip().lower()] = int(days)
+            except (TypeError, ValueError):
+                continue
+        return offsets
+
     def _apply_due_date(self, rec: dict[str, Any]) -> None:
-        if rec.get("due_date"):
-            dt = parse_date(rec["due_date"])
-            if dt:
-                rec["due_date"] = format_date(dt, with_time=False)
-                return
         created = parse_date(rec.get("created_date"))
-        if not created:
-            rec["due_date"] = ""
-            return
         ptype = str(rec.get("work_type") or "").strip().lower()
-        days = DUE_OFFSETS.get(ptype, 14)
+        offsets = self._due_offsets()
+        default_days = int(getattr(self.cfg(), "due_offset_default_days", 14) or 14)
+        if ptype in offsets:
+            days = offsets[ptype]
+        else:
+            days = default_days
+        rec["_due_offset_days"] = days
+        rec["_due_purchase_type"] = ptype
+        if not created:
+            stored = parse_date(rec.get("due_date"))
+            rec["due_date"] = format_date(stored, with_time=False) if stored else ""
+            return
         rec["due_date"] = (created + timedelta(days=days)).strftime("%Y-%m-%d")
         rec["_due_computed"] = True
 

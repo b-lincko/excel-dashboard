@@ -29,18 +29,20 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 import { api } from "../lib/api.js";
+import { clearDashCache } from "../lib/widgets.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, group: "Work" },
-  { to: "/work-orders", label: "Work orders", icon: ClipboardList, group: "Work" },
-  { to: "/open", label: "Open", icon: FolderOpen, group: "Work" },
-  { to: "/overdue", label: "Overdue", icon: AlertTriangle, group: "Work" },
-  { to: "/closed", label: "Closed", icon: CheckCircle2, group: "Work" },
-  { to: "/queue", label: "Action queue", icon: ListTodo, group: "Ops" },
-  { to: "/suppliers", label: "Suppliers / PO", icon: Truck, group: "Ops" },
-  { to: "/analytics", label: "Analytics", icon: BarChart3, perm: "analytics", group: "Ops" },
-  { to: "/reports", label: "Reports", icon: FileText, perm: "reports", group: "Ops" },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, group: "Work", page: "dashboard" },
+  { to: "/work-orders", label: "Work orders", icon: ClipboardList, group: "Work", page: "work_orders" },
+  { to: "/open", label: "Open", icon: FolderOpen, group: "Work", page: "open" },
+  { to: "/placed", label: "Placed", icon: Truck, group: "Work", page: "placed" },
+  { to: "/overdue", label: "Overdue", icon: AlertTriangle, group: "Work", page: "overdue" },
+  { to: "/closed", label: "Closed", icon: CheckCircle2, group: "Work", page: "closed" },
+  { to: "/queue", label: "Action queue", icon: ListTodo, group: "Ops", page: "queue" },
+  { to: "/suppliers", label: "Suppliers / PO", icon: Truck, group: "Ops", page: "suppliers" },
+  { to: "/analytics", label: "Analytics", icon: BarChart3, perm: "analytics", group: "Ops", page: "analytics" },
+  { to: "/reports", label: "Reports", icon: FileText, perm: "reports", group: "Ops", page: "reports" },
   { to: "/audit", label: "Audit log", icon: Shield, perm: "audit", group: "Admin" },
   { to: "/users", label: "Users", icon: Users, perm: "users", group: "Admin" },
   { to: "/settings", label: "Settings", icon: Settings, perm: "settings", group: "Admin" },
@@ -50,6 +52,7 @@ const TITLES = {
   "/": "Dashboard",
   "/work-orders": "Work orders",
   "/open": "Open orders",
+  "/placed": "Placed orders",
   "/overdue": "Overdue",
   "/closed": "Closed orders",
   "/queue": "Action queue",
@@ -63,7 +66,7 @@ const TITLES = {
 };
 
 export default function Layout() {
-  const { user, logout, can } = useAuth();
+  const { user, logout, can, canPage } = useAuth();
   const { theme, toggle } = useTheme();
   const { toast, ask } = useUi();
   const nav = useNavigate();
@@ -190,7 +193,7 @@ export default function Layout() {
     nav("/login");
   }
 
-  const items = NAV.filter((n) => !n.perm || can(n.perm));
+  const items = NAV.filter((n) => (!n.perm || can(n.perm)) && (!n.page || canPage(n.page)));
   const groups = [];
   items.forEach((n) => {
     const last = groups[groups.length - 1];
@@ -270,22 +273,27 @@ export default function Layout() {
             <Menu size={18} />
           </button>
           <form
-            className="flex-1 max-w-xl relative"
+            className="flex-1 max-w-xl relative flex items-center gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               nav(`/work-orders?q=${encodeURIComponent(q)}`);
             }}
           >
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              ref={searchRef}
-              id="global-search"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search MRs, technicians, PO, remarks…  /"
-              className="pl-9"
-              aria-label="Search work orders"
-            />
+            <div className="relative flex-1">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                ref={searchRef}
+                id="global-search"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search MRs, technicians, PO, remarks…  /"
+                className="pl-9"
+                aria-label="Search work orders"
+              />
+            </div>
+            <button type="submit" className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs whitespace-nowrap" title="Search Excel records now">
+              Hard search
+            </button>
           </form>
           <div className="flex items-center gap-1.5 sm:gap-2 text-xs">
             <span

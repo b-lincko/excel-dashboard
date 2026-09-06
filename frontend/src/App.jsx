@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { useAuth } from "./context/AuthContext.jsx";
+import { firstPath, useAuth } from "./context/AuthContext.jsx";
 import Layout from "./components/Layout.jsx";
 import Login from "./pages/Login.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
@@ -33,14 +33,15 @@ function Guard({ children }) {
   return children;
 }
 
-function Perm({ perm, children }) {
-  const { can } = useAuth();
-  if (!can(perm)) {
+function Perm({ perm, page, children }) {
+  const { can, canPage } = useAuth();
+  const allowed = page ? canPage(page) : can(perm);
+  if (!allowed) {
     return (
       <div className="card p-8 max-w-md mx-auto text-center">
         <div className="text-lg font-semibold">You don’t have access</div>
         <p className="text-sm text-slate-500 mt-2">
-          This page needs the <span className="font-medium">{perm}</span> permission. Ask an administrator if you need it.
+          This page needs the <span className="font-medium">{page || perm}</span> permission. Ask an administrator if you need it.
         </p>
       </div>
     );
@@ -60,16 +61,16 @@ function NotFound() {
   );
 }
 
-function Lazy({ perm, children }) {
+function Lazy({ perm, page, children }) {
   const inner = <Suspense fallback={<Fallback />}>{children}</Suspense>;
-  return perm ? <Perm perm={perm}>{inner}</Perm> : inner;
+  return perm || page ? <Perm perm={perm} page={page}>{inner}</Perm> : inner;
 }
 
 export default function App() {
   const { user, loading } = useAuth();
   return (
     <Routes>
-      <Route path="/login" element={!loading && user ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/login" element={!loading && user ? <Navigate to={firstPath(user)} replace /> : <Login />} />
       <Route
         path="/"
         element={
@@ -78,18 +79,19 @@ export default function App() {
           </Guard>
         }
       >
-        <Route index element={<Dashboard />} />
-        <Route path="work-orders" element={<WorkOrders />} />
+        <Route index element={<Perm page="dashboard"><Dashboard /></Perm>} />
+        <Route path="work-orders" element={<Perm page="work_orders"><WorkOrders /></Perm>} />
         <Route path="work-orders/new" element={<WorkOrderDetail />} />
         <Route path="work-orders/:id" element={<WorkOrderDetail />} />
-        <Route path="open" element={<WorkOrders presetFlag="open" title="Open work orders" />} />
-        <Route path="overdue" element={<WorkOrders presetFlag="overdue" title="Overdue work orders" />} />
-        <Route path="closed" element={<WorkOrders presetFlag="closed" title="Closed work orders" />} />
+        <Route path="open" element={<Perm page="open"><WorkOrders presetFlag="open" title="Open work orders" /></Perm>} />
+        <Route path="placed" element={<Perm page="placed"><WorkOrders presetFlag="placed" title="Placed work orders" /></Perm>} />
+        <Route path="overdue" element={<Perm page="overdue"><WorkOrders presetFlag="overdue" title="Overdue work orders" /></Perm>} />
+        <Route path="closed" element={<Perm page="closed"><WorkOrders presetFlag="closed" title="Closed work orders" /></Perm>} />
         <Route path="pending" element={<WorkOrders presetFlag="pending" title="Pending work orders" />} />
-        <Route path="analytics" element={<Lazy perm="analytics"><Analytics /></Lazy>} />
-        <Route path="queue" element={<Lazy><ActionQueue /></Lazy>} />
-        <Route path="suppliers" element={<Lazy><Suppliers /></Lazy>} />
-        <Route path="reports" element={<Lazy perm="reports"><Reports /></Lazy>} />
+        <Route path="analytics" element={<Lazy perm="analytics" page="analytics"><Analytics /></Lazy>} />
+        <Route path="queue" element={<Lazy page="queue"><ActionQueue /></Lazy>} />
+        <Route path="suppliers" element={<Lazy page="suppliers"><Suppliers /></Lazy>} />
+        <Route path="reports" element={<Lazy perm="reports" page="reports"><Reports /></Lazy>} />
         <Route path="audit" element={<Lazy perm="audit"><AuditLog /></Lazy>} />
         <Route path="users" element={<Lazy perm="users"><Users /></Lazy>} />
         <Route path="settings" element={<Lazy perm="settings"><Settings /></Lazy>} />

@@ -5,13 +5,75 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from .. import database
 from ..config import load_config
 from ..dates import to_date
 from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_for_open, today
-from ..excel.service import ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
-from ..security import get_current_user, require_permission
+from ..excel.service import DUE_OFFSETS, ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
+from ..security import require_permission
 from ..stats import parse_query_filters
 from ..validation import validate_work_order
+
+EXTRA_FIELDS = {"delay_kind", "delay_source", "delay_justification"}
+
+
+def _overlay_fields(extra: dict[str, Any] | None) -> dict[str, Any]:
+    extra = extra or {}
+    return {
+        "delay_kind": extra.get("delay_kind") or "",
+        "delay_source": extra.get("delay_source") or "",
+        "delay_justification": extra.get("delay_justification") or "",
+    }
+
+
+def _with_extras(rec: dict[str, Any]) -> dict[str, Any]:
+    extra = database.get_record_extra(str(rec.get("record_id") or ""))
+    out = dict(rec)
+    out.update(_overlay_fields(extra))
+    return out
+
+
+def _with_extras_many(recs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    extras = database.get_record_extras([str(r.get("record_id") or "") for r in recs])
+    out = []
+    for rec in recs:
+        item = dict(rec)
+        item.update(_overlay_fields(extras.get(str(rec.get("record_id") or ""))))
+        out.append(item)
+    return out
+
+
+def _split_changes(changes: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    excel_changes: dict[str, Any] = {}
+    extra_changes: dict[str, Any] = {}
+    for key, value in (changes or {}).items():
+        if key in EXTRA_FIELDS:
+            extra_changes[key] = value if value is not None else ""
+        else:
+            excel_changes[key] = value
+    return excel_changes, extra_changes
+
+
+def _save_extras(rec: dict[str, Any], extra_changes: dict[str, Any], username: str) -> None:
+    if not extra_changes:
+        return
+    rid = str(rec.get("record_id") or "")
+    if not rid:
+        return
+    database.upsert_record_extra(
+        rid,
+        username,
+        work_order_id=str(rec.get("work_order_id") or ""),
+        delay_kind=extra_changes.get("delay_kind"),
+        delay_source=extra_changes.get("delay_source"),
+        delay_justification=extra_changes.get("delay_justification"),
+    )
+
+
+def _maybe_add_supplier(name: Any, username: str) -> None:
+    cleaned = " ".join(str(name or "").split())
+    if cleaned:
+        database.add_supplier(cleaned, created_by=username)
 
 router = APIRouter(prefix="/api/work-orders", tags=["work-orders"])
 
@@ -98,7 +160,7 @@ def list_work_orders(
     matched.sort(key=sort_key, reverse=reverse)
     total = len(matched)
     start = (page - 1) * page_size
-    page_rows = [annotate(r, cfg) for r in matched[start : start + page_size]]
+    page_rows = [annotate(r, cfg) for r in _with_extras_many(matched[start : start + page_size])]
     return {
         "items": page_rows,
         "total": total,
@@ -135,12 +197,22 @@ def options(user=Depends(require_permission("view"))):
                 buckets[f].add(str(v))
     opts = {f: sorted(buckets[f], key=str.lower) for f in fields}
     lists = excel_service.lists()
+    cfg = load_config()
+    catalog_names = [s["name"] for s in database.list_suppliers() if s.get("name")]
+    suppliers = sorted({*opts.get("supplier", []), *catalog_names}, key=str.lower)
+    opts["supplier"] = suppliers
+    offsets = dict(DUE_OFFSETS)
+    offsets.update({str(k).lower(): int(v) for k, v in (cfg.due_offsets or {}).items()})
     return {
         "options": opts,
         "lists": lists,
-        "mapping": load_config().mapping.model_dump(),
+        "mapping": cfg.mapping.model_dump(),
         "headers": excel_service.headers(),
         "sync_token": excel_service.sync_token(),
+        "due_offsets": offsets,
+        "due_offset_default_days": cfg.due_offset_default_days,
+        "delay_kinds": ["placement", "delivery"],
+        "delay_sources": ["site", "procurement", "supplier"],
     }
 
 
@@ -152,7 +224,7 @@ def get_work_order(wo_id: str, user=Depends(require_permission("view"))):
         _raise_excel(exc)
     if not rec:
         raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
-    return {"item": annotate(rec), "sync_token": excel_service.sync_token()}
+    return {"item": annotate(_with_extras(rec)), "sync_token": excel_service.sync_token()}
 
 
 @router.put("/{wo_id}")
@@ -160,29 +232,41 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
     rec = excel_service.get_by_id(wo_id)
     if not rec:
         raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
-    merged = {**{k: rec.get(k) for k in load_config().mapping.model_dump().keys()}, **body.changes}
+    excel_changes, extra_changes = _split_changes(body.changes)
+    merged = {**{k: rec.get(k) for k in load_config().mapping.model_dump().keys()}, **excel_changes}
     errors = validate_work_order(merged, partial=False)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
-    try:
-        updated = excel_service.update_record(
-            wo_id, body.changes, username=user["username"], sync_token=body.sync_token, force=body.force
-        )
-    except (ExcelUnavailable, ExcelLocked, SyncConflict, KeyError, ValueError) as exc:
-        _raise_excel(exc)
-    return {"item": annotate(updated), "sync_token": excel_service.sync_token(), "saved": True}
+    updated = rec
+    if excel_changes:
+        try:
+            updated = excel_service.update_record(
+                wo_id, excel_changes, username=user["username"], sync_token=body.sync_token, force=body.force
+            )
+        except (ExcelUnavailable, ExcelLocked, SyncConflict, KeyError, ValueError) as exc:
+            _raise_excel(exc)
+    if extra_changes:
+        _save_extras(updated, extra_changes, user["username"])
+    if excel_changes.get("supplier"):
+        _maybe_add_supplier(excel_changes.get("supplier"), user["username"])
+    return {"item": annotate(_with_extras(updated)), "sync_token": excel_service.sync_token(), "saved": True}
 
 
 @router.post("")
 def create_work_order(body: WorkOrderCreate, user=Depends(require_permission("create"))):
-    errors = validate_work_order(body.data, partial=False)
+    excel_data, extra_changes = _split_changes(body.data)
+    errors = validate_work_order(excel_data, partial=False)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
     try:
-        created = excel_service.create_record(body.data, username=user["username"])
+        created = excel_service.create_record(excel_data, username=user["username"])
     except (ExcelUnavailable, ExcelLocked, ValueError) as exc:
         _raise_excel(exc)
-    return {"item": annotate(created), "sync_token": excel_service.sync_token(), "saved": True}
+    if extra_changes:
+        _save_extras(created, extra_changes, user["username"])
+    if excel_data.get("supplier"):
+        _maybe_add_supplier(excel_data.get("supplier"), user["username"])
+    return {"item": annotate(_with_extras(created)), "sync_token": excel_service.sync_token(), "saved": True}
 
 
 @router.delete("/{wo_id}")

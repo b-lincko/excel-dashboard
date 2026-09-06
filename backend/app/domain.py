@@ -48,7 +48,21 @@ def is_in_progress(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool
 
 
 def is_open(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    """Still outstanding: anything that is not CLOSED (includes PLACED, NTP, hold)."""
     return not is_closed(rec, cfg)
+
+
+def is_status_open(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    """Excel STATUS is OPEN — used for the Open KPI and /open page."""
+    cfg = cfg or load_config()
+    values = getattr(cfg, "status_open_values", None) or ["OPEN"]
+    return _norm(rec.get("status")) in status_set(values)
+
+
+def is_placed(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    cfg = cfg or load_config()
+    values = getattr(cfg, "placed_statuses", None) or ["PLACED"]
+    return _norm(rec.get("status")) in status_set(values)
 
 
 def is_overdue(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optional[date] = None) -> bool:
@@ -180,7 +194,11 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
             return False
 
     flag = filters.get("flag")
-    if flag == "open" and not is_open(rec, cfg):
+    if flag == "open" and not is_status_open(rec, cfg):
+        return False
+    if flag == "placed" and not is_placed(rec, cfg):
+        return False
+    if flag == "outstanding" and not is_open(rec, cfg):
         return False
     if flag == "closed" and not is_closed(rec, cfg):
         return False

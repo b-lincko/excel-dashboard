@@ -56,7 +56,7 @@ export default function Filters({ value, onChange, options = {}, extra }) {
         <Select label="Assigned to" field="assigned_to" value={v} set={set} options={options.assigned_to} />
         <Select label="Location" field="location" value={v} set={set} options={options.location} />
         <Select label="Work type" field="work_type" value={v} set={set} options={options.work_type} />
-        <Select label="Delay reason" field="delay_reason" value={v} set={set} options={options.delay_reason} />
+        <Select label="Delivery status" field="delay_reason" value={v} set={set} options={options.delay_reason} />
         <Select label="Supplier" field="supplier" value={v} set={set} options={options.supplier} />
         {extra}
       </div>

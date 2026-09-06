@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext.jsx";
+import { firstPath, useAuth } from "../context/AuthContext.jsx";
 
 export default function Login() {
   const { login } = useAuth();
@@ -20,8 +20,8 @@ export default function Login() {
     setBusy(true);
     setError("");
     try {
-      await login(username.trim(), password);
-      nav("/");
+      const signedIn = await login(username.trim(), password);
+      nav(firstPath(signedIn));
     } catch (err) {
       setError(err.message || "Sign in failed");
     } finally {

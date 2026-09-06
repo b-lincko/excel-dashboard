@@ -89,7 +89,22 @@ class AppConfig(BaseModel):
     open_statuses: list[str] = Field(
         default_factory=lambda: ["OPEN", "PLACED", "UNDER NTP", "UNDER GATEPASS", "ON HOLD"]
     )
+    status_open_values: list[str] = Field(default_factory=lambda: ["OPEN"])
+    placed_statuses: list[str] = Field(default_factory=lambda: ["PLACED"])
     pending_statuses: list[str] = Field(default_factory=lambda: ["OPEN", "UNDER NTP", "ON HOLD"])
+    due_offsets: dict[str, int] = Field(
+        default_factory=lambda: {
+            "direct cash": 3,
+            "local po": 5,
+            "international": 10,
+            "service": 10,
+            "consumable": 2,
+            "emergency": 0,
+            "under warranty": 10,
+            "alternative": 10,
+        }
+    )
+    due_offset_default_days: int = 14
     in_progress_statuses: list[str] = Field(default_factory=lambda: ["PLACED", "UNDER GATEPASS"])
     cancelled_statuses: list[str] = Field(default_factory=lambda: [])
     aging_buckets: list[dict[str, Any]] = Field(
@@ -126,6 +141,8 @@ class AppConfig(BaseModel):
             ],
             "manager": ["view", "edit", "create", "reports", "analytics", "audit"],
             "user": ["view", "edit", "reports"],
+            "readonly": ["view", "reports", "analytics"],
+            "guest": ["view"],
         }
     )
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -13,6 +14,33 @@ from fastapi.security import OAuth2PasswordBearer
 from . import database
 from .config import load_config
 from .passwords import hash_password, verify_password  # re-export
+
+VALID_ROLES = {"admin", "manager", "user", "readonly", "guest"}
+GUEST_PAGES = [
+    "dashboard",
+    "work_orders",
+    "open",
+    "placed",
+    "overdue",
+    "closed",
+    "queue",
+    "suppliers",
+    "analytics",
+    "reports",
+]
+ALL_PERMS = [
+    "view",
+    "edit",
+    "create",
+    "delete",
+    "reports",
+    "analytics",
+    "settings",
+    "users",
+    "audit",
+    "backup",
+    *GUEST_PAGES,
+]
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 oauth2_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
@@ -70,11 +98,52 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict[str, Any]:
     return user
 
 
+def parse_extra_permissions(user: Optional[dict[str, Any]]) -> list[str]:
+    if not user:
+        return []
+    raw = user.get("extra_permissions")
+    if isinstance(raw, list):
+        values = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            values = parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            values = [p.strip() for p in raw.split(",") if p.strip()]
+    else:
+        values = []
+    allowed = set(ALL_PERMS)
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        key = str(item or "").strip()
+        if key in allowed and key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
+def user_permissions(user: dict[str, Any]) -> list[str]:
+    role = str(user.get("role") or "user")
+    cfg = load_config()
+    if role == "admin":
+        return list(ALL_PERMS)
+    if role == "guest":
+        extra = parse_extra_permissions(user)
+        pages = [p for p in extra if p in GUEST_PAGES]
+        return ["view", *pages]
+    allowed = list(cfg.permissions.get(role) or ["view"])
+    if "view" not in allowed:
+        allowed = ["view", *allowed]
+    return allowed
+
+
 def require_permission(permission: str):
     def checker(user: dict = Depends(get_current_user)) -> dict:
-        cfg = load_config()
-        allowed = cfg.permissions.get(user["role"], [])
-        if permission not in allowed and user["role"] != "admin":
+        if user.get("role") == "admin":
+            return user
+        allowed = user_permissions(user)
+        if permission not in allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         return user
 

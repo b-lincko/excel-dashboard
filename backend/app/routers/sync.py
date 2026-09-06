@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
 from ..security import require_permission
-from ..stats import dashboard_payload
+from ..stats import dashboard_payload, invalidate_dash_cache
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
@@ -22,13 +22,16 @@ def sync_ping(user=Depends(require_permission("view"))):
 @router.post("/refresh")
 def refresh(user=Depends(require_permission("view"))):
     try:
+        excel_service.invalidate()
         records = excel_service.load(force=True)
     except ExcelUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except ExcelLocked as exc:
         raise HTTPException(status_code=423, detail=str(exc))
+    invalidate_dash_cache()
     status = excel_service.status()
     status["record_count"] = len(records)
+    status["hard"] = True
     return status
 
 

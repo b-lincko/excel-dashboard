@@ -60,6 +60,7 @@ const ICONS = {
   overdue: AlertTriangle,
   total: ClipboardList,
   open: FolderOpen,
+  placed: Truck,
   closed: CheckCircle2,
   pending: Hourglass,
   completion_rate: CheckCircle2,
@@ -139,7 +140,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
               <div className="h-full bg-gradient-to-r from-brand-700 to-emerald-500" style={{ width: `${progress}%` }} />
             </div>
             <div className="mt-2 text-xs text-slate-500">
-              {progress}% complete · {k.open ?? 0} still open · {k.blockades ?? 0} blocked
+              {progress}% complete · {k.open ?? 0} open · {k.placed ?? 0} placed · {k.blockades ?? 0} blocked
             </div>
           </div>
         );
@@ -150,7 +151,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
             <KPICard label="Jobs in today" value={k.created_today} hint="MR received today" icon={ClipboardList} accent="brand" onClick={() => go({ period: "today" })} />
             <KPICard label="Jobs done today" value={k.done_today} hint="Closed / ETA today" icon={CheckCircle2} accent="emerald" onClick={() => go({ flag: "closed", period: "today" })} />
             <KPICard label="Delivered today" value={k.delivered_today} icon={Truck} accent="sky" />
-            <KPICard label="Blockades" value={k.blockades} hint="NTP, hold, open, overdue" icon={Ban} accent="rose" onClick={() => go({ flag: "open" })} />
+            <KPICard label="Blockades" value={k.blockades} hint="NTP, hold, open, overdue" icon={Ban} accent="rose" onClick={() => go({ flag: "outstanding" })} />
             <KPICard label="In progress" value={k.in_progress} hint="Placed / gatepass" icon={Wrench} accent="indigo" onClick={() => go({ flag: "in_progress" })} />
             <KPICard label="Overdue" value={k.overdue} icon={AlertTriangle} accent="rose" onClick={() => go({ flag: "overdue" })} />
           </div>
@@ -181,9 +182,10 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
       }
       case "kpis_totals":
         return (
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
             <KPICard label="Total MRs" value={k.total} icon={ClipboardList} accent="brand" onClick={() => go({})} />
-            <KPICard label="Open" value={k.open} icon={FolderOpen} accent="sky" onClick={() => go({ flag: "open" })} />
+            <KPICard label="Open" value={k.open} hint="STATUS = OPEN" icon={FolderOpen} accent="sky" onClick={() => go({ flag: "open" })} />
+            <KPICard label="Placed" value={k.placed} hint="STATUS = PLACED" icon={Truck} accent="indigo" onClick={() => go({ flag: "placed" })} />
             <KPICard label="Closed" value={k.closed} icon={CheckCircle2} accent="emerald" onClick={() => go({ flag: "closed" })} />
             <KPICard label="Pending / NTP" value={k.pending} icon={Hourglass} accent="amber" onClick={() => go({ flag: "pending" })} />
             <KPICard label="Completion rate" value={`${k.completion_rate ?? 0}%`} icon={CheckCircle2} accent="emerald" />
@@ -204,6 +206,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
             hint="Click to view records"
             onClick={() => {
               if (meta.id === "open") go({ flag: "open" });
+              else if (meta.id === "placed") go({ flag: "placed" });
               else if (meta.id === "closed") go({ flag: "closed" });
               else if (meta.id === "overdue") go({ flag: "overdue" });
               else if (meta.id === "pending") go({ flag: "pending" });
@@ -237,7 +240,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
           <ChartCard title="Blockades" subtitle="Why open MRs are stuck">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={data?.blockades || []} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78} isAnimationActive={false} onClick={(d) => d?.name && go({ status: d.name, flag: "open" })}>
+                <Pie data={data?.blockades || []} dataKey="value" nameKey="name" innerRadius={48} outerRadius={78} isAnimationActive={false} onClick={(d) => d?.name && go({ status: d.name, flag: "outstanding" })}>
                   {(data?.blockades || []).map((_, i) => (
                     <Cell key={i} fill={PIE[i % PIE.length]} />
                   ))}
@@ -317,7 +320,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
                 <XAxis type="number" allowDecimals={false} />
                 <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Bar dataKey="value" fill="#1D6A96" radius={[0, 6, 6, 0]} isAnimationActive={false} onClick={(d) => d?.name && nav(`/work-orders?flag=open&reason=${encodeURIComponent(d.name)}`)} />
+                <Bar dataKey="value" fill="#1D6A96" radius={[0, 6, 6, 0]} isAnimationActive={false} onClick={(d) => d?.name && nav(`/work-orders?flag=outstanding&reason=${encodeURIComponent(d.name)}`)} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
