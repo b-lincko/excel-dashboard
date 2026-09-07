@@ -246,6 +246,15 @@ export default function Settings() {
           <p className="text-[11px] text-slate-500 mt-1">Example: supplier: admin, manager. Fields not listed can be edited by anyone with edit permission. Admin always can.</p>
         </div>
         <ListField
+          label="Delivery statuses"
+          value={cfg.delivery_statuses}
+          onChange={(v) => setCfg({ ...cfg, delivery_statuses: v })}
+          disabled={!can("settings")}
+        />
+        <p className="text-[11px] text-slate-500 md:col-span-2 -mt-2">
+          Merged with unique Excel Delivery Status values. Do not replace live workbook values — extras only appear in the dropdown.
+        </p>
+        <ListField
           label="Status changes that need a remark"
           value={cfg.status_change_remarks}
           onChange={(v) => setCfg({ ...cfg, status_change_remarks: v })}

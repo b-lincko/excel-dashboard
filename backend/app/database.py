@@ -170,6 +170,39 @@ CREATE TABLE IF NOT EXISTS queue_seen (
     PRIMARY KEY (record_id, username)
 );
 CREATE INDEX IF NOT EXISTS idx_seen_record ON queue_seen(record_id);
+CREATE TABLE IF NOT EXISTS mr_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_id TEXT NOT NULL,
+    work_order_id TEXT,
+    supplier TEXT NOT NULL DEFAULT '',
+    material TEXT NOT NULL DEFAULT '',
+    qty TEXT,
+    unit TEXT,
+    notes TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mr_lines_record ON mr_lines(record_id);
+CREATE INDEX IF NOT EXISTS idx_mr_lines_supplier ON mr_lines(supplier);
+CREATE INDEX IF NOT EXISTS idx_mr_lines_material ON mr_lines(material);
+CREATE TABLE IF NOT EXISTS supplier_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    supplier_name TEXT NOT NULL COLLATE NOCASE,
+    material TEXT NOT NULL COLLATE NOCASE,
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT,
+    UNIQUE(supplier_name, material)
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_items_name ON supplier_items(supplier_name);
+CREATE TABLE IF NOT EXISTS supplier_aliases (
+    alias TEXT PRIMARY KEY COLLATE NOCASE,
+    canonical TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_aliases_canon ON supplier_aliases(canonical);
 """
 
 DEFAULT_USERS = [
@@ -1190,6 +1223,212 @@ def list_queue_seen(record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
             {"username": row["username"], "seen_at": row["seen_at"]}
         )
     return out
+
+
+def list_mr_lines(record_id: str) -> list[dict[str, Any]]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        return []
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM mr_lines WHERE record_id = ? ORDER BY sort_order, id",
+            (rid,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_mr_lines_many(record_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+    ids = [str(i).strip() for i in record_ids if str(i).strip()]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM mr_lines WHERE record_id IN ({placeholders}) ORDER BY sort_order, id",
+            ids,
+        ).fetchall()
+    out: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        out.setdefault(str(row["record_id"]), []).append(dict(row))
+    return out
+
+
+def list_all_mr_lines() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM mr_lines ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+
+def replace_mr_lines(
+    record_id: str,
+    items: list[dict[str, Any]],
+    created_by: str = "",
+    work_order_id: str = "",
+) -> list[dict[str, Any]]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        raise ValueError("record_id is required")
+    wo = str(work_order_id or "").strip()
+    cleaned: list[dict[str, Any]] = []
+    for row in items or []:
+        if not isinstance(row, dict):
+            continue
+        supplier = " ".join(str(row.get("supplier") or "").split())
+        material = " ".join(str(row.get("material") or "").split())
+        if not supplier and not material:
+            continue
+        cleaned.append(
+            {
+                "supplier": supplier,
+                "material": material,
+                "qty": " ".join(str(row.get("qty") or "").split()),
+                "unit": " ".join(str(row.get("unit") or "").split()),
+                "notes": " ".join(str(row.get("notes") or "").split()),
+            }
+        )
+    ts = now_iso()
+    with connect() as conn:
+        conn.execute("DELETE FROM mr_lines WHERE record_id = ?", (rid,))
+        for idx, row in enumerate(cleaned):
+            conn.execute(
+                """INSERT INTO mr_lines
+                   (record_id, work_order_id, supplier, material, qty, unit, notes, sort_order, created_at, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    rid,
+                    wo,
+                    row["supplier"],
+                    row["material"],
+                    row["qty"],
+                    row["unit"],
+                    row["notes"],
+                    idx,
+                    ts,
+                    created_by,
+                ),
+            )
+    return list_mr_lines(rid)
+
+
+def list_supplier_items(supplier_name: str = "") -> list[dict[str, Any]]:
+    name = " ".join(str(supplier_name or "").split())
+    with connect() as conn:
+        if name:
+            rows = conn.execute(
+                "SELECT * FROM supplier_items WHERE supplier_name = ? COLLATE NOCASE ORDER BY material COLLATE NOCASE",
+                (name,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM supplier_items ORDER BY supplier_name COLLATE NOCASE, material COLLATE NOCASE"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def add_supplier_item(
+    supplier_name: str,
+    material: str,
+    notes: str = "",
+    created_by: str = "",
+) -> Optional[dict[str, Any]]:
+    name = " ".join(str(supplier_name or "").split())
+    item = " ".join(str(material or "").split())
+    if not name or not item:
+        return None
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO supplier_items (supplier_name, material, notes, created_at, created_by)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(supplier_name, material) DO UPDATE SET
+                 notes = CASE WHEN excluded.notes != '' THEN excluded.notes ELSE supplier_items.notes END""",
+            (name, item, " ".join(str(notes or "").split()), now_iso(), created_by),
+        )
+        row = conn.execute(
+            "SELECT * FROM supplier_items WHERE supplier_name = ? COLLATE NOCASE AND material = ? COLLATE NOCASE",
+            (name, item),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def replace_supplier_items(supplier_name: str, materials: list[str], created_by: str = "") -> list[dict[str, Any]]:
+    name = " ".join(str(supplier_name or "").split())
+    if not name:
+        raise ValueError("Supplier name is required")
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in materials or []:
+        item = " ".join(str(raw or "").split())
+        key = item.lower()
+        if not item or key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(item)
+    ts = now_iso()
+    with connect() as conn:
+        conn.execute("DELETE FROM supplier_items WHERE supplier_name = ? COLLATE NOCASE", (name,))
+        for item in cleaned:
+            conn.execute(
+                """INSERT INTO supplier_items (supplier_name, material, notes, created_at, created_by)
+                   VALUES (?, ?, '', ?, ?)""",
+                (name, item, ts, created_by),
+            )
+    return list_supplier_items(name)
+
+
+def delete_supplier_item(item_id: int) -> bool:
+    with connect() as conn:
+        cur = conn.execute("DELETE FROM supplier_items WHERE id = ?", (item_id,))
+        return cur.rowcount > 0
+
+
+def list_supplier_aliases() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM supplier_aliases ORDER BY canonical COLLATE NOCASE, alias COLLATE NOCASE"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def upsert_supplier_alias(alias: str, canonical: str, created_by: str = "") -> dict[str, Any]:
+    alias_name = " ".join(str(alias or "").split())
+    canon = " ".join(str(canonical or "").split())
+    if not alias_name or not canon:
+        raise ValueError("Alias and canonical name are required")
+    if alias_name.lower() == canon.lower():
+        raise ValueError("Alias cannot be the same as the canonical name")
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO supplier_aliases (alias, canonical, created_at, created_by)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(alias) DO UPDATE SET canonical = excluded.canonical, created_by = excluded.created_by""",
+            (alias_name, canon, now_iso(), created_by),
+        )
+        row = conn.execute(
+            "SELECT * FROM supplier_aliases WHERE alias = ? COLLATE NOCASE",
+            (alias_name,),
+        ).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def rename_supplier_refs(old_name: str, new_name: str) -> None:
+    old = " ".join(str(old_name or "").split())
+    new = " ".join(str(new_name or "").split())
+    if not old or not new or old.lower() == new.lower():
+        return
+    with connect() as conn:
+        conn.execute(
+            "UPDATE mr_lines SET supplier = ? WHERE supplier = ? COLLATE NOCASE",
+            (new, old),
+        )
+        conn.execute(
+            "UPDATE supplier_items SET supplier_name = ? WHERE supplier_name = ? COLLATE NOCASE",
+            (new, old),
+        )
+        conn.execute(
+            "UPDATE supplier_aliases SET canonical = ? WHERE canonical = ? COLLATE NOCASE",
+            (new, old),
+        )
 
 
 # Ensure schema exists for scripts/tests that never hit FastAPI startup.

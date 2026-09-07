@@ -100,7 +100,9 @@ export default function WorkOrderDetail() {
 
   const dirty = useMemo(() => {
     const keys = [...FIELDS.map(([key]) => key), ...EXTRA_KEYS];
-    return keys.some((key) => String(form[key] ?? "") !== String(original[key] ?? ""));
+    const fieldsDirty = keys.some((key) => String(form[key] ?? "") !== String(original[key] ?? ""));
+    const linesDirty = JSON.stringify(form.lines || []) !== JSON.stringify(original.lines || []);
+    return fieldsDirty || linesDirty;
   }, [form, original]);
   const showDelay = canAddDelay(form);
   const dueDays = dueOffsets[String(form.work_type || "").trim().toLowerCase()];
@@ -127,10 +129,11 @@ export default function WorkOrderDetail() {
       api
         .get(`/api/work-orders/${encodeURIComponent(id)}`)
         .then((d) => {
-          setForm(d.item);
-          setOriginal(d.item);
+          const item = { ...d.item, lines: d.item.lines || [] };
+          setForm(item);
+          setOriginal(item);
           setSyncToken(d.sync_token);
-          setMeta(d.item);
+          setMeta(item);
           const rid = d.item.record_id || id;
           api.get(`/api/work-orders/${encodeURIComponent(rid)}/files`).then((f) => setFiles(f.items || [])).catch(() => {});
           api
@@ -156,6 +159,7 @@ export default function WorkOrderDetail() {
         priority: "MEDIUM",
         created_date: new Date().toISOString().slice(0, 16).replace("T", " "),
         department: "SH5-SH1",
+        lines: [],
       };
       setForm(initial);
       setOriginal(initial);
@@ -259,12 +263,16 @@ export default function WorkOrderDetail() {
           "open_reason",
           "record_id",
           "due_date",
+          "lines",
         ]);
         const changes = {};
         Object.keys(form).forEach((k) => {
           if (k.startsWith("_") || skip.has(k)) return;
           if (String(form[k] ?? "") !== String(original[k] ?? "")) changes[k] = form[k];
         });
+        if (JSON.stringify(form.lines || []) !== JSON.stringify(original.lines || [])) {
+          changes.lines = form.lines || [];
+        }
         const d = await api.put(`/api/work-orders/${encodeURIComponent(id)}`, {
           changes,
           sync_token: syncToken,
@@ -274,9 +282,17 @@ export default function WorkOrderDetail() {
         setOriginal(d.item);
         setMeta(d.item);
         setSyncToken(d.sync_token);
-        const extraOnly = Object.keys(changes).length > 0 && Object.keys(changes).every((k) => EXTRA_KEYS.includes(k));
-        setSuccess(extraOnly ? "Delay notes saved in the app database." : "Excel workbook updated successfully.");
-        toast(extraOnly ? "Delay notes saved" : "Excel updated", "success");
+        const keys = Object.keys(changes);
+        const extraOnly = keys.length > 0 && keys.every((k) => EXTRA_KEYS.includes(k));
+        const linesOnly = keys.length > 0 && keys.every((k) => k === "lines" || EXTRA_KEYS.includes(k));
+        setSuccess(
+          extraOnly
+            ? "Delay notes saved in the app database."
+            : linesOnly
+              ? "Supplier line items saved in the app database. Excel still has one supplier cell and one material cell."
+              : "Excel workbook updated successfully."
+        );
+        toast(extraOnly ? "Delay notes saved" : linesOnly ? "Line items saved" : "Excel updated", "success");
       }
     } catch (e) {
       if (e.status === 409) {
@@ -499,6 +515,7 @@ export default function WorkOrderDetail() {
             ) : ["status", "priority", "assigned_to", "work_type", "issue"].includes(type) ? (
               <select value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)}>
                 <option value="">—</option>
+                {form[key] && !(options[type] || []).includes(form[key]) && <option value={form[key]}>{form[key]}</option>}
                 {(options[type] || []).map((o) => (
                   <option key={o} value={o}>
                     {o}
@@ -534,6 +551,7 @@ export default function WorkOrderDetail() {
           </div>
         ))}
       </div>
+      <LineItemsCard form={form} setForm={setForm} options={options} readOnly={readOnly} />
       {showDelay && (
         <div className="card p-5 space-y-3">
           <div>
@@ -713,6 +731,107 @@ export default function WorkOrderDetail() {
             {!timeline.length && !history.length && <div className="px-4 py-6 text-sm text-slate-500">No events yet.</div>}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function emptyLine() {
+  return { supplier: "", material: "", qty: "", unit: "", notes: "" };
+}
+
+function LineItemsCard({ form, setForm, options, readOnly }) {
+  const lines = Array.isArray(form.lines) ? form.lines : [];
+  const suppliers = options.supplier || [];
+
+  function setLine(index, patch) {
+    setForm((f) => {
+      const next = [...(f.lines || [])];
+      next[index] = { ...emptyLine(), ...next[index], ...patch };
+      return { ...f, lines: next };
+    });
+  }
+
+  function addLine(supplier = "") {
+    setForm((f) => ({ ...f, lines: [...(f.lines || []), { ...emptyLine(), supplier }] }));
+  }
+
+  function removeLine(index) {
+    setForm((f) => ({ ...f, lines: (f.lines || []).filter((_, i) => i !== index) }));
+  }
+
+  const groups = [];
+  lines.forEach((line, index) => {
+    const name = line.supplier || "";
+    const last = groups[groups.length - 1];
+    if (!last || last.supplier !== name) groups.push({ supplier: name, items: [{ line, index }] });
+    else last.items.push({ line, index });
+  });
+
+  return (
+    <div className="card p-5 space-y-3">
+      <div>
+        <div className="font-semibold">Suppliers & materials</div>
+        <p className="text-xs text-slate-500">
+          Excel keeps one Supplier Name and one Required Material Details cell. Extra suppliers and items on this MR are stored in the app and used for search and suggestions.
+        </p>
+      </div>
+      {groups.map((group) => (
+        <div key={`${group.supplier}-${group.items[0].index}`} className="rounded-xl border border-slate-200 dark:border-white/10 p-3 space-y-2">
+          {group.items.map(({ line, index }, i) => (
+            <div key={index} className="grid md:grid-cols-12 gap-2 items-end">
+              {i === 0 ? (
+                <div className="md:col-span-4">
+                  <label className="lbl">Supplier</label>
+                  <input
+                    list="wo-supplier-list"
+                    value={line.supplier || ""}
+                    disabled={readOnly}
+                    onChange={(e) => setLine(index, { supplier: e.target.value })}
+                    placeholder="Supplier"
+                  />
+                </div>
+              ) : (
+                <div className="md:col-span-4 text-xs text-slate-400 pb-2 pl-1">same supplier</div>
+              )}
+              <div className="md:col-span-4">
+                {i === 0 && <label className="lbl">Material</label>}
+                <input value={line.material || ""} disabled={readOnly} onChange={(e) => setLine(index, { material: e.target.value })} placeholder="Item" />
+              </div>
+              <div className="md:col-span-1">
+                {i === 0 && <label className="lbl">Qty</label>}
+                <input value={line.qty || ""} disabled={readOnly} onChange={(e) => setLine(index, { qty: e.target.value })} />
+              </div>
+              <div className="md:col-span-2">
+                {i === 0 && <label className="lbl">Unit</label>}
+                <input value={line.unit || ""} disabled={readOnly} onChange={(e) => setLine(index, { unit: e.target.value })} />
+              </div>
+              <div className="md:col-span-1">
+                {!readOnly && (
+                  <button type="button" className="btn-outline !py-1 !px-2 text-xs w-full" onClick={() => removeLine(index)}>
+                    ×
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+          {!readOnly && (
+            <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => addLine(group.supplier)}>
+              + Add item for this supplier
+            </button>
+          )}
+        </div>
+      ))}
+      <datalist id="wo-supplier-list">
+        {suppliers.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
+      {!lines.length && <div className="text-sm text-slate-500">No extra suppliers or items yet.</div>}
+      {!readOnly && (
+        <button type="button" className="btn-outline" onClick={() => addLine()}>
+          + Add supplier
+        </button>
       )}
     </div>
   );

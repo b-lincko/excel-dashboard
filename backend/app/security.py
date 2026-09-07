@@ -35,6 +35,8 @@ GUEST_PAGES = [
     "handover",
     "health",
     "digest",
+    "materials",
+    "supplier_suggest",
 ]
 ALL_PERMS = [
     "view",

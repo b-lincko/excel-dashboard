@@ -143,6 +143,18 @@ class AppConfig(BaseModel):
     status_change_remarks: list[str] = Field(
         default_factory=lambda: ["*->ON HOLD", "*->CLOSED"]
     )
+    delivery_statuses: list[str] = Field(
+        default_factory=lambda: [
+            "Delivered",
+            "Pending",
+            "Material in Store",
+            "Estimation Provided",
+            "Not Delivered",
+            "Waiting for Approval",
+            "In Transit",
+            "Partial",
+        ]
+    )
     in_progress_statuses: list[str] = Field(default_factory=lambda: ["PLACED", "UNDER GATEPASS"])
     cancelled_statuses: list[str] = Field(default_factory=lambda: [])
     aging_buckets: list[dict[str, Any]] = Field(

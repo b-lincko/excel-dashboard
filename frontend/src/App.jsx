@@ -23,6 +23,7 @@ const ImportData = lazy(() => import("./pages/ImportData.jsx"));
 const Handover = lazy(() => import("./pages/Handover.jsx"));
 const Health = lazy(() => import("./pages/Health.jsx"));
 const Digest = lazy(() => import("./pages/Digest.jsx"));
+const Materials = lazy(() => import("./pages/Materials.jsx"));
 
 function Fallback() {
   return <div className="text-sm text-slate-500 py-10 text-center">Loading…</div>;
@@ -103,6 +104,8 @@ export default function App() {
         <Route path="handover" element={<Lazy page="handover"><Handover /></Lazy>} />
         <Route path="health" element={<Lazy page="health"><Health /></Lazy>} />
         <Route path="suppliers" element={<Lazy page="suppliers"><Suppliers /></Lazy>} />
+        <Route path="materials" element={<Lazy page="materials"><Materials /></Lazy>} />
+        <Route path="supplier-suggest" element={<Lazy page="supplier_suggest"><Materials mode="suggest" /></Lazy>} />
         <Route path="reports" element={<Lazy perm="reports" page="reports"><Reports /></Lazy>} />
         <Route path="audit" element={<Lazy perm="audit"><AuditLog /></Lazy>} />
         <Route path="users" element={<Lazy perm="users"><Users /></Lazy>} />

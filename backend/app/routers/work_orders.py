@@ -11,6 +11,7 @@ from ..config import load_config
 from ..dates import to_date
 from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_for_open, site_choices, today
 from ..excel.service import DELAY_FIELDS, DUE_OFFSETS, ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
+from ..materials import apply_lines_to_excel_fields, merge_choices, normalize_lines, persist_work_order_lines
 from ..security import editable_fields, forbidden_fields, require_permission
 from ..stats import parse_query_filters
 from ..ops import timeline_payload
@@ -34,6 +35,8 @@ def _with_extras(rec: dict[str, Any]) -> dict[str, Any]:
     extra = database.get_record_extra(str(rec.get("record_id") or ""))
     out = dict(rec)
     out.update(_overlay_fields(rec, extra))
+    rid = str(rec.get("record_id") or "")
+    out["lines"] = database.list_mr_lines(rid) if rid else []
     return out
 
 
@@ -47,16 +50,20 @@ def _with_extras_many(recs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def _split_changes(changes: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _split_changes(changes: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], Optional[list[dict[str, Any]]]]:
     excel_changes: dict[str, Any] = {}
     extra_changes: dict[str, Any] = {}
+    lines = None
     for key, value in (changes or {}).items():
+        if key == "lines":
+            lines = normalize_lines(value)
+            continue
         if key in EXTRA_FIELDS:
             extra_changes[key] = value if value is not None else ""
             excel_changes[key] = extra_changes[key]
         else:
             excel_changes[key] = value
-    return excel_changes, extra_changes
+    return excel_changes, extra_changes, lines
 
 
 def _save_extras(rec: dict[str, Any], extra_changes: dict[str, Any], username: str) -> None:
@@ -221,6 +228,9 @@ def options(user=Depends(require_permission("view"))):
     catalog_names = [s["name"] for s in database.list_suppliers() if s.get("name")]
     suppliers = sorted({*opts.get("supplier", []), *catalog_names}, key=str.lower)
     opts["supplier"] = suppliers
+    delivery = getattr(cfg, "delivery_statuses", None) or []
+    opts["issue"] = merge_choices(opts.get("issue") or [], delivery)
+    opts["delay_reason"] = merge_choices(opts.get("delay_reason") or [], delivery)
     sites = site_choices(cfg)
     for name in sites:
         if name not in opts.get("department", []):
@@ -343,7 +353,18 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
     rec = excel_service.get_by_id(wo_id)
     if not rec:
         raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
-    excel_changes, extra_changes = _split_changes(body.changes)
+    excel_changes, extra_changes, lines = _split_changes(body.changes)
+    if lines is not None:
+        seed = {
+            "supplier": excel_changes.get("supplier", rec.get("supplier")),
+            "description": excel_changes.get("description", rec.get("description")),
+        }
+        before = dict(seed)
+        apply_lines_to_excel_fields(seed, lines)
+        if seed.get("supplier") != before.get("supplier"):
+            excel_changes["supplier"] = seed.get("supplier")
+        if seed.get("description") != before.get("description"):
+            excel_changes["description"] = seed.get("description")
     blocked = forbidden_fields(user, {**excel_changes, **extra_changes})
     if blocked:
         raise HTTPException(
@@ -376,6 +397,13 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
         _save_extras(updated, extra_changes, user["username"])
     if excel_changes.get("supplier"):
         _maybe_add_supplier(excel_changes.get("supplier"), user["username"])
+    if lines is not None:
+        persist_work_order_lines(
+            str(updated.get("record_id") or rec.get("record_id") or ""),
+            str(updated.get("work_order_id") or rec.get("work_order_id") or ""),
+            lines,
+            user["username"],
+        )
     actor = user["username"]
     remark = str(excel_changes.get("remarks") or "")
     pinged = (
@@ -388,10 +416,12 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
         if remark
         else []
     )
-    if excel_changes or extra_changes:
+    if excel_changes or extra_changes or lines is not None:
         bits = [k for k in {**excel_changes, **extra_changes} if k != "remarks"]
         if remark:
             bits.append("remarks")
+        if lines is not None:
+            bits.append("lines")
         notify.notify_watchers(
             actor,
             updated,
@@ -403,7 +433,9 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
 
 @router.post("")
 def create_work_order(body: WorkOrderCreate, user=Depends(require_permission("create"))):
-    excel_data, extra_changes = _split_changes(body.data)
+    excel_data, extra_changes, lines = _split_changes(body.data)
+    if lines is not None:
+        apply_lines_to_excel_fields(excel_data, lines)
     errors = validate_work_order(excel_data, partial=False)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
@@ -415,6 +447,13 @@ def create_work_order(body: WorkOrderCreate, user=Depends(require_permission("cr
         _save_extras(created, extra_changes, user["username"])
     if excel_data.get("supplier"):
         _maybe_add_supplier(excel_data.get("supplier"), user["username"])
+    if lines is not None:
+        persist_work_order_lines(
+            str(created.get("record_id") or ""),
+            str(created.get("work_order_id") or ""),
+            lines,
+            user["username"],
+        )
     return {"item": annotate(_with_extras(created)), "sync_token": excel_service.sync_token(), "saved": True}
 
 

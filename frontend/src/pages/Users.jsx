@@ -18,6 +18,8 @@ const PAGE_LABELS = {
   projects: "Projects",
   import: "Import",
   performance: "Performance",
+  materials: "Materials",
+  supplier_suggest: "Supplier suggest",
 };
 
 const emptyForm = { username: "", password: "", full_name: "", email: "", role: "user", extra_permissions: ["dashboard"] };

@@ -30,6 +30,8 @@ export const GUEST_PAGES = [
   "handover",
   "health",
   "digest",
+  "materials",
+  "supplier_suggest",
 ];
 
 const PAGE_PATHS = {
@@ -51,6 +53,8 @@ const PAGE_PATHS = {
   handover: "/handover",
   health: "/health",
   digest: "/digest",
+  materials: "/materials",
+  supplier_suggest: "/supplier-suggest",
 };
 
 export function firstPath(user) {
