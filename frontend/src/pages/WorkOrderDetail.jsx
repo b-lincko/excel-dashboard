@@ -634,7 +634,7 @@ export default function WorkOrderDetail() {
         </div>
       )}
 
-      <div className="tab-bar">
+      <div className="tab-bar" data-tour="wo-tabs">
         <button type="button" className={`tab-btn ${tab === "details" ? "is-on" : ""}`} onClick={() => setTab("details")}>
           Details
         </button>
@@ -832,7 +832,7 @@ export default function WorkOrderDetail() {
       )}
 
       {canSave && (
-        <div className="sticky-save flex items-center justify-between gap-3">
+        <div className="sticky-save flex items-center justify-between gap-3" data-tour="wo-save">
           <div className="text-sm text-slate-500">
             {busy ? "Saving…" : dirty || isNew ? "Ctrl/⌘+S to save" : "All changes saved."}
           </div>

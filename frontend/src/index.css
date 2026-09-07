@@ -137,6 +137,44 @@ body {
   padding: 0.25rem;
 }
 
+.tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+.tour-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  pointer-events: auto;
+}
+.dark .tour-dim {
+  background: rgba(2, 6, 23, 0.62);
+}
+.tour-hole {
+  position: fixed;
+  border-radius: 14px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.55), 0 0 0 2px #0ea5e9;
+  pointer-events: none;
+  transition: top 0.18s ease, left 0.18s ease, width 0.18s ease, height 0.18s ease;
+}
+.tour-card {
+  position: fixed;
+  z-index: 91;
+  width: min(380px, calc(100vw - 32px));
+  pointer-events: auto;
+  border-radius: 1rem;
+  padding: 1.1rem 1.15rem 1rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.25);
+}
+.dark .tour-card {
+  background: #0f172a;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
 .print-only {
   display: none;
 }

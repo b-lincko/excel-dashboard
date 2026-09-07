@@ -323,7 +323,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
             )}
           </div>
           {can("create") && (
-            <button className="btn-primary" onClick={() => nav("/work-orders/new")}>
+            <button className="btn-primary" data-tour="wo-new" onClick={() => nav("/work-orders/new")}>
               <Plus size={14} /> New work order
             </button>
           )}
@@ -465,7 +465,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
 
       {error && <div className="text-sm text-rose-600">{error}</div>}
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-hidden" data-tour="wo-list">
         <div className="table-wrap max-h-[70vh]">
           <table className="data">
             <thead>
@@ -524,10 +524,39 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
                   ))}
                 </tr>
               ))}
+              {loading && !rows.length && (
+                <tr>
+                  <td colSpan={cols.length + (can("edit") ? 1 : 0)} className="py-8">
+                    <div className="space-y-2 px-2">
+                      <div className="skel h-8" />
+                      <div className="skel h-8" />
+                      <div className="skel h-8" />
+                    </div>
+                  </td>
+                </tr>
+              )}
               {!loading && !rows.length && (
                 <tr>
-                  <td colSpan={cols.length + (can("edit") ? 1 : 0)} className="text-center text-slate-400 py-10">
-                    No work orders match the current filters.
+                  <td colSpan={cols.length + (can("edit") ? 1 : 0)} className="text-center py-12">
+                    <div className="text-slate-500">No material requests match.</div>
+                    <div className="mt-3 flex justify-center gap-2">
+                      <button
+                        type="button"
+                        className="btn-outline"
+                        onClick={() => {
+                          setFilters(presetFlag ? { flag: presetFlag } : {});
+                          setQ("");
+                          setPage(1);
+                        }}
+                      >
+                        Clear filters
+                      </button>
+                      {can("create") && (
+                        <button type="button" className="btn-primary" onClick={() => nav("/work-orders/new")}>
+                          New work order
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               )}

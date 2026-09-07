@@ -7,6 +7,7 @@ import {
   BarChart3,
   CheckCircle2,
   ChevronDown,
+  CircleHelp,
   ClipboardList,
   FileText,
   FolderOpen,
@@ -38,9 +39,11 @@ import { useUi } from "../context/UiContext.jsx";
 import { api } from "../lib/api.js";
 import { clearDashCache } from "../lib/widgets.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
+import { useTour } from "../context/TourContext.jsx";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, group: "Work", page: "dashboard" },
+  { to: "/guide", label: "Guide", icon: CircleHelp, group: "Work" },
   { to: "/work-orders", label: "Work orders", icon: ClipboardList, group: "Work", page: "work_orders" },
   { to: "/open", label: "Open", icon: FolderOpen, group: "Work", page: "open" },
   { to: "/placed", label: "Placed", icon: Truck, group: "Work", page: "placed" },
@@ -90,12 +93,14 @@ const TITLES = {
   "/users": "Users",
   "/settings": "Settings",
   "/account": "Account",
+  "/guide": "Guide",
 };
 
 export default function Layout() {
   const { user, logout, can, canPage } = useAuth();
   const { theme, toggle } = useTheme();
   const { toast, ask } = useUi();
+  const { start: startTour, active: tourActive } = useTour();
   const nav = useNavigate();
   const loc = useLocation();
   const [sync, setSync] = useState(null);
@@ -126,9 +131,13 @@ export default function Layout() {
     function onKey(e) {
       const tag = (e.target?.tagName || "").toLowerCase();
       const typing = tag === "input" || tag === "textarea" || tag === "select" || e.target?.isContentEditable;
-      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) {
+      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
         e.preventDefault();
         searchRef.current?.focus();
+      }
+      if (e.key === "?" && !typing) {
+        e.preventDefault();
+        if (!tourActive) nav("/guide");
       }
       if (e.key === "Escape") {
         setMenu(false);
@@ -146,7 +155,7 @@ export default function Layout() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", onClick);
     };
-  }, []);
+  }, [nav, tourActive]);
 
   function loadInbox() {
     api
@@ -264,7 +273,7 @@ export default function Layout() {
       </div>
       <nav className="px-3 flex-1 space-y-4 overflow-y-auto" aria-label="Main">
         {groups.map((g) => (
-          <div key={g.group}>
+          <div key={g.group} data-tour={g.group === "Work" ? "nav-work" : undefined}>
             <div className="px-3 mb-1 text-[10px] uppercase tracking-wider text-slate-500">{g.group}</div>
             <div className="space-y-0.5">
               {g.items.map((n) => (
@@ -320,6 +329,7 @@ export default function Layout() {
             <Menu size={18} />
           </button>
           <form
+            data-tour="search"
             className="flex-1 max-w-xl relative flex items-center gap-2"
             onSubmit={(e) => {
               e.preventDefault();
@@ -344,6 +354,7 @@ export default function Layout() {
           </form>
           <div className="flex items-center gap-1.5 sm:gap-2 text-xs">
             <span
+              data-tour="live"
               className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 font-medium ${
                 sync?.stale
                   ? "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"
@@ -453,6 +464,9 @@ export default function Layout() {
                 </div>
               )}
             </div>
+            <button className="btn-ghost !px-2" onClick={() => nav("/guide")} title="Guide (?)" aria-label="Open guide">
+              <CircleHelp size={16} />
+            </button>
             <button className="btn-ghost !px-2" onClick={toggle} title="Toggle theme" aria-label="Toggle theme">
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>
@@ -470,6 +484,18 @@ export default function Layout() {
                 <div role="menu" className="absolute right-0 mt-2 w-52 card p-1 z-30">
                   <button className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-white/5" onClick={() => nav("/account")}>
                     Account
+                  </button>
+                  <button className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-white/5" onClick={() => nav("/guide")}>
+                    Guide
+                  </button>
+                  <button
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-white/5"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      if (!tourActive) startTour();
+                    }}
+                  >
+                    Start tour
                   </button>
                   <button className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-white/5" onClick={signOut}>
                     Sign out

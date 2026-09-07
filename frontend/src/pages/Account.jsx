@@ -1,11 +1,15 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useTour } from "../context/TourContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 
 export default function Account() {
   const { user } = useAuth();
   const { toast } = useUi();
+  const { start } = useTour();
+  const nav = useNavigate();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [again, setAgain] = useState("");
@@ -42,6 +46,27 @@ export default function Account() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Account</h1>
         <p className="text-sm text-slate-500">Your profile and sign-in credentials. Work-order history lives in the database.</p>
+      </div>
+      <div className="card p-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="font-semibold">New here?</div>
+          <p className="text-sm text-slate-500">A short tour of search, the list, a record, and the morning queue.</p>
+        </div>
+        <div className="flex gap-2">
+          <button type="button" className="btn-outline" onClick={() => nav("/guide")}>
+            Open guide
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              start();
+              nav("/");
+            }}
+          >
+            Start tour
+          </button>
+        </div>
       </div>
       <div className="card p-5 space-y-2 text-sm">
         <Row label="Name" value={user?.full_name || "—"} />

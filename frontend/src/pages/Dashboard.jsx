@@ -168,6 +168,7 @@ export default function Dashboard() {
         />
       )}
 
+      <div data-tour="dashboard">
       {!data && loading ? (
         <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
           <div className="skel h-40" />
@@ -192,6 +193,7 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

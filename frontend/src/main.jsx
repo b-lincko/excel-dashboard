@@ -5,7 +5,9 @@ import App from "./App.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
+import { TourProvider } from "./context/TourContext.jsx";
 import { UiProvider } from "./context/UiContext.jsx";
+import Tour from "./components/Tour.jsx";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -15,7 +17,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         <ThemeProvider>
           <UiProvider>
             <AuthProvider>
-              <App />
+              <TourProvider>
+                <App />
+                <Tour />
+              </TourProvider>
             </AuthProvider>
           </UiProvider>
         </ThemeProvider>

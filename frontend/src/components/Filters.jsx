@@ -61,7 +61,7 @@ export default function Filters({ value, onChange, options = {}, extra, defaultO
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-tour="filters">
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="btn-outline !py-1.5 !px-2.5 text-xs" onClick={() => setOpen((s) => !s)}>
           <SlidersHorizontal size={14} />

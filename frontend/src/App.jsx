@@ -24,6 +24,7 @@ const Handover = lazy(() => import("./pages/Handover.jsx"));
 const Health = lazy(() => import("./pages/Health.jsx"));
 const Digest = lazy(() => import("./pages/Digest.jsx"));
 const Materials = lazy(() => import("./pages/Materials.jsx"));
+const Guide = lazy(() => import("./pages/Guide.jsx"));
 
 function Fallback() {
   return <div className="text-sm text-slate-500 py-10 text-center">Loading…</div>;
@@ -111,6 +112,7 @@ export default function App() {
         <Route path="users" element={<Lazy perm="users"><Users /></Lazy>} />
         <Route path="settings" element={<Lazy perm="settings"><Settings /></Lazy>} />
         <Route path="account" element={<Lazy><Account /></Lazy>} />
+        <Route path="guide" element={<Lazy><Guide /></Lazy>} />
         <Route path="performance" element={<Lazy perm="analytics" page="performance"><Performance /></Lazy>} />
         <Route path="chat" element={<Lazy page="chat"><Chat /></Lazy>} />
         <Route path="projects" element={<Lazy page="projects"><Projects /></Lazy>} />

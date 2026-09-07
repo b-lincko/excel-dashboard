@@ -58,7 +58,7 @@ export default function Login() {
       <div className="grid place-items-center p-8 bg-slate-50 dark:bg-ink-900">
         <form onSubmit={submit} className="w-full max-w-sm card p-8">
           <h2 className="text-xl font-bold">Sign in</h2>
-          <p className="text-sm text-slate-500 mt-1 mb-6">Use your WOMS account to continue.</p>
+          <p className="text-sm text-slate-500 mt-1 mb-6">Use your WOMS account. First sign-in starts a short tour.</p>
           {expired && !error && (
             <div className="mb-4 rounded-lg bg-amber-50 text-amber-800 text-sm px-3 py-2 dark:bg-amber-500/10 dark:text-amber-200">
               Your session expired. Sign in again to continue.

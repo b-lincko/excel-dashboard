@@ -205,7 +205,7 @@ export default function ActionQueue() {
   const go = (params) => goSearch(nav, { ...filters, ...params });
 
   return (
-    <div className="space-y-5 briefing">
+    <div className="space-y-5 briefing" data-tour="queue">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Today’s action queue</h1>
