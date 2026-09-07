@@ -73,6 +73,8 @@ export default function WorkOrderDetail() {
   const [editable, setEditable] = useState(null);
   const [chat, setChat] = useState([]);
   const [chatBody, setChatBody] = useState("");
+  const [timeline, setTimeline] = useState([]);
+  const [remarkRules, setRemarkRules] = useState(["*->ON HOLD", "*->CLOSED"]);
   const attachRef = useRef(null);
 
   const dirty = useMemo(() => {
@@ -97,6 +99,7 @@ export default function WorkOrderDetail() {
         setOptions(d.options || {});
         if (d.due_offsets) setDueOffsets(d.due_offsets);
         if (d.editable_fields) setEditable(d.editable_fields);
+        if (d.status_change_remarks) setRemarkRules(d.status_change_remarks);
       })
       .catch(() => {});
     if (!isNew) {
@@ -119,6 +122,10 @@ export default function WorkOrderDetail() {
           api
             .get(`/api/work-orders/${encodeURIComponent(rid)}/chat`)
             .then((c) => setChat(c.items || []))
+            .catch(() => {});
+          api
+            .get(`/api/work-orders/${encodeURIComponent(rid)}/timeline`)
+            .then((t) => setTimeline(t.items || []))
             .catch(() => {});
         })
         .catch((e) => setError(e.message));
@@ -313,6 +320,41 @@ export default function WorkOrderDetail() {
               Print sheet
             </button>
           )}
+          {!isNew && can("edit") && !fieldLocked("assigned_to") && (
+            <button
+              className="btn-outline"
+              disabled={busy}
+              onClick={async () => {
+                const rid = form.record_id || id;
+                try {
+                  const d = await api.post(`/api/work-orders/${encodeURIComponent(rid)}/claim`);
+                  setForm(d.item);
+                  setOriginal(d.item);
+                  setMeta(d.item);
+                  toast(d.already ? "Already claimed" : "Claimed — written to Excel Assign to", "success");
+                } catch (e) {
+                  if (e.status === 409) {
+                    const ok = await ask({
+                      title: "Already assigned",
+                      body: e.detail?.message || e.message,
+                      confirmLabel: "Take over",
+                      danger: true,
+                    });
+                    if (!ok) return;
+                    const d = await api.post(`/api/work-orders/${encodeURIComponent(rid)}/claim?force=true`);
+                    setForm(d.item);
+                    setOriginal(d.item);
+                    setMeta(d.item);
+                    toast("Taken over — written to Excel Assign to", "success");
+                    return;
+                  }
+                  setError(e.message);
+                }
+              }}
+            >
+              Claim
+            </button>
+          )}
           {!isNew && (
             <button
               className="btn-outline"
@@ -440,6 +482,11 @@ export default function WorkOrderDetail() {
                 onChange={(e) => setField(key, e.target.value)}
               />
             )}
+            {key === "status" && (remarkRules || []).length > 0 && (
+              <p className="text-[11px] text-slate-500 mt-1">
+                Configured transitions that need a remark: {(remarkRules || []).join(", ")}. Type it in Remarks before saving.
+              </p>
+            )}
             {key === "due_date" && (
               <p className="text-[11px] text-slate-500 mt-1">
                 {dueDays != null
@@ -517,6 +564,7 @@ export default function WorkOrderDetail() {
                 const d = await api.post(`/api/work-orders/${encodeURIComponent(id)}/chat`, { body: text });
                 setChat((prev) => [...prev, d.item]);
                 setChatBody("");
+                api.get(`/api/work-orders/${encodeURIComponent(id)}/timeline`).then((t) => setTimeline(t.items || [])).catch(() => {});
               } catch (err) {
                 setError(err.message);
               }
@@ -600,35 +648,33 @@ export default function WorkOrderDetail() {
           Saving updates the matching row in file.xlsx (SN, due-date and hyperlink formulas are left untouched). Delay notes stay in the app database. A backup is written first. Ctrl/⌘+S to save.
         </p>
       )}
-      {!isNew && can("audit") && (
+      {!isNew && (
         <div className="card overflow-hidden">
-          <div className="px-4 py-3 font-semibold">Recent changes</div>
-          {history.length ? (
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>User</th>
-                  <th>Field</th>
-                  <th>Old</th>
-                  <th>New</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((r) => (
-                  <tr key={r.id} className="!cursor-default">
-                    <td className="font-mono text-xs">{r.created_at}</td>
-                    <td>{r.username}</td>
-                    <td>{r.field || r.action}</td>
-                    <td className="max-w-[200px] truncate text-slate-500">{r.old_value}</td>
-                    <td className="max-w-[200px] truncate">{r.new_value || r.details}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="px-4 pb-4 text-sm text-slate-500">No audit events for this work order yet.</div>
-          )}
+          <div className="px-4 py-3">
+            <div className="font-semibold">Timeline</div>
+            <p className="text-xs text-slate-500">Excel field changes, chat, attachments, follows and seen — one feed.</p>
+          </div>
+          <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-white/5">
+            {(timeline.length ? timeline : history.map((r) => ({ kind: "field", at: r.created_at, ...r }))).map((ev, i) => (
+              <div key={`${ev.kind}-${ev.at}-${i}`} className="px-4 py-2 text-sm">
+                <div className="text-[11px] text-slate-500">
+                  {ev.at} · {ev.username || "—"} · {ev.kind}
+                </div>
+                <div>
+                  {ev.kind === "chat"
+                    ? ev.body
+                    : ev.kind === "file"
+                      ? `Attached ${ev.filename || "file"}${ev.note ? ` — ${ev.note}` : ""}`
+                      : ev.kind === "follow"
+                        ? "Started following"
+                        : ev.kind === "seen"
+                          ? "Marked seen"
+                          : `${ev.field || ev.action || "update"}${ev.old_value || ev.new_value ? `: ${ev.old_value || "—"} → ${ev.new_value || ev.details || "—"}` : ""}`}
+                </div>
+              </div>
+            ))}
+            {!timeline.length && !history.length && <div className="px-4 py-6 text-sm text-slate-500">No events yet.</div>}
+          </div>
         </div>
       )}
     </div>

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Ban, Bell, CalendarClock, ClipboardList, PauseCircle, Printer, Truck } from "lucide-react";
 import { api, qs } from "../lib/api.js";
 import { goSearch, useLiveReload } from "../lib/live.js";
+import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 import KPICard from "../components/KPICard.jsx";
 import OpsTable from "../components/OpsTable.jsx";
@@ -118,7 +119,8 @@ const SECTIONS = [
 export default function ActionQueue() {
   const nav = useNavigate();
   const tick = useLiveReload();
-  const { toast } = useUi();
+  const { toast, ask } = useUi();
+  const { can } = useAuth();
   const [filters, setFilters] = useState({});
   const [options, setOptions] = useState({});
   const [data, setData] = useState(null);
@@ -140,6 +142,40 @@ export default function ActionQueue() {
         return next;
       });
     } catch (e) {
+      toast(e.message, "error");
+    }
+  }
+
+  async function claimRow(row, force = false) {
+    const rid = row.record_id || row.work_order_id;
+    if (!rid) return;
+    try {
+      const d = await api.post(`/api/work-orders/${encodeURIComponent(rid)}/claim${force ? "?force=true" : ""}`);
+      const name = d.item?.assigned_to;
+      setData((prev) => {
+        if (!prev?.queues) return prev;
+        const next = { ...prev, queues: {} };
+        Object.entries(prev.queues).forEach(([key, rows]) => {
+          next.queues[key] = (rows || []).map((r) =>
+            (r.record_id || r.work_order_id) === rid
+              ? { ...r, assigned_to: name || r.assigned_to, seen_by: d.seen_by || r.seen_by }
+              : r
+          );
+        });
+        return next;
+      });
+      toast(d.already ? "Already claimed" : "Claimed — Assign to written to Excel", "success");
+    } catch (e) {
+      if (e.status === 409) {
+        const ok = await ask({
+          title: "Already assigned",
+          body: e.detail?.message || e.message,
+          confirmLabel: "Take over",
+          danger: true,
+        });
+        if (ok) return claimRow(row, true);
+        return;
+      }
       toast(e.message, "error");
     }
   }
@@ -210,6 +246,8 @@ export default function ActionQueue() {
           columns={s.cols}
           seen
           onSeen={markSeen}
+          claim={can("edit")}
+          onClaim={claimRow}
           viewAll={() => go({ flag: s.flag })}
         />
       ))}

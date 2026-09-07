@@ -95,6 +95,78 @@ def is_waiting_supplier(rec: dict[str, Any], cfg: Optional[AppConfig] = None) ->
     return bool(str(rec.get("supplier") or "").strip()) and is_open(rec, cfg)
 
 
+def _tokens(text: Any) -> set[str]:
+    import re
+
+    return {t for t in re.findall(r"[a-z0-9]+", str(text or "").lower()) if len(t) > 2}
+
+
+def similar_open_pairs(records: list[dict[str, Any]], cfg: Optional[AppConfig] = None, limit: int = 40) -> list[dict[str, Any]]:
+    """Open MRs on the same asset with similar material text. No invented scores beyond overlap."""
+    from collections import defaultdict
+    from difflib import SequenceMatcher
+
+    cfg = cfg or load_config()
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for rec in records:
+        if not is_open(rec, cfg):
+            continue
+        asset = str(rec.get("location") or "").strip()
+        if not asset:
+            continue
+        desc = str(rec.get("description") or "").strip()
+        if not desc:
+            continue
+        groups[asset.lower()].append(rec)
+    pairs: list[dict[str, Any]] = []
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        for i, a in enumerate(group):
+            ta = _tokens(a.get("description"))
+            da = str(a.get("description") or "").lower()
+            if not ta:
+                continue
+            for b in group[i + 1 :]:
+                if str(a.get("record_id")) == str(b.get("record_id")):
+                    continue
+                tb = _tokens(b.get("description"))
+                db = str(b.get("description") or "").lower()
+                if not tb:
+                    continue
+                inter = len(ta & tb)
+                union = len(ta | tb) or 1
+                overlap = inter / union
+                seq = SequenceMatcher(None, da, db).ratio()
+                score = max(overlap, seq)
+                if not ((inter >= 2 and overlap >= 0.35) or seq >= 0.55):
+                    continue
+                pairs.append(
+                    {
+                        "asset": a.get("location") or b.get("location"),
+                        "score": round(score, 2),
+                        "a": {
+                            "record_id": a.get("record_id"),
+                            "work_order_id": a.get("work_order_id"),
+                            "description": a.get("description"),
+                            "assigned_to": a.get("assigned_to"),
+                            "status": a.get("status"),
+                            "department": a.get("department"),
+                        },
+                        "b": {
+                            "record_id": b.get("record_id"),
+                            "work_order_id": b.get("work_order_id"),
+                            "description": b.get("description"),
+                            "assigned_to": b.get("assigned_to"),
+                            "status": b.get("status"),
+                            "department": b.get("department"),
+                        },
+                    }
+                )
+    pairs.sort(key=lambda x: (-float(x.get("score") or 0), str(x.get("asset") or "")))
+    return pairs[: max(1, min(int(limit or 40), 80))]
+
+
 def has_po(rec: dict[str, Any]) -> bool:
     return bool(str(rec.get("po_number") or "").strip())
 

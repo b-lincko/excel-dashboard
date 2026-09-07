@@ -754,6 +754,82 @@ class ExcelService:
             },
         }
 
+    def mapping_scan(self) -> dict[str, Any]:
+        from difflib import SequenceMatcher
+
+        if not self.available():
+            raise ExcelUnavailable("Excel file is currently unavailable.")
+        wb = self._load_workbook(data_only=False, read_only=True)
+        try:
+            headers: list[str] = []
+            seen: set[str] = set()
+            header_row = self.cfg().header_row
+            for sheet_name in self.data_sheets(wb):
+                ws = wb[sheet_name]
+                raw: list[str] = []
+                for row in ws.iter_rows(min_row=header_row, max_row=header_row, max_col=40):
+                    for col_i, cell in enumerate(row, start=1):
+                        raw.append(str(cell.value) if cell.value is not None else f"Column{col_i}")
+                    break
+                while raw and raw[-1].startswith("Column"):
+                    raw.pop()
+                for h in raw:
+                    nh = norm_header(h)
+                    if not nh or nh in seen:
+                        continue
+                    seen.add(nh)
+                    headers.append(str(h))
+        finally:
+            wb.close()
+        mapping = self.cfg().mapping.model_dump()
+        present = {norm_header(h) for h in headers}
+        suggestions: dict[str, dict[str, Any]] = {}
+        for field, current in mapping.items():
+            current_h = str(current or "").strip()
+            present_now = bool(current_h) and norm_header(current_h) in present
+            best = current_h
+            score = 1.0 if present_now else 0.0
+            if not present_now:
+                needle = (current_h or field.replace("_", " ")).lower()
+                for h in headers:
+                    s = SequenceMatcher(None, needle, norm_header(h).lower()).ratio()
+                    if s > score:
+                        score = s
+                        best = h
+            suggestions[field] = {
+                "current": current_h,
+                "present": present_now,
+                "suggested": best if score >= 0.4 else "",
+                "score": round(score, 2),
+            }
+        return {"headers": headers, "mapping": mapping, "suggestions": suggestions}
+
+    def check_backup(self, backup_path: str) -> dict[str, Any]:
+        src = self._resolve_backup(backup_path)
+        err = None
+        backup_count: Optional[int] = None
+        try:
+            recs = self.records_from_path(src)
+            backup_count = len(recs)
+        except Exception as exc:
+            err = str(exc)
+        try:
+            live_count = len(self.get_all())
+        except Exception:
+            live_count = database.wo_cache_count()
+        healthy = err is None and backup_count is not None and backup_count > 0
+        if healthy and live_count:
+            healthy = backup_count >= max(1, int(live_count * 0.5))
+        return {
+            "path": str(src),
+            "name": src.name,
+            "backup_count": backup_count,
+            "live_count": live_count,
+            "delta": None if backup_count is None else backup_count - int(live_count or 0),
+            "ok": bool(healthy),
+            "error": err,
+        }
+
     def _file_lock(self, timeout: float = 90.0):
         return FileLock(str(self.lock_path()), timeout=timeout)
 

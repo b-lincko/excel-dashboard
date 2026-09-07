@@ -29,6 +29,7 @@ export const GUEST_PAGES = [
   "performance",
   "handover",
   "health",
+  "digest",
 ];
 
 const PAGE_PATHS = {
@@ -49,6 +50,7 @@ const PAGE_PATHS = {
   performance: "/performance",
   handover: "/handover",
   health: "/health",
+  digest: "/digest",
 };
 
 export function firstPath(user) {

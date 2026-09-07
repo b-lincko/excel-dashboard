@@ -124,6 +124,9 @@ class AppConfig(BaseModel):
             "po_number": ["admin", "manager"],
         }
     )
+    status_change_remarks: list[str] = Field(
+        default_factory=lambda: ["*->ON HOLD", "*->CLOSED"]
+    )
     in_progress_statuses: list[str] = Field(default_factory=lambda: ["PLACED", "UNDER GATEPASS"])
     cancelled_statuses: list[str] = Field(default_factory=lambda: [])
     aging_buckets: list[dict[str, Any]] = Field(

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from ..backup import ensure_folder, list_folders, run_due_backup, schedule_status
 from ..config import AppConfig, load_config, save_config
-from ..excel.service import excel_service
+from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
 from ..security import require_permission
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -47,9 +47,35 @@ def update_settings(body: SettingsUpdate, user=Depends(require_permission("setti
     return {"settings": new_cfg.model_dump(), "saved": True, "backup": schedule_status(new_cfg)}
 
 
+@router.get("/mapping-scan")
+def mapping_scan(user=Depends(require_permission("settings"))):
+    try:
+        return excel_service.mapping_scan()
+    except ExcelUnavailable as cop:
+        raise HTTPException(status_code=503, detail=str(cop))
+    except ExcelLocked as cop:
+        raise HTTPException(status_code=423, detail=str(cop))
+    except Exception as cop:
+        raise HTTPException(status_code=500, detail=str(cop))
+
+
 @router.get("/backups")
 def list_backups(user=Depends(require_permission("backup"))):
     return {"items": excel_service.list_backups(), "schedule": schedule_status()}
+
+
+class BackupCheck(BaseModel):
+    path: str
+
+
+@router.post("/backups/check")
+def check_backup(body: BackupCheck, user=Depends(require_permission("backup"))):
+    try:
+        return excel_service.check_backup(body.path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    except Exception as cop:
+        raise HTTPException(status_code=500, detail=str(cop))
 
 
 class RestoreRequest(BaseModel):
@@ -113,9 +139,16 @@ def create_backup(user=Depends(require_permission("backup"))):
     path = excel_service.create_backup(reason="manual")
     cfg = load_config()
     pruned = excel_service.prune_backups(int(getattr(cfg, "backup_ratio", 14) or 0), reasons=("auto", "manual"))
+    health = None
+    if path:
+        try:
+            health = excel_service.check_backup(str(path))
+        except Exception as cop:
+            health = {"ok": False, "error": str(cop), "path": str(path)}
     return {
         "path": str(path) if path else None,
         "pruned": pruned,
+        "health": health,
         "items": excel_service.list_backups(),
         "schedule": schedule_status(cfg),
     }
@@ -126,10 +159,12 @@ def run_auto_now(user=Depends(require_permission("backup"))):
     path = run_due_backup(force=True)
     if path is None and not excel_service.available():
         raise HTTPException(status_code=503, detail="Excel file is currently unavailable.")
+    sched = schedule_status()
     return {
         "path": str(path) if path else None,
+        "health": sched.get("last_auto_backup_health"),
         "items": excel_service.list_backups(),
-        "schedule": schedule_status(),
+        "schedule": sched,
     }
 
 

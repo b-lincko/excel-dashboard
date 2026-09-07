@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import StatusBadge from "./StatusBadge.jsx";
 
-export default function OpsTable({ title, subtitle, rows, columns, empty, onRow, viewAll, seen, onSeen }) {
+export default function OpsTable({ title, subtitle, rows, columns, empty, onRow, viewAll, seen, onSeen, claim, onClaim }) {
   const nav = useNavigate();
   const baseCols = columns || [
     ["work_order_id", "IM WO #"],
@@ -14,7 +14,10 @@ export default function OpsTable({ title, subtitle, rows, columns, empty, onRow,
     ["due_date", "Due"],
     ["aging_days", "Age"],
   ];
-  const cols = seen ? [...baseCols, ["_seen", "Seen"]] : baseCols;
+  const extra = [];
+  if (claim) extra.push(["_claim", "Claim"]);
+  if (seen) extra.push(["_seen", "Seen"]);
+  const cols = extra.length ? [...baseCols, ...extra] : baseCols;
 
   function open(r) {
     if (onRow) return onRow(r);
@@ -62,6 +65,12 @@ export default function OpsTable({ title, subtitle, rows, columns, empty, onRow,
                       ) : (
                         "—"
                       )
+                    ) : k === "_claim" ? (
+                      <div className="no-print" onClick={(e) => e.stopPropagation()}>
+                        <button type="button" className="btn-outline !py-0.5 !px-2 text-[11px]" onClick={() => onClaim?.(r)}>
+                          Claim
+                        </button>
+                      </div>
                     ) : k === "_seen" ? (
                       <div className="flex items-center gap-2 no-print" onClick={(e) => e.stopPropagation()}>
                         <button type="button" className="btn-outline !py-0.5 !px-2 text-[11px]" onClick={() => onSeen?.(r)}>

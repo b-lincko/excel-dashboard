@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -15,6 +17,15 @@ DELAY_SOURCES = ["site", "procurement", "supplier"]
 
 class SupplierCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+
+
+class SupplierUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    contact: Optional[str] = None
+    lead_time_days: Optional[int] = None
+    notes: Optional[str] = None
 
 
 def _excel_suppliers() -> list[str]:
@@ -44,4 +55,22 @@ def create_supplier(body: SupplierCreate, user=Depends(require_permission("edit"
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     database.add_audit(user["username"], "supplier_create", details=f"Added supplier {item['name']}")
+    return {"item": item}
+
+
+@router.put("/suppliers/{supplier_id}")
+def save_supplier(supplier_id: int, body: SupplierUpdate, user=Depends(require_permission("edit"))):
+    current = database.get_supplier(supplier_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    payload = body.model_dump(exclude_unset=True)
+    try:
+        item = database.update_supplier(supplier_id, **payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    database.add_audit(
+        user["username"],
+        "supplier_update",
+        details=f"Updated supplier {(item or current).get('name')}",
+    )
     return {"item": item}

@@ -16,6 +16,8 @@ import {
 import { Ban, Clock, Package, Send, Truck } from "lucide-react";
 import { api, qs } from "../lib/api.js";
 import { goSearch, useLiveReload } from "../lib/live.js";
+import { useAuth } from "../context/AuthContext.jsx";
+import { useUi } from "../context/UiContext.jsx";
 import KPICard from "../components/KPICard.jsx";
 import ChartCard from "../components/ChartCard.jsx";
 import OpsTable from "../components/OpsTable.jsx";
@@ -26,6 +28,7 @@ const TABS = [
   ["scorecard", "Scorecard"],
   ["board", "PO board"],
   ["lists", "Lists"],
+  ["cards", "Supplier cards"],
 ];
 const BOARD = [
   ["need_rfq", "Need RFQ", "Open, no PO, RFQ date empty", "need_rfq", "bg-slate-50 dark:bg-white/5"],
@@ -43,6 +46,10 @@ export default function Suppliers() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("scorecard");
+  const [card, setCard] = useState(null);
+  const [cardBusy, setCardBusy] = useState(false);
+  const { can } = useAuth();
+  const { toast } = useUi();
 
   useEffect(() => {
     api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
@@ -299,6 +306,126 @@ export default function Suppliers() {
             viewAll={() => go({ flag: "eta_late" })}
           />
         </>
+      )}
+
+      {tab === "cards" && (
+        <div className="card overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 dark:border-white/5">
+            <div className="font-semibold">Supplier cards</div>
+            <p className="text-xs text-slate-500">Phone, contact, lead time and notes live in the app catalog. On-time % is still counted from Excel.</p>
+          </div>
+          <div className="table-wrap max-h-[560px]">
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Supplier</th>
+                  <th>On-time</th>
+                  <th>Open</th>
+                  <th>Contact</th>
+                  <th>Phone</th>
+                  <th>Lead (days)</th>
+                  <th>Notes</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.suppliers || [])
+                  .filter((r) => r.name !== "Unassigned")
+                  .map((r) => (
+                    <tr key={r.name} className="!cursor-default">
+                      <td className="font-medium">{r.name}</td>
+                      <td>{r.scored ? `${r.on_time_rate}%` : "—"}</td>
+                      <td>{r.open}</td>
+                      <td>{r.contact || "—"}</td>
+                      <td>{r.phone || "—"}</td>
+                      <td>{r.lead_time_days ?? "—"}</td>
+                      <td className="max-w-[220px] truncate">{r.notes || "—"}</td>
+                      <td>
+                        {can("edit") && (
+                          <button className="btn-outline !py-1 !px-2 text-xs" onClick={() => setCard({ ...r })}>
+                            Edit card
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {card && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => setCard(null)}>
+          <div className="card w-full max-w-lg p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <div className="font-semibold">{card.name}</div>
+            <p className="text-xs text-slate-500">On-time {card.scored ? `${card.on_time_rate}%` : "—"} from Excel. Card fields stay in SQLite.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="lbl">Contact</label>
+                <input value={card.contact || ""} onChange={(e) => setCard({ ...card, contact: e.target.value })} />
+              </div>
+              <div>
+                <label className="lbl">Phone</label>
+                <input value={card.phone || ""} onChange={(e) => setCard({ ...card, phone: e.target.value })} />
+              </div>
+              <div>
+                <label className="lbl">Email</label>
+                <input value={card.email || ""} onChange={(e) => setCard({ ...card, email: e.target.value })} />
+              </div>
+              <div>
+                <label className="lbl">Lead time (days)</label>
+                <input type="number" value={card.lead_time_days ?? ""} onChange={(e) => setCard({ ...card, lead_time_days: e.target.value === "" ? "" : Number(e.target.value) })} />
+              </div>
+              <div className="col-span-2">
+                <label className="lbl">Notes</label>
+                <textarea rows={3} value={card.notes || ""} onChange={(e) => setCard({ ...card, notes: e.target.value })} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button className="btn-ghost" type="button" onClick={() => setCard(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                type="button"
+                disabled={cardBusy}
+                onClick={async () => {
+                  setCardBusy(true);
+                  try {
+                    let id = card.id;
+                    if (!id) {
+                      const created = await api.post("/api/catalog/suppliers", { name: card.name });
+                      id = created.item?.id;
+                    }
+                    const d = await api.put(`/api/catalog/suppliers/${id}`, {
+                      phone: card.phone || "",
+                      email: card.email || "",
+                      contact: card.contact || "",
+                      lead_time_days: card.lead_time_days === "" ? null : card.lead_time_days,
+                      notes: card.notes || "",
+                    });
+                    setData((prev) => {
+                      if (!prev?.suppliers) return prev;
+                      return {
+                        ...prev,
+                        suppliers: prev.suppliers.map((r) => (r.name === card.name ? { ...r, ...d.item } : r)),
+                      };
+                    });
+                    toast("Supplier card saved", "success");
+                    setCard(null);
+                  } catch (e) {
+                    toast(e.message, "error");
+                  } finally {
+                    setCardBusy(false);
+                  }
+                }}
+              >
+                Save card
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

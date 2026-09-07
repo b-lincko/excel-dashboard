@@ -302,6 +302,84 @@ def wo_sheet_pdf(rec: dict[str, Any], attachments: Optional[list[dict[str, Any]]
     return buf.getvalue()
 
 
+def digest_pdf(payload: dict[str, Any]) -> bytes:
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+        title="Morning digest",
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "DigTitle", parent=styles["Title"], fontSize=16, textColor=colors.HexColor("#0F3D5E"), spaceAfter=4, alignment=0
+    )
+    meta = ParagraphStyle("DigMeta", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#64748B"), spaceAfter=2)
+    h2 = ParagraphStyle("DigH2", parent=styles["Heading2"], fontSize=12, textColor=colors.HexColor("#0F3D5E"), spaceBefore=8, spaceAfter=4)
+    h3 = ParagraphStyle("DigH3", parent=styles["Heading3"], fontSize=10, textColor=colors.HexColor("#334155"), spaceBefore=4, spaceAfter=2)
+    cell = ParagraphStyle("DigC", parent=styles["Normal"], fontSize=7, leading=9)
+    counts = payload.get("counts") or {}
+    story: list[Any] = [
+        Paragraph("Linkco MR · morning digest", title_style),
+        Paragraph(
+            f"Printed {datetime.now().strftime('%Y-%m-%d %H:%M')} · as of { _esc(payload.get('as_of')) } · "
+            f"overdue {counts.get('overdue', 0)} · NTP {counts.get('ntp', 0)} · due soon {counts.get('due_soon', 0)} · live Excel",
+            meta,
+        ),
+        Spacer(1, 4),
+        HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0F3D5E"), spaceAfter=6),
+    ]
+    for section in payload.get("sections") or []:
+        story.append(Paragraph(f"{_esc(section.get('title'))} ({section.get('count') or 0})", h2))
+        sites = section.get("sites") or []
+        if not sites:
+            story.append(Paragraph("None.", cell))
+            continue
+        for site in sites:
+            story.append(Paragraph(f"{_esc(site.get('name'))} · {site.get('count') or 0}", h3))
+            for person in site.get("assignees") or []:
+                rows = [["WO #", "Material", "Due / age", "Status", "Assigned"]]
+                for rec in person.get("items") or []:
+                    due = str(rec.get("due_date") or "")[:10]
+                    age = rec.get("days_overdue")
+                    if age is None:
+                        age = rec.get("aging_days")
+                    rows.append(
+                        [
+                            Paragraph(_esc(rec.get("work_order_id")), cell),
+                            Paragraph(_esc(str(rec.get("description") or "")[:80]), cell),
+                            Paragraph(_esc(due or age or "—"), cell),
+                            Paragraph(_esc(rec.get("status")), cell),
+                            Paragraph(_esc(rec.get("assigned_to") or person.get("name")), cell),
+                        ]
+                    )
+                table = Table(rows, colWidths=[28 * mm, 70 * mm, 28 * mm, 28 * mm, 32 * mm], repeatRows=1)
+                table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F3D5E")),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                            ("FONTSIZE", (0, 0), (-1, 0), 7),
+                            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                            ("TOPPADDING", (0, 0), (-1, -1), 2),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                        ]
+                    )
+                )
+                story.append(Paragraph(_esc(person.get("name")) + f" · {person.get('count') or 0}", cell))
+                story.append(table)
+                story.append(Spacer(1, 4))
+    doc.build(story)
+    return buf.getvalue()
+
+
 def render(kind: str, fmt: str, filters: dict[str, Any]) -> tuple[bytes, str, str]:
     records = records_for_report(kind, filters)
     title_map = {

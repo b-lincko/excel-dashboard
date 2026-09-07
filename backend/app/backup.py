@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import threading
 from datetime import datetime, timedelta
@@ -104,6 +105,13 @@ def schedule_status(cfg: Optional[AppConfig] = None, now: Optional[datetime] = N
     nxt = next_run(now, cfg)
     last = database.get_sync_meta("last_auto_backup")
     last_any = database.get_sync_meta("last_backup")
+    health_raw = database.get_sync_meta("last_auto_backup_health")
+    health = None
+    if health_raw:
+        try:
+            health = json.loads(health_raw)
+        except json.JSONDecodeError:
+            health = {"ok": False, "error": health_raw}
     return {
         "enabled": bool(getattr(cfg, "backup_auto_enabled", False)),
         "folder": str(cfg.backup_dir),
@@ -113,6 +121,7 @@ def schedule_status(cfg: Optional[AppConfig] = None, now: Optional[datetime] = N
         "ratio": int(getattr(cfg, "backup_ratio", 14) or 0),
         "last_auto_backup": last,
         "last_backup": last_any,
+        "last_auto_backup_health": health,
         "next_run": nxt.strftime("%Y-%m-%d %H:%M") if nxt else None,
         "due_now": is_due(now, cfg, last),
     }
@@ -134,11 +143,18 @@ def run_due_backup(force: bool = False) -> Optional[Path]:
         pruned = excel_service.prune_backups(keep, reasons=("auto", "manual"))
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         database.set_sync_meta("last_auto_backup", stamp)
-        database.add_audit(
-            "system",
-            "backup",
-            details=f"Automatic backup {dest or ''} (pruned {pruned})",
-        )
+        health = None
+        if dest:
+            try:
+                health = excel_service.check_backup(str(dest))
+                database.set_sync_meta("last_auto_backup_health", json.dumps(health, default=str))
+            except Exception as exc:
+                health = {"ok": False, "error": str(exc), "path": str(dest)}
+                database.set_sync_meta("last_auto_backup_health", json.dumps(health))
+        details = f"Automatic backup {dest or ''} (pruned {pruned})"
+        if health and not health.get("ok"):
+            details += f" HEALTH FAIL rows={health.get('backup_count')} live={health.get('live_count')} {health.get('error') or ''}"
+        database.add_audit("system", "backup", details=details.strip())
         return dest
 
 

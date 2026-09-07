@@ -231,6 +231,16 @@ def init_db() -> None:
         if "work_order_id" not in chat_cols:
             conn.execute("ALTER TABLE chat_threads ADD COLUMN work_order_id TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_record ON chat_threads(record_id)")
+        sup_cols = {r[1] for r in conn.execute("PRAGMA table_info(suppliers)")}
+        for col, spec in (
+            ("phone", "TEXT"),
+            ("email", "TEXT"),
+            ("contact", "TEXT"),
+            ("lead_time_days", "INTEGER"),
+            ("notes", "TEXT"),
+        ):
+            if col not in sup_cols:
+                conn.execute(f"ALTER TABLE suppliers ADD COLUMN {col} {spec}")
         general = conn.execute("SELECT id FROM chat_threads WHERE kind = 'channel' AND title = 'General'").fetchone()
         if not general:
             conn.execute(
@@ -403,33 +413,75 @@ def set_sync_meta(key: str, value: str) -> None:
 
 def list_suppliers() -> list[dict[str, Any]]:
     with connect() as conn:
-        rows = conn.execute(
-            "SELECT id, name, created_at, created_by FROM suppliers ORDER BY name COLLATE NOCASE"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM suppliers ORDER BY name COLLATE NOCASE").fetchall()
         return [dict(r) for r in rows]
+
+
+def get_supplier(supplier_id: int) -> Optional[dict[str, Any]]:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_supplier_by_name(name: str) -> Optional[dict[str, Any]]:
+    cleaned = " ".join((name or "").split())
+    if not cleaned:
+        return None
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM suppliers WHERE name = ? COLLATE NOCASE",
+            (cleaned,),
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def add_supplier(name: str, created_by: str = "") -> dict[str, Any]:
     cleaned = " ".join((name or "").split())
     if not cleaned:
         raise ValueError("Supplier name is required")
+    existing = get_supplier_by_name(cleaned)
+    if existing:
+        return existing
     with connect() as conn:
-        existing = conn.execute(
-            "SELECT id, name, created_at, created_by FROM suppliers WHERE name = ? COLLATE NOCASE",
-            (cleaned,),
-        ).fetchone()
-        if existing:
-            return dict(existing)
         conn.execute(
             "INSERT INTO suppliers (name, created_at, created_by) VALUES (?, ?, ?)",
             (cleaned, now_iso(), created_by),
         )
         row = conn.execute(
-            "SELECT id, name, created_at, created_by FROM suppliers WHERE name = ? COLLATE NOCASE",
+            "SELECT * FROM suppliers WHERE name = ? COLLATE NOCASE",
             (cleaned,),
         ).fetchone()
     assert row is not None
     return dict(row)
+
+
+def update_supplier(supplier_id: int, **fields: Any) -> Optional[dict[str, Any]]:
+    allowed = {"name", "phone", "email", "contact", "lead_time_days", "notes"}
+    sets = []
+    values: list[Any] = []
+    for k, v in fields.items():
+        if k not in allowed:
+            continue
+        if k == "name":
+            v = " ".join(str(v or "").split())
+            if not v:
+                continue
+        elif k == "lead_time_days":
+            if v in ("", None):
+                v = None
+            else:
+                try:
+                    v = int(v)
+                except (TypeError, ValueError):
+                    continue
+        sets.append(f"{k} = ?")
+        values.append(v)
+    if not sets:
+        return get_supplier(supplier_id)
+    values.append(supplier_id)
+    with connect() as conn:
+        conn.execute(f"UPDATE suppliers SET {', '.join(sets)} WHERE id = ?", values)
+    return get_supplier(supplier_id)
 
 
 def get_record_extra(record_id: str) -> Optional[dict[str, Any]]:
@@ -695,6 +747,29 @@ def get_or_create_wo_thread(record_id: str, work_order_id: str, created_by: str)
             return item
     wo = str(work_order_id or "").strip() or rid
     return create_chat_thread("work_order", f"WO {wo}", created_by, record_id=rid, work_order_id=wo)
+
+
+def get_wo_thread(record_id: str) -> Optional[dict[str, Any]]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        return None
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM chat_threads WHERE kind = 'work_order' AND record_id = ?",
+            (rid,),
+        ).fetchone()
+        if not row:
+            return None
+    return get_chat_thread(int(row["id"]))
+
+
+def list_watch_events(record_id: str) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT username, work_order_id, created_at FROM watches WHERE record_id = ? ORDER BY created_at",
+            (record_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def add_chat_message(thread_id: int, username: str, body: str) -> dict[str, Any]:

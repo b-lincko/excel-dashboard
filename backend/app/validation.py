@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from .config import load_config
 from .dates import parse_date
@@ -56,6 +56,41 @@ def validate_work_order(data: dict[str, Any], partial: bool = False) -> list[str
         labels = cfg.mapping.model_dump() if hasattr(cfg, "mapping") else {}
         for field in needed:
             if not str(data.get(field) or "").strip():
-                label = field if field not in labels else field
-                errors.append(f"Status {status} requires {label}.")
+                errors.append(f"Status {status} requires {field}.")
     return errors
+
+
+def status_transition_needs_remark(old_status: Any, new_status: Any, cfg=None) -> bool:
+    cfg = cfg or load_config()
+    old_n = _norm(old_status)
+    new_n = _norm(new_status)
+    if not new_n or old_n == new_n:
+        return False
+    rules = getattr(cfg, "status_change_remarks", None) or []
+    for rule in rules:
+        text = str(rule or "").strip()
+        if not text:
+            continue
+        if "->" in text:
+            left, right = text.split("->", 1)
+        elif "→" in text:
+            left, right = text.split("→", 1)
+        else:
+            left, right = "*", text
+        left_n = _norm(left) or "*"
+        right_n = _norm(right)
+        if right_n not in {"", "*", new_n}:
+            continue
+        if left_n in {"", "*", old_n}:
+            return True
+    return False
+
+
+def status_change_remark_error(old_status: Any, new_status: Any, remark: Any, cfg=None) -> Optional[str]:
+    if not status_transition_needs_remark(old_status, new_status, cfg):
+        return None
+    if str(remark or "").strip():
+        return None
+    old_s = str(old_status or "—").strip() or "—"
+    new_s = str(new_status or "").strip() or "—"
+    return f"Changing status from {old_s} to {new_s} requires a remark."

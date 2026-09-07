@@ -3,11 +3,12 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from .. import database
+from .. import database, reports
 from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
-from ..ops import alerts_payload, handover_snapshot, queue_payload, supplier_payload
+from ..ops import alerts_payload, digest_payload, handover_snapshot, queue_payload, similar_payload, supplier_payload
 from ..security import require_permission
 from ..stats import parse_query_filters
 
@@ -145,6 +146,50 @@ def publish_handover(body: HandoverIn, user=Depends(require_permission("edit")))
         shift=body.shift or "",
     )
     return {"item": item}
+
+
+@router.get("/digest")
+def morning_digest(
+    q: Optional[str] = None,
+    period: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    year: Optional[str] = None,
+    month: Optional[str] = None,
+    week: Optional[str] = None,
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    department: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    work_type: Optional[str] = None,
+    supplier: Optional[str] = None,
+    fmt: Optional[str] = None,
+    user=Depends(require_permission("view")),
+):
+    try:
+        payload = digest_payload(_filters(locals()))
+    except ExcelUnavailable as cop:
+        raise HTTPException(status_code=503, detail=str(cop))
+    except ExcelLocked as cop:
+        raise HTTPException(status_code=423, detail=str(cop))
+    if str(fmt or "").lower() == "pdf":
+        pdf = reports.digest_pdf(payload)
+        return Response(
+            content=pdf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": 'inline; filename="morning_digest.pdf"'},
+        )
+    return payload
+
+
+@router.get("/similar")
+def similar_mrs(limit: int = 40, user=Depends(require_permission("view"))):
+    try:
+        return similar_payload(limit=limit)
+    except ExcelUnavailable as cop:
+        raise HTTPException(status_code=503, detail=str(cop))
+    except ExcelLocked as cop:
+        raise HTTPException(status_code=423, detail=str(cop))
 
 
 @router.get("/health")

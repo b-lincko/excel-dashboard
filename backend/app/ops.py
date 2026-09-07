@@ -31,6 +31,7 @@ from .domain import (
     is_status_open,
     is_waiting_supplier,
     matches_filters,
+    similar_open_pairs,
     today,
 )
 from .excel.service import excel_service
@@ -284,6 +285,15 @@ def supplier_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]
             }
         )
     rows.sort(key=lambda x: (x["overdue"], x["eta_late"], -x["on_time_rate"], x["open"]), reverse=True)
+    catalog = {str(s.get("name") or "").strip().lower(): s for s in database.list_suppliers()}
+    for r in rows:
+        card = catalog.get(str(r.get("name") or "").strip().lower()) or {}
+        r["id"] = card.get("id")
+        r["phone"] = card.get("phone") or ""
+        r["email"] = card.get("email") or ""
+        r["contact"] = card.get("contact") or ""
+        r["lead_time_days"] = card.get("lead_time_days")
+        r["notes"] = card.get("notes") or ""
 
     pending_pos = _sort_date([r for r in records if is_pending_po(r, cfg)], "created_date", False)
     awaiting_po = _sort_date([r for r in records if is_awaiting_po(r, cfg)], "created_date", False)
@@ -419,3 +429,104 @@ def alerts_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         "sites": sites,
         "items": [_slim(r) for r in soon[:100]],
     }
+
+
+def _group_site_assignee(rows: list[dict[str, Any]], cfg) -> list[dict[str, Any]]:
+    by_site: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    for rec in rows:
+        item = _slim(annotate(rec, cfg))
+        site = str(rec.get("department") or "Unassigned")
+        person = str(rec.get("assigned_to") or "Unassigned")
+        by_site[site][person].append(item)
+    sites = []
+    for site, people in sorted(by_site.items(), key=lambda kv: kv[0].lower()):
+        assignees = []
+        for person, items in sorted(people.items(), key=lambda kv: kv[0].lower()):
+            assignees.append({"name": person, "count": len(items), "items": items[:80]})
+        sites.append({"name": site, "count": sum(a["count"] for a in assignees), "assignees": assignees})
+    return sites
+
+
+def digest_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Morning digest: overdue + NTP + due-soon, grouped site then assignee. Live Excel numbers."""
+    cfg = load_config()
+    records = _filtered(excel_service.get_all(), filters or {})
+    buckets = {
+        "overdue": _sort_date([r for r in records if is_overdue(r, cfg)], "due_date", False),
+        "ntp": _sort_date([r for r in records if is_ntp(r) and is_open(r, cfg)], "created_date", False),
+        "due_soon": _sort_date([r for r in records if is_due_soon(r, cfg)], "due_date", False),
+    }
+    titles = {"overdue": "Overdue", "ntp": "UNDER NTP", "due_soon": "Due soon"}
+    sections = [
+        {"id": key, "title": titles[key], "count": len(rows), "sites": _group_site_assignee(rows, cfg)}
+        for key, rows in buckets.items()
+    ]
+    return {
+        "as_of": today().isoformat(),
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "sync_token": excel_service.sync_token(),
+        "count": len(records),
+        "counts": {k: len(v) for k, v in buckets.items()},
+        "sections": sections,
+    }
+
+
+def similar_payload(limit: int = 40) -> dict[str, Any]:
+    cfg = load_config()
+    records = excel_service.get_all()
+    pairs = similar_open_pairs(records, cfg, limit=limit)
+    return {
+        "as_of": today().isoformat(),
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "sync_token": excel_service.sync_token(),
+        "count": len(pairs),
+        "items": pairs,
+    }
+
+
+def timeline_payload(rec: dict[str, Any]) -> dict[str, Any]:
+    rid = str(rec.get("record_id") or "")
+    wo = str(rec.get("work_order_id") or "")
+    events: list[dict[str, Any]] = []
+    audits, _ = database.list_audit(work_order_id=wo, limit=200) if wo else ([], 0)
+    for a in audits:
+        events.append(
+            {
+                "kind": "field",
+                "at": a.get("created_at"),
+                "username": a.get("username"),
+                "field": a.get("field"),
+                "old_value": a.get("old_value"),
+                "new_value": a.get("new_value"),
+                "action": a.get("action"),
+                "details": a.get("details"),
+            }
+        )
+    thread = database.get_wo_thread(rid) if rid else None
+    if thread:
+        for m in database.list_chat_messages(int(thread["id"]), limit=200):
+            events.append(
+                {
+                    "kind": "chat",
+                    "at": m.get("created_at"),
+                    "username": m.get("username"),
+                    "body": m.get("body"),
+                }
+            )
+    if rid:
+        for f in database.list_attachments(rid):
+            events.append(
+                {
+                    "kind": "file",
+                    "at": f.get("created_at"),
+                    "username": f.get("created_by"),
+                    "filename": f.get("filename"),
+                    "note": f.get("note"),
+                }
+            )
+        for w in database.list_watch_events(rid):
+            events.append({"kind": "follow", "at": w.get("created_at"), "username": w.get("username")})
+        for s in database.list_queue_seen([rid]).get(rid, []):
+            events.append({"kind": "seen", "at": s.get("seen_at"), "username": s.get("username")})
+    events.sort(key=lambda e: str(e.get("at") or ""), reverse=True)
+    return {"items": events[:250], "count": len(events), "record_id": rid, "work_order_id": wo}

@@ -21,6 +21,8 @@ export default function Settings() {
   const [sync, setSync] = useState(null);
   const [backups, setBackups] = useState([]);
   const [schedule, setSchedule] = useState(null);
+  const [headers, setHeaders] = useState([]);
+  const [suggest, setSuggest] = useState({});
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -30,6 +32,13 @@ export default function Settings() {
       setSync(d.sync);
       setSchedule(d.backup || null);
     });
+    api
+      .get("/api/settings/mapping-scan")
+      .then((d) => {
+        setHeaders(d.headers || []);
+        setSuggest(d.suggestions || {});
+      })
+      .catch(() => {});
     if (can("backup")) {
       api.get("/api/settings/backups").then((d) => {
         setBackups(d.items || []);
@@ -121,18 +130,45 @@ export default function Settings() {
       )}
 
       <div className="card p-5">
-        <div className="font-semibold mb-3">Column mapping (Excel → application)</div>
+        <div className="font-semibold mb-1">Column mapping wizard</div>
+        <p className="text-xs text-slate-500 mb-3">
+          Headers scanned from the live workbook. Pick the Excel column for each app field. Suggested matches are from the current file, not invented names.
+        </p>
         <div className="grid md:grid-cols-2 gap-3">
-          {Object.entries(mapping).map(([k, v]) => (
-            <div key={k}>
-              <label className="lbl">{k}</label>
-              <input
-                value={v}
-                disabled={!can("settings")}
-                onChange={(e) => setCfg({ ...cfg, mapping: { ...mapping, [k]: e.target.value } })}
-              />
-            </div>
-          ))}
+          {Object.entries(mapping).map(([k, v]) => {
+            const hint = suggest[k] || {};
+            const missing = headers.length && v && !headers.some((h) => String(h).toLowerCase() === String(v).toLowerCase());
+            return (
+              <div key={k}>
+                <label className="lbl">
+                  {k}
+                  {missing ? <span className="text-rose-600 font-normal"> · not in live headers</span> : ""}
+                </label>
+                <select
+                  value={v || ""}
+                  disabled={!can("settings")}
+                  onChange={(e) => setCfg({ ...cfg, mapping: { ...mapping, [k]: e.target.value } })}
+                >
+                  <option value="">—</option>
+                  {v && !headers.includes(v) && <option value={v}>{v} (saved)</option>}
+                  {headers.map((h) => (
+                    <option key={h} value={h}>
+                      {h}
+                    </option>
+                  ))}
+                </select>
+                {hint.suggested && hint.suggested !== v && (
+                  <button
+                    type="button"
+                    className="text-[11px] text-brand-700 dark:text-cyan-300 mt-1 hover:underline"
+                    onClick={() => setCfg({ ...cfg, mapping: { ...mapping, [k]: hint.suggested } })}
+                  >
+                    Use suggested: {hint.suggested}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -205,6 +241,13 @@ export default function Settings() {
           />
           <p className="text-[11px] text-slate-500 mt-1">Example: supplier: admin, manager. Fields not listed can be edited by anyone with edit permission. Admin always can.</p>
         </div>
+        <ListField
+          label="Status changes that need a remark"
+          value={cfg.status_change_remarks}
+          onChange={(v) => setCfg({ ...cfg, status_change_remarks: v })}
+          disabled={!can("settings")}
+        />
+        <p className="text-[11px] text-slate-500 md:col-span-2 -mt-2">Example: *-&gt;ON HOLD, *-&gt;CLOSED. Same pattern as required fields. Blank remark is rejected on save and bulk status change.</p>
       </div>
 
       {can("settings") && (
@@ -222,6 +265,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
   const [busy, setBusy] = useState(false);
   const [newFolder, setNewFolder] = useState("");
   const [rowRestore, setRowRestore] = useState(null);
+  const [healthMap, setHealthMap] = useState({});
   const days = cfg.backup_days?.length ? cfg.backup_days : [0, 1, 2, 3, 4, 5, 6];
 
   async function openBrowse(path) {
@@ -372,6 +416,13 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
           <CalendarClock size={14} />
           <span>{cfg.backup_auto_enabled ? `Next run ${schedule?.next_run || "—"}` : "Autobackup is off"}</span>
           <span>· last auto {schedule?.last_auto_backup || "never"}</span>
+          {schedule?.last_auto_backup_health && (
+            <span className={schedule.last_auto_backup_health.ok ? "text-emerald-700" : "text-rose-600"}>
+              · {schedule.last_auto_backup_health.ok
+                ? `${schedule.last_auto_backup_health.backup_count} rows vs live ${schedule.last_auto_backup_health.live_count}`
+                : `backup health fail: ${schedule.last_auto_backup_health.error || "row count mismatch"}`}
+            </span>
+          )}
           <span className="ml-auto flex gap-2">
             <button className="btn-outline !py-1 !px-2 text-xs" onClick={backupNow} disabled={busy}>
               {busy ? "Working…" : "Backup now"}
@@ -390,34 +441,55 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
             <th>Kind</th>
             <th>Modified</th>
             <th>Size</th>
+            <th>Health</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
-          {backups.map((b) => (
-            <tr key={b.path} className="!cursor-default">
-              <td className="font-mono text-xs">{b.name}</td>
-              <td className="uppercase text-[11px] text-slate-500">{b.reason || "—"}</td>
-              <td>{b.modified}</td>
-              <td>{Math.round(b.size / 1024)} KB</td>
-              <td>
-                <div className="flex gap-1 justify-end">
-                  <button className="btn-outline !py-1 !px-2 text-xs" onClick={() => onRestore(b)}>
-                    Restore file
-                  </button>
-                  <button
-                    className="btn-outline !py-1 !px-2 text-xs"
-                    onClick={() => setRowRestore({ path: b.path, name: b.name, record_id: "", work_order_id: "", site: "", preview: null, busy: false })}
-                  >
-                    Restore row
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
+          {backups.map((b) => {
+            const h = healthMap[b.path];
+            return (
+              <tr key={b.path} className="!cursor-default">
+                <td className="font-mono text-xs">{b.name}</td>
+                <td className="uppercase text-[11px] text-slate-500">{b.reason || "—"}</td>
+                <td>{b.modified}</td>
+                <td>{Math.round(b.size / 1024)} KB</td>
+                <td className={`text-xs ${h && !h.ok ? "text-rose-600" : ""}`}>
+                  {h ? (h.ok ? `${h.backup_count} / live ${h.live_count}` : h.error || "mismatch") : "—"}
+                </td>
+                <td>
+                  <div className="flex gap-1 justify-end">
+                    <button
+                      className="btn-outline !py-1 !px-2 text-xs"
+                      onClick={async () => {
+                        try {
+                          const d = await api.post("/api/settings/backups/check", { path: b.path });
+                          setHealthMap((prev) => ({ ...prev, [b.path]: d }));
+                          toast(d.ok ? "Backup looks healthy" : "Backup does not match live row counts", d.ok ? "success" : "error");
+                        } catch (e) {
+                          toast(e.message, "error");
+                        }
+                      }}
+                    >
+                      Check
+                    </button>
+                    <button className="btn-outline !py-1 !px-2 text-xs" onClick={() => onRestore(b)}>
+                      Restore file
+                    </button>
+                    <button
+                      className="btn-outline !py-1 !px-2 text-xs"
+                      onClick={() => setRowRestore({ path: b.path, name: b.name, record_id: "", work_order_id: "", site: "", preview: null, busy: false })}
+                    >
+                      Restore row
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
           {!backups.length && (
             <tr className="!cursor-default">
-              <td colSpan={5} className="text-center text-slate-400 py-8">
+              <td colSpan={6} className="text-center text-slate-400 py-8">
                 No backups yet.
               </td>
             </tr>

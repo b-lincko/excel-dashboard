@@ -13,7 +13,8 @@ from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_f
 from ..excel.service import DELAY_FIELDS, DUE_OFFSETS, ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
 from ..security import editable_fields, forbidden_fields, require_permission
 from ..stats import parse_query_filters
-from ..validation import validate_work_order
+from ..ops import timeline_payload
+from ..validation import status_change_remark_error, validate_work_order
 
 EXTRA_FIELDS = set(DELAY_FIELDS)
 
@@ -235,6 +236,7 @@ def options(user=Depends(require_permission("view"))):
         "editable_fields": editable_fields(user, cfg),
         "status_required_fields": getattr(cfg, "status_required_fields", None) or {},
         "field_edit_roles": getattr(cfg, "field_edit_roles", None) or {},
+        "status_change_remarks": getattr(cfg, "status_change_remarks", None) or [],
     }
 
 
@@ -257,6 +259,24 @@ def bulk_update(body: BulkUpdate, user=Depends(require_permission("edit"))):
             status_code=403,
             detail=f"Your role cannot edit: {', '.join(blocked)}.",
         )
+    if body.status is not None:
+        cfg = load_config()
+        recs = excel_service.get_all()
+        by_rid = {str(r.get("record_id") or ""): r for r in recs}
+        by_wo = {str(r.get("work_order_id") or ""): r for r in recs}
+        need_remark = []
+        for wo_id in body.ids:
+            rec = by_rid.get(str(wo_id)) or by_wo.get(str(wo_id))
+            if not rec:
+                continue
+            err = status_change_remark_error(rec.get("status"), body.status, remark, cfg)
+            if err:
+                need_remark.append(str(rec.get("work_order_id") or wo_id))
+        if need_remark:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Changing status to {body.status} requires a remark ({len(need_remark)} selected).",
+            )
     try:
         result = excel_service.update_records(
             body.ids,
@@ -324,8 +344,18 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
             status_code=403,
             detail=f"Your role cannot edit: {', '.join(blocked)}.",
         )
-    merged = {**{k: rec.get(k) for k in load_config().mapping.model_dump().keys()}, **excel_changes}
+    cfg = load_config()
+    merged = {**{k: rec.get(k) for k in cfg.mapping.model_dump().keys()}, **excel_changes}
     errors = validate_work_order(merged, partial=False)
+    if "status" in excel_changes:
+        remark_err = status_change_remark_error(
+            rec.get("status"),
+            excel_changes.get("status"),
+            excel_changes.get("remarks"),
+            cfg,
+        )
+        if remark_err:
+            errors.append(remark_err)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
     updated = rec
@@ -500,6 +530,50 @@ def mark_seen(wo_id: str, user=Depends(require_permission("view"))):
         raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
     item = database.mark_queue_seen(str(rec.get("record_id") or wo_id), user["username"])
     return {"item": item, "seen_by": database.list_queue_seen([item["record_id"]]).get(item["record_id"], [])}
+
+
+@router.get("/{wo_id}/timeline")
+def work_order_timeline(wo_id: str, user=Depends(require_permission("view"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    return timeline_payload(rec)
+
+
+@router.post("/{wo_id}/claim")
+def claim_work_order(wo_id: str, force: bool = False, user=Depends(require_permission("edit"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    blocked = forbidden_fields(user, {"assigned_to": "x"})
+    if blocked:
+        raise HTTPException(status_code=403, detail="Your role cannot edit Assign to.")
+    name = str(user.get("full_name") or user.get("username") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Your account has no name to claim with.")
+    current = str(rec.get("assigned_to") or "").strip()
+    mine = current.lower() in {name.lower(), str(user.get("username") or "").strip().lower()}
+    if current and not mine and not force:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": f"Already assigned to {current}", "assigned_to": current, "conflict": True},
+        )
+    updated = rec
+    if not mine:
+        try:
+            updated = excel_service.update_record(wo_id, {"assigned_to": name}, username=user["username"], force=True)
+        except (ExcelUnavailable, ExcelLocked, SyncConflict, KeyError, ValueError) as cop:
+            _raise_excel(cop)
+    rid = str(updated.get("record_id") or rec.get("record_id") or wo_id)
+    seen = database.mark_queue_seen(rid, user["username"])
+    return {
+        "item": annotate(_with_extras(updated)),
+        "claimed": not mine,
+        "already": mine,
+        "seen": seen,
+        "seen_by": database.list_queue_seen([rid]).get(rid, []),
+        "sync_token": excel_service.sync_token(),
+    }
 
 
 @router.delete("/{wo_id}")

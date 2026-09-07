@@ -22,6 +22,7 @@ const Projects = lazy(() => import("./pages/Projects.jsx"));
 const ImportData = lazy(() => import("./pages/ImportData.jsx"));
 const Handover = lazy(() => import("./pages/Handover.jsx"));
 const Health = lazy(() => import("./pages/Health.jsx"));
+const Digest = lazy(() => import("./pages/Digest.jsx"));
 
 function Fallback() {
   return <div className="text-sm text-slate-500 py-10 text-center">Loading…</div>;
@@ -97,6 +98,7 @@ export default function App() {
         <Route path="pending" element={<WorkOrders presetFlag="pending" title="Pending work orders" />} />
         <Route path="analytics" element={<Lazy perm="analytics" page="analytics"><Analytics /></Lazy>} />
         <Route path="queue" element={<Lazy page="queue"><ActionQueue /></Lazy>} />
+        <Route path="digest" element={<Lazy page="digest"><Digest /></Lazy>} />
         <Route path="alerts" element={<Lazy page="alerts"><Alerts /></Lazy>} />
         <Route path="handover" element={<Lazy page="handover"><Handover /></Lazy>} />
         <Route path="health" element={<Lazy page="health"><Health /></Lazy>} />
