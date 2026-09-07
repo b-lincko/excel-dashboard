@@ -22,13 +22,18 @@ def _boot() -> None:
     try:
         path = excel_service.excel_path()
         print(f"[WOMS] Excel path: {path} exists={path.exists()}")
-        if excel_service.available():
-            n = len(excel_service.load(force=True))
-            print(f"[WOMS] Loaded {n} material requests")
+        n = database.wo_cache_count()
+        if n == 0 and excel_service.available():
+            result = excel_service.seed_from_excel(username="boot", replace_lines=True)
+            if result.get("ok"):
+                print(f"[WOMS] Seeded {result.get('count')} material requests from Excel into the database")
+            else:
+                print(f"[WOMS] Database seed skipped: {result.get('error')}")
         else:
-            print("[WOMS] Excel file is currently unavailable.")
+            recs = excel_service.load()
+            print(f"[WOMS] Database holds {len(recs)} material requests")
     except Exception as exc:
-        print(f"[WOMS] Excel load skipped: {exc}")
+        print(f"[WOMS] Database/Excel boot skipped: {exc}")
 
 
 @asynccontextmanager
@@ -49,7 +54,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="Linkco MR — Work Order Management",
-    description="Operations dashboard with Excel as the source of truth.",
+    description="Operations dashboard. The database is the work-order history; Excel is a backup replica.",
     version="1.1.0",
     lifespan=lifespan,
 )

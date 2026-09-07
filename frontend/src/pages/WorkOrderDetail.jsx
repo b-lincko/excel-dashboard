@@ -229,8 +229,23 @@ export default function WorkOrderDetail() {
     try {
       if (isNew) {
         const d = await api.post("/api/work-orders", { data: form });
-        setSuccess("Material request created and written to Excel.");
-        toast("Saved to Excel", "success");
+        if (d.excel_backup_ok === false) {
+          setSuccess("Saved in the database. Excel backup failed.");
+          toast("Saved in the database", "success");
+          const retry = await ask({
+            title: "Excel backup failed",
+            body: d.excel_backup_error || "The material request is in the database, but file.xlsx was not updated.",
+            confirmLabel: "Retry Excel backup",
+            danger: true,
+          });
+          if (retry) {
+            nav(`/work-orders/${encodeURIComponent(d.item.record_id || d.item.work_order_id)}`);
+            return;
+          }
+        } else {
+          setSuccess("Material request saved in the database and copied to Excel.");
+          toast("Saved", "success");
+        }
         nav(`/work-orders/${encodeURIComponent(d.item.record_id || d.item.work_order_id)}`);
       } else {
         const skip = new Set([
@@ -285,14 +300,29 @@ export default function WorkOrderDetail() {
         const keys = Object.keys(changes);
         const extraOnly = keys.length > 0 && keys.every((k) => EXTRA_KEYS.includes(k));
         const linesOnly = keys.length > 0 && keys.every((k) => k === "lines" || EXTRA_KEYS.includes(k));
-        setSuccess(
-          extraOnly
-            ? "Delay notes saved in the app database."
-            : linesOnly
-              ? "Supplier line items saved in the app database. Excel still has one supplier cell and one material cell."
-              : "Excel workbook updated successfully."
-        );
-        toast(extraOnly ? "Delay notes saved" : linesOnly ? "Line items saved" : "Excel updated", "success");
+        if (d.excel_backup_ok === false) {
+          setSuccess("Saved in the database. Excel backup failed.");
+          toast("Saved in the database", "success");
+          const retry = await ask({
+            title: "Excel backup failed",
+            body: d.excel_backup_error || "The change is in the database, but file.xlsx was not updated.",
+            confirmLabel: "Retry Excel backup",
+            danger: true,
+          });
+          if (retry) {
+            await save(true);
+            return;
+          }
+        } else {
+          setSuccess(
+            extraOnly
+              ? "Delay notes saved in the app database."
+              : linesOnly
+                ? "Supplier line items saved in the app database. Excel still has one supplier cell and one material cell."
+                : "Saved in the database and copied to Excel."
+          );
+          toast(extraOnly ? "Delay notes saved" : linesOnly ? "Line items saved" : "Saved", "success");
+        }
       }
     } catch (e) {
       if (e.status === 409) {
@@ -315,7 +345,7 @@ export default function WorkOrderDetail() {
     if (dirty) {
       const ok = await ask({
         title: "Discard unsaved changes?",
-        body: "Edits on this page have not been written to Excel.",
+        body: "Edits on this page have not been saved to the database.",
         confirmLabel: "Discard",
         danger: true,
       });
@@ -327,15 +357,15 @@ export default function WorkOrderDetail() {
   async function remove() {
     const ok = await ask({
       title: `Delete ${form.work_order_id || id}?`,
-      body: "This removes the row from the Excel workbook. A backup is written first.",
-      confirmLabel: "Delete from Excel",
+      body: "This removes the work order from the database, then tries to delete the Excel backup row.",
+      confirmLabel: "Delete",
       danger: true,
     });
     if (!ok) return;
     setBusy(true);
     try {
       await api.del(`/api/work-orders/${encodeURIComponent(id)}`);
-      toast("Deleted from Excel", "success");
+      toast("Deleted", "success");
       nav("/work-orders");
     } catch (e) {
       setError(e.message);
@@ -432,7 +462,7 @@ export default function WorkOrderDetail() {
           )}
           {canSave && (
             <button className="btn-primary" onClick={() => save(false)} disabled={busy || (!isNew && !dirty)}>
-              {busy ? "Saving…" : isNew ? "Create order" : "Save to Excel"}
+              {busy ? "Saving…" : isNew ? "Create order" : "Save"}
             </button>
           )}
         </div>
@@ -700,7 +730,7 @@ export default function WorkOrderDetail() {
       )}
       {!isNew && (
         <p className="text-xs text-slate-400">
-          Saving updates the matching row in file.xlsx (SN, due-date and hyperlink formulas are left untouched). Delay notes stay in the app database. A backup is written first. Ctrl/⌘+S to save.
+          Saving writes the database first, then copies the row into file.xlsx (SN, due-date and hyperlink formulas are left untouched). If Excel is locked, the database change is kept and you can retry the backup. Ctrl/⌘+S to save.
         </p>
       )}
       {!isNew && (

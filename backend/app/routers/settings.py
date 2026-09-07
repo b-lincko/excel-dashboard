@@ -205,6 +205,92 @@ class FolderCreate(BaseModel):
     path: str
 
 
+class ConfirmBody(BaseModel):
+    confirm: str = ""
+
+
+def _require_admin(user) -> None:
+    if str(user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="Only an administrator can reset or reseed the database.")
+
+
+@router.get("/database")
+def get_database_status(user=Depends(require_permission("settings"))):
+    try:
+        status = database.database_status()
+        status["excel_available"] = excel_service.available()
+        status["excel_path"] = str(excel_service.excel_path())
+        return status
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read database status: {exc}") from exc
+
+
+@router.post("/database/seed")
+def seed_database(user=Depends(require_permission("settings"))):
+    _require_admin(user)
+    try:
+        result = excel_service.seed_from_excel(username=user["username"], replace_lines=True)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Seed failed: {exc}") from exc
+    excel_service.invalidate()
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "Seed from Excel failed.")
+    return {**result, "sync": excel_service.status()}
+
+
+@router.post("/database/reset")
+def reset_app_database(body: ConfirmBody, user=Depends(require_permission("settings"))):
+    _require_admin(user)
+    if (body.confirm or "").strip() != "DELETE":
+        raise HTTPException(status_code=400, detail="Type DELETE to confirm wiping the database.")
+    try:
+        wiped = database.reset_database()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Reset failed: {exc}") from exc
+    excel_service.invalidate()
+    if not wiped.get("ok"):
+        raise HTTPException(status_code=500, detail="; ".join(wiped.get("errors") or ["Reset failed"]))
+    try:
+        seed = excel_service.seed_from_excel(username=user["username"], replace_lines=True)
+    except Exception as exc:
+        seed = {"ok": False, "error": str(exc), "count": 0}
+    try:
+        database.add_audit(user["username"], "reset", details="Wiped application database and recreated default users")
+    except Exception:
+        pass
+    return {
+        "reset": True,
+        "users": wiped.get("users"),
+        "seed": seed,
+        "relogin": True,
+        "sync": excel_service.status() if seed.get("ok") else excel_service.ping(),
+    }
+
+
+@router.post("/database/upload")
+async def upload_excel_and_seed(file: UploadFile = File(...), user=Depends(require_permission("settings"))):
+    _require_admin(user)
+    name = (file.filename or "upload.xlsx").lower()
+    if not name.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Please upload an Excel file (.xlsx or .xlsm).")
+    content = await file.read()
+    try:
+        status = excel_service.replace_from_bytes(content, username=user["username"], filename=file.filename or name)
+    except ExcelLocked as exc:
+        raise HTTPException(status_code=423, detail=str(exc))
+    except ExcelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}") from exc
+    try:
+        seed = excel_service.seed_from_excel(username=user["username"], replace_lines=True)
+    except Exception as exc:
+        seed = {"ok": False, "error": str(exc), "count": 0}
+    return {"ok": True, "sync": status, "seed": seed}
+
+
 @router.post("/folders")
 def create_folder(body: FolderCreate, user=Depends(require_permission("settings"))):
     try:

@@ -334,6 +334,8 @@ def bulk_update(body: BulkUpdate, user=Depends(require_permission("edit"))):
         "missing": result.get("missing") or [],
         "sync_token": excel_service.sync_token(),
         "saved": True,
+        "excel_backup_ok": result.get("excel_backup_ok", True),
+        "excel_backup_error": result.get("excel_backup_error"),
     }
 
 
@@ -428,7 +430,14 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
             f"{actor} updated {updated.get('work_order_id') or wo_id}" + (f" ({', '.join(bits)})" if bits else ""),
             skip=set(pinged),
         )
-    return {"item": annotate(_with_extras(updated)), "sync_token": excel_service.sync_token(), "saved": True}
+    item = annotate(_with_extras(updated))
+    return {
+        "item": item,
+        "sync_token": excel_service.sync_token(),
+        "saved": True,
+        "excel_backup_ok": updated.get("_excel_backup_ok", True),
+        "excel_backup_error": updated.get("_excel_backup_error"),
+    }
 
 
 @router.post("")
@@ -454,7 +463,13 @@ def create_work_order(body: WorkOrderCreate, user=Depends(require_permission("cr
             lines,
             user["username"],
         )
-    return {"item": annotate(_with_extras(created)), "sync_token": excel_service.sync_token(), "saved": True}
+    return {
+        "item": annotate(_with_extras(created)),
+        "sync_token": excel_service.sync_token(),
+        "saved": True,
+        "excel_backup_ok": created.get("_excel_backup_ok", True),
+        "excel_backup_error": created.get("_excel_backup_error"),
+    }
 
 
 @router.get("/{wo_id}/watch")

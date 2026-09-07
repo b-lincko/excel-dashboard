@@ -86,7 +86,7 @@ export default function Settings() {
     <div className="space-y-5 max-w-5xl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-sm text-slate-500">Excel location, column mapping, backups and business rules.</p>
+        <p className="text-sm text-slate-500">Database history, Excel backup, column mapping and business rules.</p>
       </div>
       {error && <div className="text-sm text-rose-600">{error}</div>}
 
@@ -112,9 +112,11 @@ export default function Settings() {
           </div>
         </div>
         <div className="text-xs text-slate-500">
-          Status: {sync?.synchronized ? "Synchronized" : "Not synchronized"} · {sync?.record_count} records · last write {sync?.last_write || "—"}
+          Database is the live history · Excel is a backup copy of each save · {sync?.record_count} records · last write {sync?.last_write || "—"}
         </div>
       </div>
+
+      {can("settings") && <DatabasePanel toast={toast} ask={ask} onReload={load} />}
 
       {can("backup") && (
         <BackupPanel
@@ -268,6 +270,163 @@ export default function Settings() {
           {saving ? "Saving…" : "Save configuration"}
         </button>
       )}
+    </div>
+  );
+}
+
+function DatabasePanel({ toast, ask, onReload }) {
+  const { logout } = useAuth();
+  const [info, setInfo] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const uploadRef = useRef(null);
+
+  function loadInfo() {
+    api
+      .get("/api/settings/database")
+      .then(setInfo)
+      .catch((e) => toast(e.message || "Could not read database status", "error"));
+  }
+  useEffect(loadInfo, []);
+
+  async function seed() {
+    const ok = await ask({
+      title: "Seed the database from Excel?",
+      body: "This replaces work-order history in SQLite with the current file.xlsx. Users, chat and settings stay. Mapping in app_config.json is not changed.",
+      confirmLabel: "Seed from Excel",
+    });
+    if (!ok) return;
+    setBusy("seed");
+    try {
+      const d = await api.post("/api/settings/database/seed", {});
+      toast(`Seeded ${d.count ?? 0} material requests from Excel`, "success");
+      loadInfo();
+      onReload();
+      window.dispatchEvent(new CustomEvent("woms:data"));
+    } catch (e) {
+      const retry = await ask({
+        title: "Seed failed",
+        body: e.message || "Could not seed the database from Excel.",
+        confirmLabel: "Retry",
+        danger: true,
+      });
+      if (retry) return seed();
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function resetDb() {
+    if (confirm.trim() !== "DELETE") {
+      toast("Type DELETE to confirm wiping the database", "error");
+      return;
+    }
+    const ok = await ask({
+      title: "Wipe the entire database?",
+      body: "Users, chat, settings, attachments and work orders are deleted. Default logins are recreated (admin/admin123). Then current Excel is seeded. Column mapping in app_config.json is kept. You will need to sign in again.",
+      confirmLabel: "Wipe database",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy("reset");
+    try {
+      const d = await api.post("/api/settings/database/reset", { confirm: "DELETE" });
+      const seedErr = d.seed && !d.seed.ok ? `\nExcel seed: ${d.seed.error || "failed"}` : "";
+      toast(`Database reset. Default users restored.${seedErr}`, seedErr ? "error" : "success");
+      setConfirm("");
+      await logout();
+      window.location.href = "/login";
+    } catch (e) {
+      const retry = await ask({
+        title: "Reset failed",
+        body: e.message || "Could not wipe the database.",
+        confirmLabel: "Retry",
+        danger: true,
+      });
+      if (retry) return resetDb();
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function upload(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const ok = await ask({
+      title: "Replace live Excel and seed the database?",
+      body: `${file.name}\nThis copies the file over file.xlsx, then loads those rows into SQLite. Users are not deleted. Use Reset database if you also want to wipe logins and chat.`,
+      confirmLabel: "Upload and seed",
+    });
+    if (!ok) return;
+    setBusy("upload");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const d = await api.upload("/api/settings/database/upload", fd);
+      const seedErr = d.seed && !d.seed.ok ? d.seed.error : "";
+      toast(
+        seedErr ? `Excel replaced, but seed failed: ${seedErr}` : `Uploaded and seeded ${d.seed?.count ?? d.sync?.record_count ?? 0} rows`,
+        seedErr ? "error" : "success"
+      );
+      loadInfo();
+      onReload();
+      window.dispatchEvent(new CustomEvent("woms:data"));
+    } catch (err) {
+      const retry = await ask({
+        title: "Upload failed",
+        body: err.message || "Could not upload Excel.",
+        confirmLabel: "Retry",
+        danger: true,
+      });
+      if (retry) uploadRef.current?.click();
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <div className="card p-5 space-y-3">
+      <div className="font-semibold">Work-order database</div>
+      <p className="text-xs text-slate-500">
+        SQLite is the live material-request history. Saving a work order writes the database first, then copies that row into file.xlsx as a backup. A hard refresh does not pull Excel over the database.
+      </p>
+      <div className="text-xs text-slate-500">
+        {info ? (
+          <>
+            {info.record_count ?? 0} records · {info.user_count ?? 0} users · last seed {info.last_seed || "—"} · Excel {info.excel_available ? "available" : "missing"}
+          </>
+        ) : (
+          "Loading…"
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button className="btn-outline" type="button" onClick={seed} disabled={!!busy}>
+          {busy === "seed" ? "Seeding…" : "Seed from Excel"}
+        </button>
+        <input ref={uploadRef} type="file" accept=".xlsx,.xlsm" className="hidden" onChange={upload} />
+        <button className="btn-outline" type="button" onClick={() => uploadRef.current?.click()} disabled={!!busy}>
+          {busy === "upload" ? "Uploading…" : "Upload Excel then seed"}
+        </button>
+      </div>
+      <div className="rounded-xl border border-rose-200 dark:border-rose-500/30 p-3 space-y-2">
+        <div className="text-sm font-medium text-rose-700 dark:text-rose-200">Reset database</div>
+        <p className="text-xs text-slate-500">
+          Deletes users, chat, settings, attachments and work orders, creates a fresh database with default logins, then seeds the current Excel file. Type DELETE to enable.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Type DELETE"
+            className="max-w-[160px]"
+            disabled={!!busy}
+          />
+          <button className="btn-danger" type="button" onClick={resetDb} disabled={!!busy || confirm.trim() !== "DELETE"}>
+            {busy === "reset" ? "Resetting…" : "Reset database"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

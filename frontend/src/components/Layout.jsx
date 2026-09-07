@@ -381,8 +381,8 @@ export default function Layout() {
             <button
               className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs whitespace-nowrap"
               onClick={refresh}
-              title="Reload the workbook from disk and drop cached KPIs"
-              aria-label="Hard refresh from Excel"
+              title="Reload work orders from the database and drop cached KPIs"
+              aria-label="Reload from database"
             >
               <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
               <span className="hidden md:inline">{refreshing ? "Refreshing…" : "Hard refresh"}</span>

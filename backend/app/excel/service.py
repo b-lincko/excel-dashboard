@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 import threading
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -139,7 +140,7 @@ class ExcelService:
         return h.hexdigest()[:16]
 
     def sync_token(self) -> str:
-        return self.fingerprint()
+        return database.get_sync_meta("token") or self._fingerprint or self.fingerprint() or f"db:{database.wo_cache_count()}"
 
     def data_sheets(self, wb: Workbook) -> list[str]:
         cfg = self.cfg()
@@ -347,60 +348,152 @@ class ExcelService:
         self._last_error = err
         return self._cache
 
+    def _attach_backup(self, rec: dict[str, Any], error: Optional[BaseException] = None) -> dict[str, Any]:
+        out = dict(rec or {})
+        out.pop("_excel_backup_error", None)
+        if error is None:
+            out["_excel_backup_ok"] = True
+        else:
+            out["_excel_backup_ok"] = False
+            out["_excel_backup_error"] = str(error)
+        return out
+
+    def _merge_mapped(self, current: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
+        target = dict(current)
+        allowed = set(self.cfg().mapping.model_dump().keys())
+        for k, v in (changes or {}).items():
+            if str(k).startswith("_") or k in {"record_id", "department"}:
+                continue
+            if k in allowed:
+                target[k] = v if v is not None else ""
+        self._apply_due_date(target)
+        return target
+
+    def read_workbook(self) -> list[dict[str, Any]]:
+        """Read live Excel into mapped records. Does not write SQLite."""
+        mt = self.mtime()
+        if not self.available():
+            raise ExcelUnavailable("Excel file is currently unavailable.")
+        wb = self._load_workbook(data_only=False, read_only=True)
+        try:
+            all_records: list[dict[str, Any]] = []
+            headers: list[str] = []
+            mapping_exc = self.cfg().mapping.internal_to_excel()
+            needed = [norm_header(mapping_exc.get(f, "")) for f in DELAY_FIELDS]
+            delay_ready_all = True
+            for sheet_name in self.data_sheets(wb):
+                ws = wb[sheet_name]
+                hdrs, recs = self._read_sheet_records(ws, sheet_name)
+                if hdrs:
+                    headers = hdrs
+                present = {norm_header(h) for h in hdrs}
+                if not all(n in present for n in needed if n):
+                    delay_ready_all = False
+                all_records.extend(recs)
+        finally:
+            wb.close()
+        self._headers = [norm_header(h) for h in headers]
+        self._delay_columns_ready = delay_ready_all and bool(headers)
+        self._mtime = mt
+        self._fingerprint = self.fingerprint()
+        return all_records
+
+    def seed_from_excel(self, username: str = "seed", replace_lines: bool = False) -> dict[str, Any]:
+        try:
+            records = self.read_workbook()
+        except (ExcelLocked, ExcelUnavailable, PermissionError, OSError) as exc:
+            return {"ok": False, "error": str(exc), "count": database.wo_cache_count()}
+        except Exception as exc:
+            return {"ok": False, "error": f"Could not read Excel: {exc}", "count": database.wo_cache_count()}
+        try:
+            n = database.replace_wo_cache(records, self._fingerprint or self.fingerprint())
+        except Exception as exc:
+            return {"ok": False, "error": f"Database seed failed: {exc}", "count": 0}
+        self._cache = records
+        self._stale = False
+        self._last_error = None
+        try:
+            stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            database.set_sync_meta("last_seed", stamp)
+            database.set_sync_meta("last_read", stamp)
+            database.set_sync_meta("mtime", self.mtime_iso() or "")
+            database.set_sync_meta("token", self._fingerprint or stamp)
+            database.set_sync_meta("count", str(n))
+            database.add_audit(username, "seed", details=f"Seeded {n} material requests from Excel")
+        except Exception:
+            pass
+        if replace_lines:
+            try:
+                self._seed_catalog(records, username)
+            except Exception as exc:
+                return {"ok": True, "count": n, "error": None, "warning": f"Catalog seed skipped: {exc}"}
+        return {"ok": True, "count": n, "error": None}
+
+    def _seed_catalog(self, records: list[dict[str, Any]], username: str) -> None:
+        known = {s["name"].lower() for s in database.list_suppliers() if s.get("name")}
+        for rec in records:
+            name = str(rec.get("supplier") or "").strip()
+            if name and name.lower() not in known:
+                try:
+                    database.add_supplier(name, created_by=username)
+                    known.add(name.lower())
+                except Exception:
+                    continue
+            rid = str(rec.get("record_id") or "")
+            if not rid:
+                continue
+            desc = str(rec.get("description") or "").strip()
+            if name or desc:
+                try:
+                    database.replace_mr_lines(
+                        rid,
+                        [{"supplier": name, "material": desc}],
+                        created_by=username,
+                        work_order_id=str(rec.get("work_order_id") or ""),
+                    )
+                except Exception:
+                    continue
+
     def load(self, force: bool = False) -> list[dict[str, Any]]:
         with self._lock:
-            mt = self.mtime()
-            if not force and self._cache is not None and mt == self._mtime:
+            if force:
+                result = self.seed_from_excel(username="refresh")
+                if result.get("ok"):
+                    return list(self._cache or [])
+                recs = database.load_wo_cache()
+                if recs:
+                    self._cache = recs
+                    self._stale = True
+                    self._last_error = result.get("error")
+                    return recs
+                if self._cache is not None:
+                    self._stale = True
+                    self._last_error = result.get("error")
+                    return self._cache
+                raise ExcelUnavailable(result.get("error") or "Excel file is currently unavailable.")
+            recs = database.load_wo_cache()
+            if recs:
+                self._cache = recs
                 self._stale = False
                 self._last_error = None
+                return recs
+            if self._cache is not None:
                 return self._cache
-            if not self.available():
-                return self._serve_cache("Excel file is currently unavailable.")
-            try:
-                wb = self._load_workbook(data_only=False, read_only=True)
-            except (ExcelLocked, ExcelUnavailable, PermissionError, OSError) as exc:
-                if self._cache is not None:
-                    return self._serve_cache(str(exc))
-                if isinstance(exc, (ExcelLocked, ExcelUnavailable)):
-                    raise
-                raise ExcelUnavailable(f"Excel file could not be opened: {exc}") from exc
-            try:
-                all_records: list[dict[str, Any]] = []
-                headers: list[str] = []
-                mapping_exc = self.cfg().mapping.internal_to_excel()
-                needed = [norm_header(mapping_exc.get(f, "")) for f in DELAY_FIELDS]
-                delay_ready_all = True
-                for sheet_name in self.data_sheets(wb):
-                    ws = wb[sheet_name]
-                    hdrs, recs = self._read_sheet_records(ws, sheet_name)
-                    if hdrs:
-                        headers = hdrs
-                    present = {norm_header(h) for h in hdrs}
-                    if not all(n in present for n in needed if n):
-                        delay_ready_all = False
-                    all_records.extend(recs)
-            finally:
-                wb.close()
-            self._headers = [norm_header(h) for h in headers]
-            self._delay_columns_ready = delay_ready_all and bool(headers)
-            self._cache = all_records
-            self._mtime = mt
-            self._fingerprint = self.fingerprint()
-            self._stale = False
-            self._last_error = None
-            database.set_sync_meta("last_read", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            database.set_sync_meta("mtime", self.mtime_iso() or "")
-            database.set_sync_meta("token", self._fingerprint)
-            database.set_sync_meta("count", str(len(all_records)))
-            try:
-                database.replace_wo_cache(all_records, self._fingerprint)
-            except Exception as exc:
-                print(f"[WOMS] SQLite work-order cache write skipped: {exc}")
-            return all_records
+            result = self.seed_from_excel(username="boot")
+            if result.get("ok"):
+                return list(self._cache or [])
+            raise ExcelUnavailable(result.get("error") or "No work orders in the database yet.")
 
     def headers(self) -> list[str]:
-        self.load()
-        return list(self._headers)
+        if self._headers:
+            return list(self._headers)
+        try:
+            self.load()
+        except (ExcelUnavailable, ExcelLocked):
+            pass
+        if self._headers:
+            return list(self._headers)
+        return [str(v) for v in self.cfg().mapping.model_dump().values() if v]
 
     def delay_columns_ready(self) -> bool:
         if self._cache is None:
@@ -414,14 +507,17 @@ class ExcelService:
         return list(self.load(force=force))
 
     def get_by_id(self, wo_id: str) -> Optional[dict[str, Any]]:
+        rec = database.get_wo_record(wo_id)
+        if rec:
+            return rec
         wo_id = str(wo_id)
         recs = self.load()
-        for rec in recs:
-            if str(rec.get("record_id")) == wo_id:
-                return rec
-        for rec in recs:
-            if str(rec.get("work_order_id")) == wo_id:
-                return rec
+        for item in recs:
+            if str(item.get("record_id")) == wo_id:
+                return item
+        for item in recs:
+            if str(item.get("work_order_id")) == wo_id:
+                return item
         return None
 
     def unique_values(self, field: str) -> list[str]:
@@ -1031,7 +1127,148 @@ class ExcelService:
             raise KeyError(f"Work order {wo_id} was not found in Excel")
         return target
 
+
     def update_record(
+        self,
+        wo_id: str,
+        changes: dict[str, Any],
+        username: str,
+        sync_token: Optional[str] = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        current = database.get_wo_record(wo_id)
+        if not current:
+            raise KeyError(f"Work order {wo_id} was not found")
+        old = dict(current)
+        target = self._merge_mapped(current, changes)
+        try:
+            saved = database.upsert_wo_record(target)
+        except Exception as exc:
+            raise ValueError(f"Database save failed: {exc}") from exc
+        self._audit_diff(username, str(saved.get("work_order_id") or wo_id), old, saved)
+        self.invalidate()
+        try:
+            self._excel_update_record(wo_id, changes, username, sync_token, force)
+        except SyncConflict as exc:
+            return self._attach_backup(saved, exc)
+        except (ExcelUnavailable, ExcelLocked, PermissionError, Timeout, KeyError, OSError) as exc:
+            return self._attach_backup(saved, exc)
+        except Exception as exc:
+            return self._attach_backup(saved, exc)
+        return self._attach_backup(database.get_wo_record(str(saved.get("record_id") or wo_id)) or saved)
+
+    def update_records(
+        self,
+        ids: list[str],
+        changes: dict[str, Any],
+        username: str,
+        append_remarks: bool = False,
+        sync_token: Optional[str] = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        ids = [str(i).strip() for i in ids if str(i).strip()]
+        if not ids:
+            raise ValueError("Select at least one work order.")
+        if len(ids) > 80:
+            raise ValueError("Bulk update is limited to 80 work orders at a time.")
+        remark_text = str(changes.get("remarks") or "").strip() if append_remarks else ""
+        field_changes = {k: v for k, v in (changes or {}).items() if not (append_remarks and k == "remarks")}
+        items: list[dict[str, Any]] = []
+        missing: list[str] = []
+        seen: set[str] = set()
+        for wo_id in ids:
+            current = database.get_wo_record(wo_id)
+            if not current:
+                missing.append(wo_id)
+                continue
+            rid = str(current.get("record_id") or wo_id)
+            if rid in seen:
+                continue
+            seen.add(rid)
+            old = dict(current)
+            target = self._merge_mapped(current, field_changes)
+            if append_remarks and remark_text:
+                prev = str(target.get("remarks") or "").rstrip()
+                target["remarks"] = f"{prev}\n{remark_text}".strip() if prev else remark_text
+            saved = database.upsert_wo_record(target)
+            self._audit_diff(username, str(saved.get("work_order_id") or rid), old, saved)
+            items.append(saved)
+        if not items:
+            raise ValueError("None of the selected work orders were found.")
+        self.invalidate()
+        excel_error = None
+        try:
+            self._excel_update_records(ids, changes, username, append_remarks, sync_token, force)
+        except SyncConflict as exc:
+            excel_error = str(exc)
+        except (ExcelUnavailable, ExcelLocked, PermissionError, Timeout, KeyError, OSError, ValueError) as exc:
+            excel_error = str(exc)
+        except Exception as exc:
+            excel_error = str(exc)
+        out_items = [self._attach_backup(it, excel_error) for it in items]
+        return {
+            "items": out_items,
+            "updated": len(out_items),
+            "missing": missing,
+            "excel_backup_ok": excel_error is None,
+            "excel_backup_error": excel_error,
+        }
+
+    def create_record(self, data: dict[str, Any], username: str) -> dict[str, Any]:
+        try:
+            created = self._excel_create_record(data, username)
+            saved = database.upsert_wo_record(created)
+            database.add_audit(username, "create", work_order_id=str(saved.get("work_order_id") or ""), details="Created material request")
+            self.invalidate()
+            return self._attach_backup(saved)
+        except (ExcelUnavailable, ExcelLocked, PermissionError, Timeout, OSError, Exception) as exc:
+            if isinstance(exc, (KeyError, ValueError)) and "Database save failed" in str(exc):
+                raise
+            recs = database.load_wo_cache()
+            site = str(data.get("department") or data.get("_site") or data.get("_sheet") or "")
+            sheet_name = site or ((self.cfg().worksheets or ["sheet"])[0])
+            wo_id = str(data.get("work_order_id") or "").strip() or self._next_id(recs, sheet_name)
+            rec: dict[str, Any] = {k: "" for k in self.cfg().mapping.model_dump().keys()}
+            rec.update({k: v for k, v in data.items() if not str(k).startswith("_")})
+            rec["work_order_id"] = wo_id
+            rec["created_date"] = rec.get("created_date") or datetime.now().strftime("%Y-%m-%d %H:%M")
+            rec["status"] = rec.get("status") or "OPEN"
+            rec["department"] = rec.get("department") or site
+            rec["_site"] = rec.get("department")
+            rec["_sheet"] = sheet_name
+            rec["record_id"] = str(data.get("record_id") or f"DB:{wo_id}")
+            existing = {str(r.get("record_id")) for r in recs}
+            if rec["record_id"] in existing:
+                rec["record_id"] = f"DB:{wo_id}:{uuid.uuid4().hex[:8]}"
+            self._apply_due_date(rec)
+            saved = database.upsert_wo_record(rec)
+            database.add_audit(username, "create", work_order_id=wo_id, details="Created material request (database only)")
+            self.invalidate()
+            return self._attach_backup(saved, exc)
+
+    def delete_record(self, wo_id: str, username: str) -> dict[str, Any]:
+        rec = database.get_wo_record(wo_id)
+        if not rec:
+            raise KeyError(f"Work order {wo_id} was not found")
+        database.delete_wo_record(wo_id)
+        database.add_audit(username, "delete", work_order_id=str(rec.get("work_order_id") or wo_id), details="Deleted material request")
+        self.invalidate()
+        excel_error = None
+        try:
+            self._excel_delete_record(wo_id, username)
+        except (ExcelUnavailable, ExcelLocked, PermissionError, Timeout, KeyError, OSError) as exc:
+            excel_error = str(exc)
+        except Exception as exc:
+            excel_error = str(exc)
+        return {
+            "deleted": True,
+            "id": wo_id,
+            "record_id": rec.get("record_id"),
+            "excel_backup_ok": excel_error is None,
+            "excel_backup_error": excel_error,
+        }
+
+    def _excel_update_record(
         self,
         wo_id: str,
         changes: dict[str, Any],
@@ -1105,7 +1342,7 @@ class ExcelService:
             except Exception:
                 pass
 
-    def update_records(
+    def _excel_update_records(
         self,
         ids: list[str],
         changes: dict[str, Any],
@@ -1207,7 +1444,7 @@ class ExcelService:
             except Exception:
                 pass
 
-    def create_record(self, data: dict[str, Any], username: str) -> dict[str, Any]:
+    def _excel_create_record(self, data: dict[str, Any], username: str) -> dict[str, Any]:
         if not self.available():
             raise ExcelUnavailable("Excel file is currently unavailable.")
         try:
@@ -1253,9 +1490,14 @@ class ExcelService:
                     tmp.unlink(missing_ok=True)
                 raise
             self.invalidate()
-            created = self.get_by_id(self.record_id(sheet_name, row_number)) or self.get_by_id(wo_id)
-            assert created is not None
-            database.add_audit(username, "create", work_order_id=wo_id, details="Created material request")
+            rec["record_id"] = self.record_id(sheet_name, row_number)
+            rec["_site"] = self.site_label(sheet_name)
+            rec["department"] = rec.get("department") or rec["_site"]
+            rec["_row"] = row_number
+            rec["_sheet"] = sheet_name
+            self._apply_due_date(rec)
+            database.upsert_wo_record(rec)
+            created = database.get_wo_record(rec["record_id"]) or rec
             database.set_sync_meta("last_write", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             return created
         except PermissionError as exc:
@@ -1268,7 +1510,7 @@ class ExcelService:
             except Exception:
                 pass
 
-    def delete_record(self, wo_id: str, username: str) -> None:
+    def _excel_delete_record(self, wo_id: str, username: str) -> None:
         if not self.available():
             raise ExcelUnavailable("Excel file is currently unavailable.")
         try:
@@ -1313,7 +1555,7 @@ class ExcelService:
                 pass
 
     def import_rows(self, rows: list[dict[str, Any]], username: str) -> dict[str, Any]:
-        """Append or update Excel rows from a mapped import. Excel remains source of truth."""
+        """Append or update Excel rows from a mapped import, then copy those rows into the database."""
         if not self.available():
             raise ExcelUnavailable("Excel file is currently unavailable.")
         cleaned: list[dict[str, Any]] = []
@@ -1424,7 +1666,10 @@ class ExcelService:
                     tmp.unlink(missing_ok=True)
                 raise
             self.invalidate()
-            records = self.load(force=True)
+            seeded = self.seed_from_excel(username=username)
+            records = list(self._cache or [])
+            if not seeded.get("ok") and not records:
+                raise ExcelUnavailable(seeded.get("error") or "Import saved Excel but the database could not be updated.")
             database.add_audit(
                 username,
                 "import",
@@ -1491,7 +1736,10 @@ class ExcelService:
                 self.create_backup(reason="upload")
             os.replace(tmp, dest)
             self.invalidate()
-            records = self.load(force=True)
+            seeded = self.seed_from_excel(username=username, replace_lines=True)
+            records = list(self._cache or [])
+            if not seeded.get("ok"):
+                raise ExcelUnavailable(seeded.get("error") or "Uploaded workbook could not be seeded.")
             database.add_audit(username, "upload", details=f"Uploaded workbook {filename} ({len(records)} rows)")
             database.set_sync_meta("last_write", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             database.set_sync_meta("last_write_user", username)
@@ -1509,54 +1757,59 @@ class ExcelService:
                 tmp.unlink(missing_ok=True)
 
     def ping(self) -> dict[str, Any]:
-        """Cheap live check: stat the file and reload only when it actually changed."""
+        """Cheap live check against the database. Excel mtime does not overwrite records."""
+        recs = self._cache
+        if recs is None:
+            recs = database.load_wo_cache()
+            if recs:
+                self._cache = recs
+        count = len(recs or [])
         file_token = self.fingerprint()
-        if file_token and file_token != self._fingerprint:
-            try:
-                self.load()
-            except (ExcelLocked, ExcelUnavailable, OSError):
-                pass
-        cached = self._cache is not None
-        stale = bool(file_token and self._fingerprint and file_token != self._fingerprint) or self._stale
+        excel_ok = self.available()
         return {
-            "available": self.available(),
+            "available": bool(count) or excel_ok,
+            "source": "database",
             "mtime": self.mtime_iso(),
-            "sync_token": self._fingerprint or file_token,
+            "sync_token": self.sync_token(),
             "file_token": file_token,
-            "record_count": len(self._cache or []),
-            "stale": stale,
-            "synchronized": cached,
-            "error": None if cached else (self._last_error or "Excel file is currently unavailable."),
-            "warning": self._last_error if cached and stale else None,
+            "record_count": count,
+            "stale": False,
+            "synchronized": bool(count),
+            "excel_backup": excel_ok,
+            "error": None if count else (self._last_error or "No work orders in the database yet."),
+            "warning": None if excel_ok or not count else "Excel backup file is currently unavailable.",
         }
 
     def status(self) -> dict[str, Any]:
         available = self.available()
         err = None
         try:
-            records = self.load() if available or self._cache is not None else []
+            records = self.load()
         except ExcelUnavailable as e:
-            records = list(self._cache or [])
+            records = list(self._cache or database.load_wo_cache() or [])
             err = str(e)
         except ExcelLocked as e:
-            records = list(self._cache or [])
+            records = list(self._cache or database.load_wo_cache() or [])
             err = str(e)
         live = self.ping()
         return {
-            "available": available,
+            "available": bool(records) or available,
+            "source": "database",
             "path": str(self.excel_path()),
             "worksheet": ", ".join(self.cfg().worksheets or [self.cfg().worksheet_name]),
             "mtime": self.mtime_iso(),
-            "sync_token": live.get("sync_token") or (self.fingerprint() if available else ""),
+            "sync_token": live.get("sync_token") or self.sync_token(),
             "record_count": len(records),
             "last_read": database.get_sync_meta("last_read"),
             "last_write": database.get_sync_meta("last_write"),
             "last_write_user": database.get_sync_meta("last_write_user"),
             "last_backup": database.get_sync_meta("last_backup"),
+            "last_seed": database.get_sync_meta("last_seed"),
             "synchronized": bool(records),
-            "stale": live.get("stale") or bool(err and records),
+            "excel_backup": available,
+            "stale": False,
             "error": None if records else err,
-            "warning": err if err and records else live.get("warning"),
+            "warning": None if available else (err or live.get("warning")),
             "headers": self._headers if (available or self._headers) else [],
         }
 
@@ -1652,7 +1905,7 @@ class ExcelService:
                         tmp.unlink(missing_ok=True)
                     raise
             self.invalidate()
-            records = self.load(force=True)
+            records = self.read_workbook()
             for rec in records:
                 rid = str(rec.get("record_id") or "")
                 extra = extras.get(rid) or {}
@@ -1668,6 +1921,16 @@ class ExcelService:
                         delay_source=payload["delay_source"],
                         delay_justification=payload["delay_justification"],
                     )
+                db_rec = database.get_wo_record(rid)
+                if db_rec:
+                    changed = False
+                    for field in DELAY_FIELDS:
+                        val = str(rec.get(field) or "")
+                        if str(db_rec.get(field) or "") != val:
+                            db_rec[field] = val
+                            changed = True
+                    if changed:
+                        database.upsert_wo_record(db_rec)
             database.set_sync_meta("last_reconcile", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             return {
                 "wrote_excel": wrote,

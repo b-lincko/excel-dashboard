@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from .config import DB_PATH, DATA_DIR
+from .config import ATTACHMENTS_DIR, DB_PATH, DATA_DIR
 from .passwords import hash_password
 
 SCHEMA = """
@@ -630,6 +631,102 @@ def wo_cache_count() -> int:
     with connect() as conn:
         row = conn.execute("SELECT COUNT(*) AS c FROM wo_cache").fetchone()
         return int(row["c"] if row else 0)
+
+
+def _payload_to_record(raw: Any) -> Optional[dict[str, Any]]:
+    try:
+        payload = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def get_wo_record(wo_id: str) -> Optional[dict[str, Any]]:
+    key = str(wo_id or "").strip()
+    if not key:
+        return None
+    with connect() as conn:
+        row = conn.execute("SELECT payload FROM wo_cache WHERE record_id = ?", (key,)).fetchone()
+        if not row:
+            row = conn.execute("SELECT payload FROM wo_cache WHERE work_order_id = ?", (key,)).fetchone()
+    if not row:
+        return None
+    return _payload_to_record(row["payload"])
+
+
+def upsert_wo_record(rec: dict[str, Any], fingerprint: str = "") -> dict[str, Any]:
+    rid = str((rec or {}).get("record_id") or "").strip()
+    if not rid:
+        raise ValueError("record_id is required")
+    cleaned = {k: v for k, v in (rec or {}).items() if not str(k).startswith("_excel_backup")}
+    ts = now_iso()
+    payload = json.dumps(cleaned, default=str)
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO wo_cache (record_id, work_order_id, payload, fingerprint, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(record_id) DO UPDATE SET
+                 work_order_id = excluded.work_order_id,
+                 payload = excluded.payload,
+                 fingerprint = excluded.fingerprint,
+                 updated_at = excluded.updated_at""",
+            (rid, str(cleaned.get("work_order_id") or ""), payload, fingerprint or ts, ts),
+        )
+        conn.execute(
+            "INSERT INTO sync_meta (key, value) VALUES ('token', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (ts,),
+        )
+    item = get_wo_record(rid)
+    assert item is not None
+    return item
+
+
+def delete_wo_record(wo_id: str) -> bool:
+    rec = get_wo_record(wo_id)
+    if not rec:
+        return False
+    rid = str(rec.get("record_id") or wo_id)
+    with connect() as conn:
+        conn.execute("DELETE FROM wo_cache WHERE record_id = ?", (rid,))
+        conn.execute("DELETE FROM mr_lines WHERE record_id = ?", (rid,))
+        conn.execute("DELETE FROM record_extras WHERE record_id = ?", (rid,))
+    return True
+
+
+def database_status() -> dict[str, Any]:
+    return {
+        "source": "database",
+        "record_count": wo_cache_count(),
+        "user_count": len(list_users()),
+        "last_seed": get_sync_meta("last_seed"),
+        "last_write": get_sync_meta("last_write"),
+        "last_write_user": get_sync_meta("last_write_user"),
+        "token": get_sync_meta("token"),
+    }
+
+
+def reset_database() -> dict[str, Any]:
+    """Delete the SQLite file and recreate empty schema + default users."""
+    errors: list[str] = []
+    try:
+        for extra in ("", "-wal", "-shm"):
+            path = Path(str(DB_PATH) + extra) if extra else DB_PATH
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError as exc:
+                errors.append(f"Could not delete {path.name}: {exc}")
+        try:
+            if ATTACHMENTS_DIR.exists():
+                shutil.rmtree(ATTACHMENTS_DIR)
+            ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            errors.append(f"Could not clear attachments: {exc}")
+        init_db()
+        return {"ok": not errors, "errors": errors, "users": [u["username"] for u in DEFAULT_USERS]}
+    except Exception as exc:
+        errors.append(str(exc))
+        return {"ok": False, "errors": errors}
 
 
 def add_attachment(
