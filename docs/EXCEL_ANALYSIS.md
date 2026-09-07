@@ -2,7 +2,9 @@
 
 Source: [b-lincko/excel-dashboard `file.xlsx`](https://github.com/b-lincko/excel-dashboard/blob/main/file.xlsx)
 
-This is **Linkco (Al Rawabet Commercial Services and Contracting Co. W.L.L.)**’s live **Material Request (MR) log** tied to **IM Work Orders**. It is the dashboard’s source of truth. The workbook is **not** redesigned.
+This is **Linkco (Al Rawabet Commercial Services and Contracting Co. W.L.L.)**’s **Material Request (MR) log** tied to **IM Work Orders**. The dashboard’s **live history is SQLite**; this workbook is the replica written after each save and the seed source when the database is empty or an admin seeds. The workbook is **not** redesigned.
+
+See `SKILLS.md` for AI requirements and data-flow rules.
 
 ## 1. Worksheets
 

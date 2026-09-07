@@ -1,20 +1,24 @@
 # Work Order Management System (WOMS)
 
-A production-ready operations dashboard for **Linkco’s Material Request / IM Work Order log**. The Excel workbook `file.xlsx` is the **single source of truth**.
+A production-ready operations dashboard for **Linkco’s Material Request / IM Work Order log**.
+
+**SQLite (`data/woms.db`) is the live work-order history.** `file.xlsx` is a replica written after each save, and a snapshot target for Backup now / autobackup.
 
 The application:
 
-1. Reads work orders from Excel
-2. Displays KPIs, analytics and a searchable table
-3. Lets authorized users edit records
-4. Writes every change back to the **same workbook**
-5. Reloads when Excel is changed externally
-6. Calculates statistics dynamically (nothing is stored as a second work-order database)
+1. Serves material requests from the database
+2. Displays KPIs, analytics and a searchable table counted from live records
+3. Lets authorized users edit records (database first)
+4. Copies each successful save into the **same Excel workbook** as a backup replica
+5. Seeds the database from Excel on first boot (empty DB), or when an admin chooses Seed / Upload-then-seed
+6. Calculates statistics dynamically — no fake or stored KPI tables
 
 ```
-Excel  ⇄  FastAPI  ⇄  React dashboard
-         SQLite only for users, audit log, settings
+React dashboard  ⇄  FastAPI  ⇄  SQLite (history)
+                         ↘ file.xlsx (replica + snapshots)
 ```
+
+**AI / contributors:** read and update [`SKILLS.md`](SKILLS.md) whenever behavior changes. Also [`AGENTS.md`](AGENTS.md) and [`docs/EXCEL_ANALYSIS.md`](docs/EXCEL_ANALYSIS.md).
 
 ## Quick start
 
@@ -51,7 +55,7 @@ Local mode installs Python packages into `.venv`, runs `npm install` if needed, 
 - API — http://127.0.0.1:8000
 - UI — http://127.0.0.1:5173  (Docker serves both at http://127.0.0.1:8000)
 
-Keep `file.xlsx` in the project root (it is the source of truth).
+Keep `file.xlsx` in the project root (replica of the live log; the database is the working history).
 
 ### Requirements
 
@@ -114,31 +118,35 @@ Open the UI, then sign in:
 - **KPIs** — total, open, closed, pending, overdue, in progress, completion rate, average closing time, aging
 - **Time windows** — today, yesterday, this/last week, this/last month, quarter, year, custom range
 - **Weekly / monthly / yearly** analysis with year-over-year comparison
-- **Status distribution** from the actual Excel values (not hard-coded)
+- **Status distribution** from live record values (not hard-coded)
 - **Why are work orders still open?** — grouped by Delay Reason / Issue, click to drill down
 - **Aging buckets** — 0–1, 2–3, 4–7, 8–14, 15–30, 31–60, 60+ days
 - **Overdue** list sorted by days overdue and priority
 - **Department, technician, priority** performance tables
 - **Work order table** — search, sort, filter, pagination, column visibility, CSV export, inline drill-down
-- **Edit** — Save writes the Excel row, confirms, refreshes stats
-- **Audit log** — user, time, work order, field, old/new value (SQLite, not mixed into Excel)
-- **Backups** — timestamped copies under the admin-selected folder (default `backups/YYYY-MM-DD/`) before every write, plus optional autobackup on a time/day schedule with retention ratio
+- **Edit** — Save writes SQLite first, then copies the row into Excel; if Excel is locked the record is still kept
+- **Audit log** — user, time, work order, field, old/new value (SQLite)
+- **Backups** — per-save Excel copies under the admin-selected folder (`backups/YYYY-MM-DD/`); Backup now / autobackup also snapshot SQLite as a paired `.db`. Restore of a pair rolls both back; Excel-only copies do not overwrite live history
 - **Conflict detection** — if Excel changed since you loaded the record, you get a warning instead of a silent overwrite
 - **Reports** — daily/weekly/monthly/yearly, open/overdue/closed/delay/department/technician as Excel, CSV or PDF
 - **Auth** — admin / manager / user with configurable permissions
 - **Dark / light** theme
 
-## Excel synchronization
+## Database and Excel
 
 | Action | Behaviour |
 | ------ | --------- |
-| Refresh from Excel | Reloads the workbook (mtime + size fingerprint) |
-| Save to Excel | Backup → write temp file → validate it opens → atomic replace |
-| File locked | HTTP 423: *Excel file is currently being used by another process…* |
-| File missing | HTTP 503: *Excel file is currently unavailable.* |
-| External change during edit | HTTP 409 conflict; user can reload or force overwrite |
+| Ordinary load / Refresh | Reads SQLite. Does not overwrite the database from Excel. |
+| Hard refresh / Seed | Admin (or boot if DB empty) copies Excel rows into SQLite. |
+| Save | SQLite commit, then Excel: backup → temp file → validate → atomic replace |
+| File locked | Record stays in the database. HTTP 423 on the Excel replica. |
+| File missing | Record stays in the database. HTTP 503 on Excel-only operations. |
+| External Excel change during an Excel write | HTTP 409 conflict; user can reload or force overwrite |
+| Backup now / autobackup | Snapshot SQLite + Excel as a pair |
+| Restore paired snapshot | Rolls back database and Excel (pre-restore snapshot first) |
+| Restore Excel-only copy | Replaces `file.xlsx` only. Does not silently seed the database. |
 
-Formulas, the Summary sheet, Lists, formatting and the Excel table are preserved. Only WorkOrders data cells are updated.
+Formulas, report sheets, lists, formatting and Excel tables are preserved. Only mapped data cells on the log sheets are updated.
 
 ## Configuration
 
@@ -167,16 +175,17 @@ Coverage includes reading Excel, uniqueness, KPI calculations, updating a row, r
 - Serve `frontend` via `npm run build` and let FastAPI host `frontend/dist` (enabled automatically when the folder exists)
 - Put the workbook on a filesystem both the API and Excel users can reach
 - Keep `backups/` on the same volume or a snapshot target
-- The work-order cache is in-memory and invalidated on write / mtime change; suitable for tens of thousands of rows
+- Live work orders live in SQLite (`wo_cache`); in-memory cache is invalidated on write. Suitable for tens of thousands of rows
 
 ## Project layout
 
 ```
 backend/app/          FastAPI application
-backend/app/excel/    Read/write, lock, backup, mapping
+backend/app/excel/    DB-first CRUD, Excel replica, lock, backup, mapping
 frontend/src/       React dashboard
-data/work_orders.xlsx
-scripts/generate_excel.py
+file.xlsx           Live workbook (replica)
+data/woms.db        Live history (gitignored)
+SKILLS.md           AI skills, requirements, architecture (living)
 docs/EXCEL_ANALYSIS.md
 tests/
 ```
