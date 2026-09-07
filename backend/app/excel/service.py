@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import re
 import shutil
+import sqlite3
 import tempfile
 import threading
 import uuid
+import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -558,46 +561,128 @@ class ExcelService:
         return dest
 
     def store_uploaded_backup(self, content: bytes, filename: str = "backup.xlsx") -> dict[str, Any]:
-        """Save an uploaded workbook into the backup folder. Does not replace live Excel."""
-        if not content or len(content) < 100:
-            raise ValueError("The uploaded file is empty or too small to be an Excel workbook.")
+        """Save an uploaded snapshot into the backup folder. Does not replace live Excel/DB."""
+        if not content or len(content) < 16:
+            raise ValueError("The uploaded file is empty or too small.")
         raw_name = Path(filename or "backup.xlsx").name
         lower = raw_name.lower()
-        if lower.endswith(".xlsm"):
-            ext = ".xlsm"
-        elif lower.endswith(".xlsx"):
-            ext = ".xlsx"
-        else:
-            raise ValueError("Please upload an Excel file (.xlsx or .xlsm).")
-        stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(raw_name).stem).strip("._") or "backup"
-        stem = stem[:60]
         day = datetime.now().strftime("%Y-%m-%d")
         ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         dest_dir = self.backup_dir() / day
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / f"{stem}_{ts}_upload{ext}"
-        tmp = _temp_xlsx(dest_dir)
-        try:
-            tmp.write_bytes(content)
-            self._validate_saved(tmp)
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(raw_name).stem).strip("._") or "backup"
+        stem = stem[:60]
+        excel_path: Optional[Path] = None
+        db_path: Optional[Path] = None
+
+        def _safe_write(dest: Path, data: bytes) -> None:
+            tmp = dest.with_suffix(dest.suffix + ".tmp")
+            tmp.write_bytes(data)
             os.replace(tmp, dest)
-        except Exception:
-            if tmp.exists():
-                tmp.unlink(missing_ok=True)
-            raise
+
+        if lower.endswith(".zip"):
+            try:
+                zf = zipfile.ZipFile(io.BytesIO(content))
+            except zipfile.BadZipFile as exc:
+                raise ValueError("That zip could not be opened.") from exc
+            with zf:
+                for info in zf.infolist():
+                    if info.is_dir():
+                        continue
+                    parts = Path(info.filename).parts
+                    if any(part in {os.pardir, ""} for part in parts):
+                        continue
+                    name = Path(info.filename).name.lower()
+                    data = zf.read(info)
+                    if name.endswith((".xlsx", ".xlsm")) and excel_path is None:
+                        ext = ".xlsm" if name.endswith(".xlsm") else ".xlsx"
+                        excel_path = dest_dir / f"{stem}_{ts}_upload{ext}"
+                        _safe_write(excel_path, data)
+                        try:
+                            self._validate_saved(excel_path)
+                        except Exception as exc:
+                            excel_path.unlink(missing_ok=True)
+                            raise ValueError(f"The Excel file in the zip is not a valid workbook: {exc}") from exc
+                    elif name.endswith(".db") and db_path is None:
+                        db_path = dest_dir / f"{stem}_{ts}_upload.db"
+                        _safe_write(db_path, data)
+                        self._validate_db(db_path)
+            if excel_path is None and db_path is None:
+                raise ValueError("The zip must contain an Excel workbook (.xlsx/.xlsm) and/or a .db snapshot.")
+        elif lower.endswith((".xlsx", ".xlsm")):
+            ext = ".xlsm" if lower.endswith(".xlsm") else ".xlsx"
+            excel_path = dest_dir / f"{stem}_{ts}_upload{ext}"
+            _safe_write(excel_path, content)
+            try:
+                self._validate_saved(excel_path)
+            except Exception as exc:
+                excel_path.unlink(missing_ok=True)
+                raise ValueError(f"That file could not be opened as Excel: {exc}") from exc
+        elif lower.endswith(".db"):
+            db_path = dest_dir / f"{stem}_{ts}_upload.db"
+            _safe_write(db_path, content)
+            self._validate_db(db_path)
+        else:
+            raise ValueError("Upload an Excel workbook (.xlsx/.xlsm), a SQLite snapshot (.db), or a zip of both.")
+
+        dest = excel_path or db_path
+        assert dest is not None
+        if excel_path is not None and db_path is not None and db_path != excel_path.with_suffix(".db"):
+            paired = excel_path.with_suffix(".db")
+            if paired != db_path:
+                shutil.copy2(db_path, paired)
+                if db_path.exists() and db_path != paired:
+                    db_path.unlink(missing_ok=True)
+                db_path = paired
         database.set_sync_meta("last_backup", str(dest))
         health = None
         try:
             health = self.check_backup(str(dest))
         except Exception as exc:
             health = {"ok": False, "error": str(exc), "path": str(dest)}
+        return self._uploaded_meta(dest, health)
+
+    def _validate_db(self, path: Path) -> None:
+        try:
+            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            try:
+                tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            finally:
+                con.close()
+        except sqlite3.Error as exc:
+            path.unlink(missing_ok=True)
+            raise ValueError(f"That file is not a readable SQLite database: {exc}") from exc
+        if "wo_cache" not in tables and "users" not in tables:
+            path.unlink(missing_ok=True)
+            raise ValueError("That database does not look like a WOMS snapshot (missing wo_cache/users).")
+
+    def _uploaded_meta(self, dest: Path, health: Optional[dict[str, Any]]) -> dict[str, Any]:
+        db_pair = dest if dest.suffix.lower() == ".db" else dest.with_suffix(".db")
+        has_db = db_pair.is_file()
         return {
             "path": str(dest),
             "name": dest.name,
             "size": dest.stat().st_size,
             "reason": "upload",
             "health": health,
+            "has_db": has_db,
+            "db_path": str(db_pair) if has_db else None,
         }
+
+    def backup_files_for_download(self, backup_path: str) -> list[Path]:
+        src = self._resolve_backup(backup_path)
+        files = [src]
+        if src.suffix.lower() in {".xlsx", ".xlsm"}:
+            sibling = src.with_suffix(".db")
+            if sibling.is_file():
+                files.append(sibling)
+        elif src.suffix.lower() == ".db":
+            for ext in (".xlsx", ".xlsm"):
+                sibling = src.with_suffix(ext)
+                if sibling.is_file():
+                    files.insert(0, sibling)
+                    break
+        return files
 
     def list_backups(self, limit: int = 50) -> list[dict[str, Any]]:
         items = []

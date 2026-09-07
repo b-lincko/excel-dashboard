@@ -1,4 +1,4 @@
-import { CircleHelp, Keyboard, ListTodo, Save, Search, Sparkles } from "lucide-react";
+import { CircleHelp, Keyboard, LifeBuoy, ListTodo, Save, Search, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useTour } from "../context/TourContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -100,12 +100,41 @@ export default function Guide() {
         <div className="card p-5 space-y-2">
           <div className="font-semibold">Snapshots</div>
           <p className="text-sm text-slate-500">
-            Backup now and autobackup copy the SQLite history together with file.xlsx. Restoring a paired snapshot rolls
-            both back. Older Excel-only copies replace the replica only — they do not overwrite live records unless you
-            Seed from Excel afterwards.
+            Backup now copies SQLite plus file.xlsx. Download takes a zip of that pair. Upload & restore accepts
+            .xlsx, .db, or a zip — confirm Restore to roll live data back. Excel-only copies do not overwrite history
+            unless you Seed from Excel afterwards.
           </p>
         </div>
       )}
+
+      <div className="card p-5 space-y-2">
+        <div className="flex items-center gap-2 font-semibold">
+          <LifeBuoy size={16} /> If Docker is down or data looks lost
+        </div>
+        <p className="text-sm text-slate-500">
+          The database lives on the host as <span className="font-mono">data/woms.db</span> (not only inside the
+          container). Excel is <span className="font-mono">file.xlsx</span>. Snapshots are under{" "}
+          <span className="font-mono">backups/</span>.
+        </p>
+        <ul className="text-sm text-slate-500 list-disc pl-5 space-y-1">
+          <li>
+            Restart Docker: <span className="font-mono">./docker-run.sh</span> — or without Docker:{" "}
+            <span className="font-mono">./run.sh --local</span>
+          </li>
+          <li>
+            Restore a snapshot in Settings (Download / Upload & restore / Restore), or copy a paired{" "}
+            <span className="font-mono">.xlsx</span> + <span className="font-mono">.db</span> from{" "}
+            <span className="font-mono">backups/</span> after stopping the app.
+          </li>
+          <li>
+            Locked out: <span className="font-mono">python3 scripts/reset_admin.py</span> then admin / admin123
+          </li>
+          <li>
+            Full command list: <span className="font-mono">docs/RECOVERY.md</span> or{" "}
+            <span className="font-mono">./scripts/recover.sh</span>
+          </li>
+        </ul>
+      </div>
 
       <div className="card p-5 space-y-3">
         <div className="flex items-center gap-2 font-semibold">

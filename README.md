@@ -20,6 +20,8 @@ React dashboard  ⇄  FastAPI  ⇄  SQLite (history)
 
 **AI / contributors:** read and update [`SKILLS.md`](SKILLS.md) whenever behavior changes. Also [`AGENTS.md`](AGENTS.md) and [`docs/EXCEL_ANALYSIS.md`](docs/EXCEL_ANALYSIS.md).
 
+**Data loss / Docker down:** [`docs/RECOVERY.md`](docs/RECOVERY.md) — find the database, restore snapshots, reset admin. Quick check: `./scripts/recover.sh`.
+
 ## Quick start
 
 ### One command

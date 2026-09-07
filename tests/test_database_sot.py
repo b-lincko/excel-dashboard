@@ -148,3 +148,34 @@ def test_excel_only_restore_does_not_seed_db(workbook):
     assert result["database"] is False
     stored = database.get_wo_record(rid)
     assert stored["remarks"] == "live-db-must-stay"
+
+
+def test_backup_download_upload_and_restore(workbook):
+    _, svc = workbook
+    recs = svc.get_all(force=True)
+    rid = recs[0]["record_id"]
+    original = str(recs[0].get("remarks") or "")
+    path = svc.create_backup(reason="manual")
+    assert path is not None
+    assert path.with_suffix(".db").is_file()
+    client, headers = _admin()
+    downloaded = client.get("/api/settings/backups/download", headers=headers, params={"path": str(path)})
+    assert downloaded.status_code == 200, downloaded.text
+    assert downloaded.content[:2] == b"PK"
+    patched = dict(database.get_wo_record(rid))
+    patched["remarks"] = "before-uploaded-restore"
+    database.upsert_wo_record(patched)
+    uploaded = client.post(
+        "/api/settings/backups/upload",
+        headers=headers,
+        files={"file": ("snapshot.zip", downloaded.content, "application/zip")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    body = uploaded.json()
+    assert body.get("has_db") is True
+    restored = client.post("/api/settings/backups/restore", headers=headers, json={"path": body["path"]})
+    assert restored.status_code == 200, restored.text
+    assert restored.json().get("database") is True
+    stored = database.get_wo_record(rid)
+    assert stored["remarks"] != "before-uploaded-restore"
+    assert stored["remarks"] == original

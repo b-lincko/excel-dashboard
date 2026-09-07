@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CalendarClock, FolderOpen, HardDrive, Upload } from "lucide-react";
+import { CalendarClock, Download, FolderOpen, HardDrive, Upload } from "lucide-react";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
@@ -513,10 +513,24 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
           : `Backup uploaded · ${d.name}`,
         d.health && !d.health.ok ? "error" : "success"
       );
+      if (d.path) {
+        await onRestore({ path: d.path, name: d.name, has_db: !!d.has_db });
+      }
     } catch (err) {
       toast(err.message || "Upload failed", "error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function downloadBackup(b) {
+    const stem = String(b.name || "backup").replace(/\.(xlsx|xlsm|db)$/i, "");
+    const filename = b.has_db ? `${stem}.zip` : b.name;
+    try {
+      await api.download(`/api/settings/backups/download?path=${encodeURIComponent(b.path)}`, filename);
+      toast(b.has_db ? "Downloaded snapshot zip (Excel + database)" : "Downloaded Excel backup", "success");
+    } catch (err) {
+      toast(err.message || "Download failed", "error");
     }
   }
 
@@ -528,7 +542,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
             <HardDrive size={16} /> Backup system
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Backup now and autobackup snapshot SQLite plus <span className="font-mono">file.xlsx</span>. Per-save copies (update/create/delete) stay Excel-only. Restore uses the paired .db when present; Excel-only copies do not overwrite live history.
+            Backup now and autobackup snapshot SQLite plus <span className="font-mono">file.xlsx</span>. Download a copy to another PC, upload it here, then Restore. Per-save copies stay Excel-only. Paired .db restores live history; Excel-only copies do not.
           </p>
         </div>
         <label className="inline-flex items-center gap-2 text-sm font-medium">
@@ -630,12 +644,12 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
             <input
               ref={uploadRef}
               type="file"
-              accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              accept=".xlsx,.xlsm,.db,.zip,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/zip"
               className="hidden"
               onChange={uploadBackup}
             />
             <button className="btn-outline !py-1 !px-2 text-xs" type="button" onClick={() => uploadRef.current?.click()} disabled={busy}>
-              <Upload size={12} /> Upload backup
+              <Upload size={12} /> Upload & restore
             </button>
             <button className="btn-outline !py-1 !px-2 text-xs" onClick={backupNow} disabled={busy}>
               {busy ? "Working…" : "Backup now"}
@@ -673,7 +687,13 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
                   {h ? (h.ok ? `${h.backup_count} / live ${h.live_count}` : h.error || "mismatch") : "—"}
                 </td>
                 <td>
-                  <div className="flex gap-1 justify-end">
+                  <div className="flex gap-1 justify-end flex-wrap">
+                    <button
+                      className="btn-outline !py-1 !px-2 text-xs"
+                      onClick={() => downloadBackup(b)}
+                    >
+                      <Download size={12} /> Download
+                    </button>
                     <button
                       className="btn-outline !py-1 !px-2 text-xs"
                       onClick={async () => {

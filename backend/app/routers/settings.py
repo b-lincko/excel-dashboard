@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
+import zipfile
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from .. import database
@@ -155,11 +158,40 @@ def create_backup(user=Depends(require_permission("backup"))):
     }
 
 
+@router.get("/backups/download")
+def download_backup(path: str = Query(...), user=Depends(require_permission("backup"))):
+    try:
+        files = excel_service.backup_files_for_download(path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    if len(files) == 1:
+        return FileResponse(
+            path=str(files[0]),
+            filename=files[0].name,
+            media_type="application/octet-stream",
+        )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for item in files:
+            zf.write(item, arcname=item.name)
+    zip_name = f"{files[0].stem}.zip"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+    )
+
+
 @router.post("/backups/upload")
 async def upload_backup(file: UploadFile = File(...), user=Depends(require_permission("backup"))):
     name = (file.filename or "backup.xlsx").lower()
-    if not name.endswith((".xlsx", ".xlsm")):
-        raise HTTPException(status_code=400, detail="Please upload an Excel file (.xlsx or .xlsm).")
+    if not name.endswith((".xlsx", ".xlsm", ".db", ".zip")):
+        raise HTTPException(
+            status_code=400,
+            detail="Upload an Excel workbook (.xlsx/.xlsm), a SQLite snapshot (.db), or a zip of both.",
+        )
     content = await file.read()
     try:
         stored = excel_service.store_uploaded_backup(content, filename=file.filename or name)
@@ -182,8 +214,8 @@ async def upload_backup(file: UploadFile = File(...), user=Depends(require_permi
 @router.post("/backups/run-auto")
 def run_auto_now(user=Depends(require_permission("backup"))):
     path = run_due_backup(force=True)
-    if path is None and not excel_service.available():
-        raise HTTPException(status_code=503, detail="Excel file is currently unavailable.")
+    if path is None:
+        raise HTTPException(status_code=503, detail="Backup could not be created.")
     sched = schedule_status()
     return {
         "path": str(path) if path else None,

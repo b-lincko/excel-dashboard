@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-07 (`dc7bc07` snapshot backups).
+Last updated: 2026-09-07 (backup download/upload-restore + recovery commands).
 
 ---
 
@@ -174,6 +174,9 @@ data/                        woms.db, app_config.json, attachments/  (gitignored
 file.xlsx                    Live workbook at repo root — do not clobber in tests
 tests/                       pytest
 docs/EXCEL_ANALYSIS.md       Workbook inspection
+docs/RECOVERY.md             Data loss / Docker / restore / admin commands
+scripts/recover.sh           Host file check + command cheat sheet
+scripts/reset_admin.py       Reset or create admin login
 SKILLS.md                    This file
 ```
 
@@ -222,7 +225,9 @@ Reasons in `ExcelService.SNAPSHOT_REASONS`: `manual`, `auto`, `pre_restore`.
 - Settings UI: DB column, different confirm copy, `data-tour="backup"`.
 - Health: backup row count (Excel and/or `wo_cache` in the `.db`) vs live DB count. Fail if backup has &lt; 50% of live rows.
 - Prune (`backup_ratio`, default keep last 14 auto/manual): deletes paired `.db` with the `.xlsx`. Write-safety copies are not pruned.
-- Uploading a workbook into the backup folder does **not** replace live Excel.
+- **Download** (`GET /api/settings/backups/download?path=`): zip of `.xlsx`+`.db` when paired, otherwise the single file.
+- **Upload & restore**: `POST /api/settings/backups/upload` accepts `.xlsx` / `.xlsm` / `.db` / zip of both. Saves into the backup folder (does not replace live data by itself). UI then prompts Restore. Restore of a pair rolls SQLite + Excel; Excel-only does not seed the database.
+- Operator commands: `docs/RECOVERY.md`, `scripts/recover.sh`, `scripts/reset_admin.py`. Docker down does **not** delete host `data/` or `backups/` (bind mounts).
 
 Scheduler: `backend/app/backup.py`, 20s loop, `backup_auto_enabled`, `backup_time`, `backup_days` (0=Mon … 6=Sun), `backup_start_date`.
 
@@ -304,7 +309,7 @@ cd frontend && npm run build
 
 | File | Covers |
 | ---- | ------ |
-| `tests/test_database_sot.py` | DB-first save, seed/reset confirm, snapshot pair + Excel-only restore |
+| `tests/test_database_sot.py` | DB-first save, seed/reset confirm, snapshot pair + Excel-only restore, download zip + upload + restore |
 | `tests/test_excel_and_api.py` | Read/write Excel, backup schedule/prune |
 | `tests/test_ops_pack.py` | Queue, digest, timeline, mapping, backup health |
 | `tests/test_collab_*.py` | Chat, watches, row restore |
@@ -374,6 +379,8 @@ Shipped milestones (do not regress):
 1. Per-save reasons stay Excel-only.
 2. Snapshot reasons (`manual` / `auto` / `pre_restore`) pair `.xlsx` + `.db`.
 3. Restore: pair → both; Excel-only → Excel only, no silent seed.
+4. Download zips the pair. Upload accepts `.xlsx` / `.db` / zip into the backup folder, then the UI prompts Restore.
+5. Operator recovery lives in `docs/RECOVERY.md` — do not bury commands only in chat.
 
 ---
 
@@ -392,6 +399,8 @@ Must remain true:
 - [x] Backup now + autobackup snapshot SQLite + Excel
 - [x] First-run tour + in-app Guide
 - [x] Default users recreated after reset
+- [x] Download / upload / restore snapshots (xlsx, db, zip)
+- [x] Recovery commands (`docs/RECOVERY.md`)
 
 When you complete or change a requirement, tick/retarget it here.
 
@@ -407,3 +416,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09 (feb7b71)** Tour v1; replay instead of bumping version when adding steps. Overlay click does not skip.
 - **2026-09** `X-Frame-Options: SAMEORIGIN` required for preview. Do not set `DENY`.
 - **2026-09** Pydantic ≥ 2.12 for Python 3.14; do not pin 2.9.x.
+- **2026-09** Backup UI: Download (zip pair), Upload & restore (.xlsx/.db/zip). Recovery commands in `docs/RECOVERY.md`.
