@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-07 (multi item×supplier rows on new/edit MR).
+Last updated: 2026-09-07 (daily/weekly period reports from a chosen date).
 
 ---
 
@@ -163,6 +163,7 @@ backend/app/                 FastAPI app
   excel/service.py           DB-first CRUD + Excel replica + backups
   backup.py                  Autobackup schedule
   domain.py / stats.py       Flags, filters, KPIs
+  reports.py                 Period briefings (`period_payload` / `period_pdf` / `period_xlsx`) + list exports
   security.py                JWT, roles, field-edit roles
   routers/                   auth, work_orders, dashboard, ops, catalog, collab, settings, …
 frontend/src/
@@ -262,6 +263,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
 - Header: Search, Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
 - Work-order list columns persist in `localStorage["woms.columns"]`.
+- Reports (`/reports`): Daily and Weekly are on-screen briefings. Choose a calendar date (prev/next, Today / This week). Daily = that day only; weekly = ISO Monday–Sunday of that date. JSON at `GET /api/reports/{daily|weekly}?fmt=json&as_of=`. PDF is one A4 portrait page; XLSX is one sheet with `fitToHeight=1`. Other report kinds stay download-only under the More tab.
 - Work order editor tabs: Details / Items / Activity. Details shows Item 1 / Supplier 1, Item 2 / Supplier 2 rows (`mr_lines`). Excel still has one supplier cell + one material summary.
 - Filters start collapsed; chips remove filters.
 - After Settings StrReplace, **assert `function DatabasePanel` still exists** if you insert `<DatabasePanel />` (vite can build while runtime ReferenceError).
@@ -290,7 +292,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | `/api/catalog` | suppliers, materials, aliases, MR lines |
 | `/api/collab` | chat, projects, notifications, saved views |
 | `/api/files` | attachments |
-| `/api/reports` | Excel/CSV/PDF reports |
+| `/api/reports` | Period briefings + Excel/CSV/PDF. `GET /{kind}` kinds: `daily`, `weekly`, `monthly`, `yearly`, `open`, `overdue`, `closed`, `delay`, `department`, `technician`. `fmt=pdf\|xlsx\|csv\|json`. Daily/weekly take `as_of` or `date` (ISO day). JSON for daily/weekly is `period_payload`. PDF for those kinds is inline, one page. |
 | `/api/audit` | field-level audit log |
 | `/api/users` | user admin |
 | `/api/settings` | config, mapping scan, backups, database seed/reset/upload |
@@ -315,6 +317,7 @@ cd frontend && npm run build
 | `tests/test_collab_*.py` | Chat, watches, row restore |
 | `tests/test_materials_catalog.py` | Lines, aliases |
 | `tests/test_delay_sites.py` | Extra sites / delay rules |
+| `tests/test_reports.py` | Daily/weekly window, one-page PDF, one-sheet XLSX, JSON API |
 
 Pitfalls (do not repeat):
 
@@ -402,6 +405,7 @@ Must remain true:
 - [x] Download / upload / restore snapshots (xlsx, db, zip)
 - [x] Recovery commands (`docs/RECOVERY.md`)
 - [x] Multiple materials × suppliers per MR (`mr_lines`; item 1 / supplier 1)
+- [x] Daily / weekly reports from a chosen date (that day or that ISO week only; one-page PDF)
 
 When you complete or change a requirement, tick/retarget it here.
 
