@@ -124,7 +124,7 @@ def test_manual_backup_pairs_database(workbook):
     database.upsert_wo_record(patched)
     write_only = svc.create_backup(reason="update")
     assert write_only is not None
-    assert not write_only.with_suffix(".db").exists()
+    assert write_only.with_suffix(".db").is_file()
     result = svc.restore_backup(str(path))
     assert result["database"] is True
     assert result["excel"] is True
@@ -139,6 +139,9 @@ def test_excel_only_restore_does_not_seed_db(workbook):
     rid = recs[0]["record_id"]
     path = svc.create_backup(reason="update")
     assert path is not None
+    sibling = path.with_suffix(".db")
+    if sibling.is_file():
+        sibling.unlink()
     assert not path.with_suffix(".db").exists()
     patched = dict(database.get_wo_record(rid))
     patched["remarks"] = "live-db-must-stay"

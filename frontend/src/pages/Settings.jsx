@@ -542,7 +542,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
             <HardDrive size={16} /> Backup system
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Backup now and autobackup snapshot SQLite plus <span className="font-mono">file.xlsx</span>. Download a copy to another PC, upload it here, then Restore. Per-save copies stay Excel-only. Paired .db restores live history; Excel-only copies do not.
+            Every backup copies the database and Excel. Download a zip of both, or upload an .xlsx, .db, or zip, then Restore.
           </p>
         </div>
         <label className="inline-flex items-center gap-2 text-sm font-medium">

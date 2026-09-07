@@ -11,10 +11,13 @@ from ..materials import (
     canonical_supplier,
     clean_name,
     cluster_duplicates,
+    existing_supplier_match,
     load_alias_map,
+    looks_combined,
     search_material,
     search_supplier,
     suggest_suppliers,
+    unique_supplier_names,
 )
 from ..security import require_permission
 
@@ -100,10 +103,10 @@ def list_suppliers(user=Depends(require_permission("view"))):
     names = {str(s["name"]).strip() for s in catalog if s and str(s.get("name") or "").strip()}
     names.update(_excel_suppliers())
     alias_map = load_alias_map()
-    canonicals = sorted({canonical_supplier(n, alias_map) for n in names if n}, key=str.lower)
+    canonicals = unique_supplier_names(names, alias_map)
     return {
         "items": catalog,
-        "names": sorted(names, key=str.lower),
+        "names": canonicals,
         "canonical_names": canonicals,
         "aliases": database.list_supplier_aliases(),
         "delay_kinds": DELAY_KINDS,
@@ -113,8 +116,30 @@ def list_suppliers(user=Depends(require_permission("view"))):
 
 @router.post("/suppliers")
 def create_supplier(body: SupplierCreate, user=Depends(require_permission("edit"))):
+    cleaned = clean_name(body.name)
+    if looks_combined(cleaned):
+        raise HTTPException(
+            status_code=400,
+            detail="That looks like several suppliers in one cell. Add each vendor separately.",
+        )
+    match = existing_supplier_match(cleaned)
+    if match:
+        item = match
+        payload = body.model_dump(exclude_unset=True)
+        extras = {k: v for k, v in payload.items() if k not in {"name", "items"} and v is not None}
+        if extras:
+            item = database.update_supplier(int(item["id"]), **extras) or item
+        materials = [clean_name(x) for x in (body.items or []) if clean_name(x)]
+        if materials:
+            existing = [i["material"] for i in database.list_supplier_items(item["name"])]
+            database.replace_supplier_items(
+                item["name"],
+                list(dict.fromkeys([*existing, *materials])),
+                created_by=user["username"],
+            )
+        return {"item": _with_items(item), "existing": True}
     try:
-        item = database.add_supplier(body.name, created_by=user["username"])
+        item = database.add_supplier(cleaned, created_by=user["username"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     payload = body.model_dump(exclude_unset=True)

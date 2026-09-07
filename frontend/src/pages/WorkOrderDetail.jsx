@@ -4,6 +4,7 @@ import { api, qs } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
+import MentionBox from "../components/MentionBox.jsx";
 
 const EXTRA_KEYS = ["delay_kind", "delay_source", "delay_justification"];
 const DELAY_OPEN = new Set(["open"]);
@@ -70,8 +71,8 @@ const GROUPS = [
   {
     id: "buy",
     title: "Procurement",
-    hint: "Supplier, PO and expected dates.",
-    keys: ["supplier", "po_number", "scheduled_date", "closed_date"],
+    hint: "PO and expected dates. Suppliers live in the items list above.",
+    keys: ["po_number", "scheduled_date", "closed_date"],
   },
   {
     id: "ship",
@@ -107,8 +108,7 @@ export default function WorkOrderDetail() {
   const [meta, setMeta] = useState(null);
   const [history, setHistory] = useState([]);
   const [dueOffsets, setDueOffsets] = useState(DUE_OFFSET_FALLBACK);
-  const [addingSupplier, setAddingSupplier] = useState(false);
-  const [newSupplier, setNewSupplier] = useState("");
+  const people = options.mention_users || [];
   const [files, setFiles] = useState([]);
   const [fileNote, setFileNote] = useState("");
   const [watching, setWatching] = useState(false);
@@ -182,7 +182,7 @@ export default function WorkOrderDetail() {
         priority: "MEDIUM",
         created_date: new Date().toISOString().slice(0, 16).replace("T", " "),
         department: "SH5-SH1",
-        lines: [{ supplier: "", material: "", qty: "", unit: "", notes: "" }],
+        lines: [{ supplier: "", material: "", qty: "", unit: "", notes: "", needed_date: "" }],
       };
       setForm(initial);
       setOriginal(initial);
@@ -221,32 +221,6 @@ export default function WorkOrderDetail() {
 
   function setField(k, v) {
     setForm((f) => ({ ...f, [k]: v }));
-  }
-
-  async function addSupplier() {
-    const name = newSupplier.trim();
-    if (!name) return;
-    setBusy(true);
-    try {
-      const d = await api.post("/api/catalog/suppliers", { name });
-      const added = d.item?.name || name;
-      setOptions((o) => ({
-        ...o,
-        supplier: Array.from(new Set([...(o.supplier || []), added])).sort((a, b) => a.localeCompare(b)),
-      }));
-      setForm((f) => {
-        const current = Array.isArray(f.lines) && f.lines.length ? [...f.lines] : [emptyLine()];
-        current[0] = { ...emptyLine(), ...current[0], supplier: added };
-        return { ...f, supplier: added, lines: current };
-      });
-      setNewSupplier("");
-      setAddingSupplier(false);
-      toast(`Supplier “${added}” added`, "success");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function save(force = false) {
@@ -424,9 +398,20 @@ export default function WorkOrderDetail() {
         <label className="lbl">{label}</label>
         {type === "textarea" ? (
           <>
-            <textarea rows={3} value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)} />
-            {key === "remarks" && (
-              <p className="text-[11px] text-slate-500 mt-1">Type @username in remarks to ping. Followers are notified on save.</p>
+            {key === "remarks" ? (
+              <>
+                <MentionBox
+                  rows={3}
+                  value={form[key] || ""}
+                  disabled={fieldLocked(key)}
+                  people={people}
+                  onChange={(v) => setField(key, v)}
+                  placeholder="Notes… type @ to mention a user"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">Type @ to pick a username. Followers are notified on save.</p>
+              </>
+            ) : (
+              <textarea rows={3} value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)} />
             )}
           </>
         ) : type === "site" ? (
@@ -437,44 +422,6 @@ export default function WorkOrderDetail() {
               </option>
             ))}
           </select>
-        ) : type === "supplier" ? (
-          <div className="space-y-2">
-            <select
-              value={form.supplier || ""}
-              disabled={fieldLocked("supplier")}
-              onChange={(e) => {
-                const value = e.target.value;
-                setForm((f) => {
-                  const current = Array.isArray(f.lines) && f.lines.length ? [...f.lines] : [emptyLine()];
-                  current[0] = { ...emptyLine(), ...current[0], supplier: value };
-                  return { ...f, supplier: value, lines: current };
-                });
-              }}
-            >
-              <option value="">—</option>
-              {(options.supplier || []).map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </select>
-            {!fieldLocked("supplier") && !addingSupplier && (
-              <button type="button" className="btn-outline !py-1 !px-2 text-xs" onClick={() => setAddingSupplier(true)}>
-                + Add supplier
-              </button>
-            )}
-            {addingSupplier && !fieldLocked("supplier") && (
-              <div className="flex gap-2">
-                <input value={newSupplier} onChange={(e) => setNewSupplier(e.target.value)} placeholder="New supplier name" autoFocus />
-                <button type="button" className="btn-primary !py-1 !px-2 text-xs" onClick={addSupplier} disabled={busy}>
-                  Add
-                </button>
-                <button type="button" className="btn-outline !py-1 !px-2 text-xs" onClick={() => setAddingSupplier(false)}>
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
         ) : ["status", "priority", "assigned_to", "work_type", "issue"].includes(type) ? (
           <select value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)}>
             <option value="">—</option>
@@ -781,7 +728,7 @@ export default function WorkOrderDetail() {
                 }
               }}
             >
-              <input value={chatBody} onChange={(e) => setChatBody(e.target.value)} placeholder="Message this MR… @username to ping" autoComplete="off" />
+              <MentionBox value={chatBody} onChange={setChatBody} people={people} placeholder="Message this MR… type @ to mention" className="flex-1" />
               <button className="btn-primary" disabled={!chatBody.trim()}>
                 Send
               </button>
@@ -904,12 +851,13 @@ export default function WorkOrderDetail() {
 
 
 function emptyLine() {
-  return { supplier: "", material: "", qty: "", unit: "", notes: "" };
+  return { supplier: "", material: "", qty: "", unit: "", notes: "", needed_date: "" };
 }
 
 function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
   const lines = Array.isArray(form.lines) && form.lines.length ? form.lines : [emptyLine()];
   const suppliers = options.supplier || [];
+  const itemMap = options.supplier_items || {};
   const locked = readOnly || supplierLocked;
 
   function setLine(index, patch) {
@@ -947,8 +895,8 @@ function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
       <div>
         <div className="font-semibold">Items & suppliers</div>
         <p className="text-xs text-slate-500">
-          One row per material. Item 1 can be supplier 1, item 2 a different supplier, and so on. The Excel backup still
-          has one supplier cell (item 1) and one material summary.
+          One row per material: pick the supplier, the item they can provide, and the date. Add new vendors on Materials.
+          Excel still keeps one supplier cell (item 1) and one material summary.
         </p>
       </div>
       {lines.map((line, index) => (
@@ -962,46 +910,57 @@ function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
             )}
           </div>
           <div className="grid md:grid-cols-12 gap-2">
-            <div className="md:col-span-5">
-              <label className="lbl">Material</label>
-              <input
-                value={line.material || ""}
-                disabled={readOnly}
-                onChange={(e) => setLine(index, { material: e.target.value })}
-                placeholder={`Item ${index + 1} material`}
-              />
-            </div>
             <div className="md:col-span-4">
               <label className="lbl">Supplier</label>
-              <input
-                list="wo-supplier-list"
+              <select
                 value={line.supplier || ""}
                 disabled={locked}
                 onChange={(e) => setLine(index, { supplier: e.target.value })}
-                placeholder={`Supplier ${index + 1}`}
+              >
+                <option value="">—</option>
+                {line.supplier && !suppliers.includes(line.supplier) && <option value={line.supplier}>{line.supplier}</option>}
+                {suppliers.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="md:col-span-4">
+              <label className="lbl">Item they can provide</label>
+              <input
+                list={`wo-item-list-${index}`}
+                value={line.material || ""}
+                disabled={readOnly}
+                onChange={(e) => setLine(index, { material: e.target.value })}
+                placeholder={`Item ${index + 1}`}
+              />
+              <datalist id={`wo-item-list-${index}`}>
+                {(itemMap[line.supplier] || []).map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+            </div>
+            <div className="md:col-span-2">
+              <label className="lbl">Date</label>
+              <input
+                type="date"
+                value={(line.needed_date || "").slice(0, 10)}
+                disabled={readOnly}
+                onChange={(e) => setLine(index, { needed_date: e.target.value })}
               />
             </div>
             <div className="md:col-span-1">
               <label className="lbl">Qty</label>
               <input value={line.qty || ""} disabled={readOnly} onChange={(e) => setLine(index, { qty: e.target.value })} />
             </div>
-            <div className="md:col-span-2">
+            <div className="md:col-span-1">
               <label className="lbl">Unit</label>
-              <input
-                value={line.unit || ""}
-                disabled={readOnly}
-                onChange={(e) => setLine(index, { unit: e.target.value })}
-                placeholder="pcs"
-              />
+              <input value={line.unit || ""} disabled={readOnly} onChange={(e) => setLine(index, { unit: e.target.value })} placeholder="pcs" />
             </div>
           </div>
         </div>
       ))}
-      <datalist id="wo-supplier-list">
-        {suppliers.map((s) => (
-          <option key={s} value={s} />
-        ))}
-      </datalist>
       {!readOnly && (
         <button type="button" className="btn-outline" onClick={addLine}>
           + Add item

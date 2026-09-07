@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS mr_lines (
     qty TEXT,
     unit TEXT,
     notes TEXT,
+    needed_date TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     created_by TEXT
@@ -265,6 +266,9 @@ def init_db() -> None:
         if "work_order_id" not in chat_cols:
             conn.execute("ALTER TABLE chat_threads ADD COLUMN work_order_id TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_record ON chat_threads(record_id)")
+        line_cols = {r[1] for r in conn.execute("PRAGMA table_info(mr_lines)")}
+        if "needed_date" not in line_cols:
+            conn.execute("ALTER TABLE mr_lines ADD COLUMN needed_date TEXT")
         sup_cols = {r[1] for r in conn.execute("PRAGMA table_info(suppliers)")}
         for col, spec in (
             ("phone", "TEXT"),
@@ -1430,6 +1434,7 @@ def replace_mr_lines(
                 "qty": " ".join(str(row.get("qty") or "").split()),
                 "unit": " ".join(str(row.get("unit") or "").split()),
                 "notes": " ".join(str(row.get("notes") or "").split()),
+                "needed_date": " ".join(str(row.get("needed_date") or "").split())[:10],
             }
         )
     ts = now_iso()
@@ -1438,8 +1443,8 @@ def replace_mr_lines(
         for idx, row in enumerate(cleaned):
             conn.execute(
                 """INSERT INTO mr_lines
-                   (record_id, work_order_id, supplier, material, qty, unit, notes, sort_order, created_at, created_by)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (record_id, work_order_id, supplier, material, qty, unit, notes, needed_date, sort_order, created_at, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     rid,
                     wo,
@@ -1448,6 +1453,7 @@ def replace_mr_lines(
                     row["qty"],
                     row["unit"],
                     row["notes"],
+                    row.get("needed_date") or "",
                     idx,
                     ts,
                     created_by,

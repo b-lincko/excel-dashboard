@@ -548,16 +548,15 @@ class ExcelService:
             dest = dest_dir / f"{stem}_{ts}_{reason}{src.suffix}"
             shutil.copy2(src, dest)
             database.set_sync_meta("last_backup", str(dest))
-        if reason in self.SNAPSHOT_REASONS:
-            db_dest = dest_dir / f"{stem}_{ts}_{reason}.db"
-            try:
-                database.snapshot_to(db_dest)
-                if dest is None:
-                    dest = db_dest
-                    database.set_sync_meta("last_backup", str(dest))
-            except Exception:
-                if db_dest.exists():
-                    db_dest.unlink(missing_ok=True)
+        db_dest = dest_dir / f"{stem}_{ts}_{reason}.db"
+        try:
+            database.snapshot_to(db_dest)
+            if dest is None:
+                dest = db_dest
+                database.set_sync_meta("last_backup", str(dest))
+        except Exception:
+            if db_dest.exists():
+                db_dest.unlink(missing_ok=True)
         return dest
 
     def store_uploaded_backup(self, content: bytes, filename: str = "backup.xlsx") -> dict[str, Any]:

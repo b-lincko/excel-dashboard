@@ -47,7 +47,45 @@ def looks_combined(name: Any) -> bool:
         return True
     if "\n" in text:
         return True
+    if re.search(r"\b1[\.\)]\s+\S.+\b2[\.\)]\s+", text):
+        return True
+    if re.search(r"^\s*\d+[\.\)]\s+", text) and re.search(r"\s+\d+[\.\)]\s+", text):
+        return True
     return False
+
+
+def unique_supplier_names(names: Iterable[str], alias_map: Optional[dict[str, str]] = None) -> list[str]:
+    """One dropdown entry per supplier. Drops numbered/combined Excel cells and W.L.L vs WLL twins."""
+    amap = alias_map if alias_map is not None else load_alias_map()
+    best: dict[str, str] = {}
+    for raw in names:
+        cleaned = clean_name(raw)
+        if not cleaned or looks_combined(cleaned):
+            continue
+        canon = canonical_supplier(cleaned, amap)
+        key = compact_supplier_key(canon) or compact_supplier_key(cleaned)
+        if not key:
+            continue
+        prev = best.get(key)
+        if not prev or len(canon) < len(prev):
+            best[key] = canon
+    return sorted(best.values(), key=str.lower)
+
+
+def existing_supplier_match(name: Any) -> Optional[dict[str, Any]]:
+    cleaned = clean_name(name)
+    if not cleaned:
+        return None
+    hit = database.get_supplier_by_name(cleaned)
+    if hit:
+        return hit
+    key = compact_supplier_key(cleaned)
+    if not key:
+        return None
+    for row in database.list_suppliers():
+        if compact_supplier_key(row.get("name")) == key:
+            return row
+    return None
 
 
 def supplier_similarity(a: Any, b: Any) -> float:
@@ -109,6 +147,7 @@ def normalize_lines(raw: Any) -> list[dict[str, str]]:
                 "qty": clean_name(row.get("qty")),
                 "unit": clean_name(row.get("unit")),
                 "notes": clean_name(row.get("notes")),
+                "needed_date": clean_name(row.get("needed_date"))[:10],
             }
         )
     return items
@@ -376,10 +415,16 @@ def persist_work_order_lines(
     username: str,
 ) -> list[dict[str, str]]:
     cleaned = normalize_lines(lines)
+    for line in cleaned:
+        supplier = line.get("supplier")
+        if supplier and not looks_combined(supplier):
+            match = existing_supplier_match(supplier)
+            if match:
+                line["supplier"] = match["name"]
+            else:
+                database.add_supplier(supplier, created_by=username)
     database.replace_mr_lines(record_id, cleaned, created_by=username, work_order_id=work_order_id)
     for line in cleaned:
-        if line.get("supplier"):
-            database.add_supplier(line["supplier"], created_by=username)
         if line.get("supplier") and line.get("material"):
             database.add_supplier_item(line["supplier"], line["material"], created_by=username)
     return cleaned

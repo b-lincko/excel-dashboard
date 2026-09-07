@@ -105,6 +105,8 @@ export default function Layout() {
   const loc = useLocation();
   const [sync, setSync] = useState(null);
   const [q, setQ] = useState("");
+  const [hits, setHits] = useState([]);
+  const [hitsOpen, setHitsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -125,6 +127,7 @@ export default function Layout() {
     setMenu(false);
     setAccountOpen(false);
     setInboxOpen(false);
+    setHitsOpen(false);
   }, [loc.pathname]);
 
   useEffect(() => {
@@ -206,6 +209,24 @@ export default function Layout() {
     const id = setInterval(loadInbox, 8000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 1) {
+      setHits([]);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      api
+        .get(`/api/work-orders?q=${encodeURIComponent(query)}&page_size=8`)
+        .then((d) => {
+          setHits(d.items || []);
+          setHitsOpen(true);
+        })
+        .catch(() => setHits([]));
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [q]);
 
   async function onUpload(e) {
     const file = e.target.files?.[0];
@@ -333,6 +354,7 @@ export default function Layout() {
             className="flex-1 max-w-xl relative flex items-center gap-2"
             onSubmit={(e) => {
               e.preventDefault();
+              setHitsOpen(false);
               nav(`/work-orders?q=${encodeURIComponent(q)}`);
             }}
           >
@@ -342,11 +364,50 @@ export default function Layout() {
                 ref={searchRef}
                 id="global-search"
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setHitsOpen(true);
+                }}
+                onFocus={() => hits.length && setHitsOpen(true)}
+                onBlur={() => setTimeout(() => setHitsOpen(false), 150)}
                 placeholder="Search MRs, technicians, PO, remarks…  /"
                 className="pl-9"
                 aria-label="Search work orders"
+                autoComplete="off"
               />
+              {hitsOpen && hits.length > 0 && (
+                <div className="absolute left-0 right-0 top-full z-30 mt-1 card p-1 max-h-80 overflow-auto">
+                  {hits.map((r) => (
+                    <button
+                      key={r.record_id || r.work_order_id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-white/5"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setHitsOpen(false);
+                        nav(`/work-orders/${encodeURIComponent(r.record_id || r.work_order_id)}`);
+                      }}
+                    >
+                      <div className="font-medium truncate">{r.work_order_id || r.record_id}</div>
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {[r.department, r.assigned_to, r.status, r.supplier].filter(Boolean).join(" · ")}
+                      </div>
+                      {r.description ? <div className="text-xs text-slate-500 truncate">{r.description}</div> : null}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-2 text-xs text-brand-700 dark:text-cyan-300"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setHitsOpen(false);
+                      nav(`/work-orders?q=${encodeURIComponent(q)}`);
+                    }}
+                  >
+                    View all matches
+                  </button>
+                </div>
+              )}
             </div>
             <button type="submit" className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs whitespace-nowrap" title="Search material requests">
               Search

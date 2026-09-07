@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
+import MentionBox from "../components/MentionBox.jsx";
 
 function mergeMessages(prev, incoming) {
   if (!incoming?.length) return prev;
@@ -170,7 +171,7 @@ export default function Chat() {
               <div ref={bottomRef} />
             </div>
             <form onSubmit={send} className="p-3 border-t border-slate-200 dark:border-white/5 flex gap-2">
-              <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write a message… @username to ping" autoComplete="off" />
+              <MentionBox value={body} onChange={setBody} people={people} placeholder="Write a message… type @ to mention" className="flex-1" />
               <button className="btn-primary" disabled={busy || !body.trim()}>
                 Send
               </button>

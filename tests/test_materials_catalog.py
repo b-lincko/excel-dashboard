@@ -50,6 +50,34 @@ def _login():
     return client, {"Authorization": f"Bearer {token}"}
 
 
+def test_dropdown_hides_combined_and_wll_twins():
+    from app.materials import looks_combined, unique_supplier_names
+
+    combined = "1. ALBAYAN FOR ELECTRONICS AND LED TECHNOLOGIES FACTORY 2. NARJAS ELECTRICALS & TECHNICAL SERVICES"
+    assert looks_combined(combined)
+    names = unique_supplier_names(
+        [
+            combined,
+            "AAGE INTERNATIONAL W.L.L",
+            "AAGE INTERNATIONAL WLL",
+            "AAGE INTERNATIONAL & KONE ELEVATORS WLL",
+        ],
+        alias_map={},
+    )
+    assert combined not in names
+    aage = [n for n in names if n.upper().startswith("AAGE INTERNATIONAL") and "&" not in n]
+    assert len(aage) == 1
+    assert "AAGE INTERNATIONAL & KONE ELEVATORS WLL" in names
+
+
+def test_create_backup_pairs_database(workbook):
+    _, svc = workbook
+    svc.get_all(force=True)
+    path = svc.create_backup(reason="create")
+    assert path is not None
+    assert path.with_suffix(".db").is_file()
+
+
 def test_supplier_name_normalization():
     assert compact_supplier_key("AAGE INTERNATIONAL W.L.L") == compact_supplier_key("AAGE INTERNATIONAL WLL")
     assert compact_supplier_key("AL MEERA") == compact_supplier_key("ALMEERA")
@@ -149,6 +177,10 @@ def test_catalog_lines_suggest_delivery_aliases(workbook):
 
     opts = client.get("/api/work-orders/options", headers=headers)
     assert opts.status_code == 200, opts.text
+    suppliers = opts.json()["options"]["supplier"]
+    assert all(not (("1." in s or "1)" in s) and ("2." in s or "2)" in s)) for s in suppliers)
+    people = opts.json()["options"].get("mention_users") or []
+    assert any(p.get("username") == "admin" for p in people)
     issue = opts.json()["options"]["issue"]
     assert "Delivered" in issue
     assert "Pending" in issue

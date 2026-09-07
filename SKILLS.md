@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-07 (daily/weekly period reports from a chosen date).
+Last updated: 2026-09-07 (one MR supplier form, unique dropdown names, @mentions, search suggestions, paired backups).
 
 ---
 
@@ -79,7 +79,7 @@ UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
 - Never insert/shift columns. Missing mapped headers may be **appended** at the end only (`_ensure_mapped_headers`).
 - Identity for a row: `record_id` = `{site_label}:{excel_row}` e.g. `SH5-SH1:13`. **IM Work Order # is not unique** (several MRs per IM WO). Sync by record_id; on import, match by record_id then WO#+site.
 - Site (`department`) comes from the worksheet label, not a department column.
-- Write path: **file lock → backup (Excel-only for per-save) → temp xlsx → validate opens → `os.replace`**.
+- Write path: **file lock → backup (Excel + SQLite pair) → temp xlsx → validate opens → `os.replace`**.
 - File lock required. HTTP **423** if locked, **503** if missing, **409** on sync-token conflict.
 
 ### Database / admin
@@ -191,7 +191,7 @@ Boot (`main._boot`): `init_db()`. If `wo_cache` is empty and Excel exists → `s
 
 - `get_all()` / `load()` → SQLite `wo_cache`.
 - `update_record` / `update_records` / `create_record` / `delete_record` → SQLite first, then `_excel_*`.
-- `_excel_update_record` etc. copy Excel with reason `update` / `bulk` / `create` / `delete` / `import` / `upload` / `reconcile` (**Excel-only**, no SQLite snapshot).
+- `_excel_update_record` etc. copy Excel with reason `update` / `bulk` / `create` / `delete` / `import` / `upload` / `reconcile`, and **also snapshot SQLite** (`.xlsx` + `.db` pair).
 - On Excel failure the DB row stays; response includes `_excel_backup_ok` / `_excel_backup_error`.
 - `seed_from_excel` reads the workbook and `replace_wo_cache`.
 - `replace_from_bytes` replaces live Excel then seeds.
@@ -202,22 +202,13 @@ Boot (`main._boot`): `init_db()`. If `wo_cache` is empty and Excel exists → `s
 
 ## 8. Backup / restore
 
-Two different kinds of copies:
+Every `create_backup` writes **Excel + SQLite**:
 
-### A. Write-safety (every Excel write)
-
-Reasons: `update`, `create`, `delete`, `bulk`, `import`, `upload`, `reconcile`.
-
-- Copy **Excel only** to `{backup_dir}/{YYYY-MM-DD}/{stem}_{ts}_{reason}.xlsx`.
-- Not a SQLite snapshot.
-
-### B. Snapshots (Backup now, autobackup, pre-restore)
-
-Reasons in `ExcelService.SNAPSHOT_REASONS`: `manual`, `auto`, `pre_restore`.
-
-- Pair: same stem/timestamp `.xlsx` **and** `.db` via `database.snapshot_to` (sqlite3 backup API).
+- `{backup_dir}/{YYYY-MM-DD}/{stem}_{ts}_{reason}.xlsx` and matching `.db` via `database.snapshot_to`.
+- Reasons include write-safety (`update`, `create`, `delete`, `bulk`, `import`, `upload`, `reconcile`) and snapshots (`manual`, `auto`, `pre_restore`).
 - If Excel is missing, still snapshot SQLite (`woms_{ts}_{reason}.db`) and list that unpaired `.db`.
 - Autobackup no longer skips when Excel is unavailable.
+- Download zips the pair. Upload accepts `.xlsx` / `.db` / zip of both.
 
 ### Restore
 
@@ -264,7 +255,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - Header: Search, Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
 - Work-order list columns persist in `localStorage["woms.columns"]`.
 - Reports (`/reports`): Daily and Weekly are on-screen briefings. Choose a calendar date (prev/next, Today / This week). Daily = that day only; weekly = ISO Monday–Sunday of that date. JSON at `GET /api/reports/{daily|weekly}?fmt=json&as_of=`. PDF is one A4 portrait page; XLSX is one sheet with `fitToHeight=1`. Other report kinds stay download-only under the More tab.
-- Work order editor tabs: Details / Items / Activity. Details shows Item 1 / Supplier 1, Item 2 / Supplier 2 rows (`mr_lines`). Excel still has one supplier cell + one material summary.
+- Work order editor: **one** Items & suppliers form (dropdown supplier, item they can provide, date, qty). No “Add supplier” on the MR page — add vendors on Materials. Supplier dropdown is unique (`unique_supplier_names`; drop numbered “1. A 2. B” cells; collapse W.L.L vs WLL). Type `@` in remarks/chat to pick a username. Header search shows live suggestions (quotes are encoded).
 - Filters start collapsed; chips remove filters.
 - After Settings StrReplace, **assert `function DatabasePanel` still exists** if you insert `<DatabasePanel />` (vite can build while runtime ReferenceError).
 
@@ -315,7 +306,7 @@ cd frontend && npm run build
 | `tests/test_excel_and_api.py` | Read/write Excel, backup schedule/prune |
 | `tests/test_ops_pack.py` | Queue, digest, timeline, mapping, backup health |
 | `tests/test_collab_*.py` | Chat, watches, row restore |
-| `tests/test_materials_catalog.py` | Lines, aliases |
+| `tests/test_materials_catalog.py` | Lines, aliases, unique supplier dropdown, paired create-backup |
 | `tests/test_delay_sites.py` | Extra sites / delay rules |
 | `tests/test_reports.py` | Daily/weekly window, one-page PDF, one-sheet XLSX, JSON API |
 
@@ -379,11 +370,10 @@ Shipped milestones (do not regress):
 
 ### Backup behavior
 
-1. Per-save reasons stay Excel-only.
-2. Snapshot reasons (`manual` / `auto` / `pre_restore`) pair `.xlsx` + `.db`.
-3. Restore: pair → both; Excel-only → Excel only, no silent seed.
-4. Download zips the pair. Upload accepts `.xlsx` / `.db` / zip into the backup folder, then the UI prompts Restore.
-5. Operator recovery lives in `docs/RECOVERY.md` — do not bury commands only in chat.
+1. Every backup reason pairs `.xlsx` + `.db`.
+2. Restore: pair → both; Excel-only leftover files → Excel only, no silent seed.
+3. Download zips the pair. Upload accepts `.xlsx` / `.db` / zip into the backup folder, then the UI prompts Restore.
+4. Operator recovery lives in `docs/RECOVERY.md` — do not bury commands only in chat.
 
 ---
 
@@ -406,6 +396,7 @@ Must remain true:
 - [x] Recovery commands (`docs/RECOVERY.md`)
 - [x] Multiple materials × suppliers per MR (`mr_lines`; item 1 / supplier 1)
 - [x] Daily / weekly reports from a chosen date (that day or that ISO week only; one-page PDF)
+- [x] One MR supplier form (dropdown only); unique supplier names; @mentions; search suggestions; backups always pair Excel + DB
 
 When you complete or change a requirement, tick/retarget it here.
 
@@ -417,7 +408,7 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 
 - **2026-09 (aef7883)** Excel is no longer SoT. User reversed earlier Excel-SoT. DB first, Excel copy on save. Excel failure keeps DB.
 - **2026-09** Admin reset wipes **everything** (users, chat, settings, WOs), then new DB + seed. Recreate default logins. Keep `app_config.json`.
-- **2026-09 (dc7bc07)** Snapshots (`manual`/`auto`/`pre_restore`) pair `.xlsx`+`.db`. Per-save copies stay Excel-only. Excel-only restore does not seed DB.
+- **2026-09 (dc7bc07)** Snapshots (`manual`/`auto`/`pre_restore`) pair `.xlsx`+`.db`. Excel-only restore of leftover files does not seed DB.
 - **2026-09 (feb7b71)** Tour v1; replay instead of bumping version when adding steps. Overlay click does not skip.
 - **2026-09** `X-Frame-Options: SAMEORIGIN` required for preview. Do not set `DENY`.
 - **2026-09** Pydantic ≥ 2.12 for Python 3.14; do not pin 2.9.x.

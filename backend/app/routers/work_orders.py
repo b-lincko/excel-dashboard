@@ -11,7 +11,7 @@ from ..config import load_config
 from ..dates import to_date
 from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_for_open, site_choices, today
 from ..excel.service import DELAY_FIELDS, DUE_OFFSETS, ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
-from ..materials import apply_lines_to_excel_fields, merge_choices, normalize_lines, persist_work_order_lines
+from ..materials import apply_lines_to_excel_fields, merge_choices, normalize_lines, persist_work_order_lines, unique_supplier_names
 from ..security import editable_fields, forbidden_fields, require_permission
 from ..stats import parse_query_filters
 from ..ops import timeline_payload
@@ -83,9 +83,12 @@ def _save_extras(rec: dict[str, Any], extra_changes: dict[str, Any], username: s
 
 
 def _maybe_add_supplier(name: Any, username: str) -> None:
-    cleaned = " ".join(str(name or "").split())
-    if cleaned:
-        database.add_supplier(cleaned, created_by=username)
+    from ..materials import clean_name, existing_supplier_match, looks_combined
+
+    cleaned = clean_name(name)
+    if not cleaned or looks_combined(cleaned) or existing_supplier_match(cleaned):
+        return
+    database.add_supplier(cleaned, created_by=username)
 
 router = APIRouter(prefix="/api/work-orders", tags=["work-orders"])
 
@@ -226,8 +229,18 @@ def options(user=Depends(require_permission("view"))):
     lists = excel_service.lists()
     cfg = load_config()
     catalog_names = [s["name"] for s in database.list_suppliers() if s.get("name")]
-    suppliers = sorted({*opts.get("supplier", []), *catalog_names}, key=str.lower)
-    opts["supplier"] = suppliers
+    opts["supplier"] = unique_supplier_names([*(opts.get("supplier") or []), *catalog_names])
+    supplier_items: dict[str, list[str]] = {}
+    for row in database.list_supplier_items():
+        name = str(row.get("supplier_name") or "").strip()
+        mat = str(row.get("material") or "").strip()
+        if name and mat and mat not in supplier_items.setdefault(name, []):
+            supplier_items[name].append(mat)
+    mention_users = [
+        {"username": u["username"], "full_name": u.get("full_name") or ""}
+        for u in database.list_users()
+        if u.get("is_active")
+    ]
     work_type_hints = [
         "Direct Cash",
         "Local PO",
@@ -242,6 +255,8 @@ def options(user=Depends(require_permission("view"))):
     delivery = getattr(cfg, "delivery_statuses", None) or []
     opts["issue"] = merge_choices(opts.get("issue") or [], delivery)
     opts["delay_reason"] = merge_choices(opts.get("delay_reason") or [], delivery)
+    opts["mention_users"] = mention_users
+    opts["supplier_items"] = supplier_items
     sites = site_choices(cfg)
     for name in sites:
         if name not in opts.get("department", []):
