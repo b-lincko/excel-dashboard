@@ -65,8 +65,8 @@ export const TOUR_STEPS = [
     path: "/work-orders/new",
     target: "wo-tabs",
     need: "create",
-    title: "Details, suppliers, activity",
-    body: "Details is the request itself. Suppliers holds extra line items. Activity (on saved records) is chat, files and the timeline. Don’t save this blank request unless you mean to create one.",
+    title: "Details, items, activity",
+    body: "On Details, add Item 1 with its supplier, then Item 2 with another supplier if needed. The Items tab is the same list. Activity (on saved records) is chat, files and the timeline. Don’t save this blank request unless you mean to create one.",
   },
   {
     id: "save",

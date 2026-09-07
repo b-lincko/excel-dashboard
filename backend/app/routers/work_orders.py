@@ -228,6 +228,17 @@ def options(user=Depends(require_permission("view"))):
     catalog_names = [s["name"] for s in database.list_suppliers() if s.get("name")]
     suppliers = sorted({*opts.get("supplier", []), *catalog_names}, key=str.lower)
     opts["supplier"] = suppliers
+    work_type_hints = [
+        "Direct Cash",
+        "Local PO",
+        "International",
+        "Service",
+        "Consumable",
+        "Emergency",
+        "Under Warranty",
+        "Alternative",
+    ]
+    opts["work_type"] = merge_choices(opts.get("work_type") or [], work_type_hints)
     delivery = getattr(cfg, "delivery_statuses", None) or []
     opts["issue"] = merge_choices(opts.get("issue") or [], delivery)
     opts["delay_reason"] = merge_choices(opts.get("delay_reason") or [], delivery)

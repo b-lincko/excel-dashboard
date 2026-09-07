@@ -67,6 +67,42 @@ def test_supplier_name_normalization():
     assert material_matches("UPS module", "REPAIR VERTIV UPS MODULE")
 
 
+def test_create_work_order_with_two_item_suppliers(workbook):
+    _, svc = workbook
+    svc.get_all(force=True)
+    client, headers = _login()
+    created = client.post(
+        "/api/work-orders",
+        headers=headers,
+        json={
+            "data": {
+                "department": "SH5-SH1",
+                "status": "OPEN",
+                "priority": "MEDIUM",
+                "work_order_id": "PYTEST-MULTI-ITEMS",
+                "lines": [
+                    {"supplier": "Vendor Alpha", "material": "AHU belt", "qty": "2", "unit": "pcs"},
+                    {"supplier": "Vendor Beta", "material": "Control card", "qty": "1", "unit": "ea"},
+                ],
+            }
+        },
+    )
+    assert created.status_code == 200, created.text
+    item = created.json()["item"]
+    lines = item.get("lines") or []
+    assert len(lines) == 2
+    assert lines[0]["supplier"] == "Vendor Alpha"
+    assert lines[0]["material"] == "AHU belt"
+    assert lines[1]["supplier"] == "Vendor Beta"
+    assert lines[1]["material"] == "Control card"
+    assert item.get("supplier") == "Vendor Alpha"
+    assert "AHU belt" in str(item.get("description") or "")
+    assert "Control card" in str(item.get("description") or "")
+    fetched = client.get(f"/api/work-orders/{item['record_id']}", headers=headers)
+    assert fetched.status_code == 200
+    assert len(fetched.json()["item"].get("lines") or []) == 2
+
+
 def test_catalog_lines_suggest_delivery_aliases(workbook):
     dest, svc = workbook
     client, headers = _login()

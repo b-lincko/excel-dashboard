@@ -7,7 +7,7 @@ const DAY = [
   ["1. Action queue", "Open Queue each morning. Work overdue, UNDER NTP, on hold, due soon, then missed ETAs."],
   ["2. Open the MR", "Click the row. Status, due date, supplier and PO sit in the summary strip."],
   ["3. Claim or follow", "Claim puts your name on Assign to. Follow notifies you when someone saves or chats."],
-  ["4. Update and save", "Use Details for the request, Suppliers for extra items, Activity for chat and files. Ctrl/⌘+S saves."],
+  ["4. Update and save", "Use Details for the request. Add Item 1 = supplier 1, Item 2 = supplier 2 when one MR needs several materials. Ctrl/⌘+S saves."],
 ];
 
 const KEYS = [

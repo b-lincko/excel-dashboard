@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-07 (backup download/upload-restore + recovery commands).
+Last updated: 2026-09-07 (multi item×supplier rows on new/edit MR).
 
 ---
 
@@ -262,7 +262,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
 - Header: Search, Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
 - Work-order list columns persist in `localStorage["woms.columns"]`.
-- Work order editor tabs: Details / Suppliers / Activity.
+- Work order editor tabs: Details / Items / Activity. Details shows Item 1 / Supplier 1, Item 2 / Supplier 2 rows (`mr_lines`). Excel still has one supplier cell + one material summary.
 - Filters start collapsed; chips remove filters.
 - After Settings StrReplace, **assert `function DatabasePanel` still exists** if you insert `<DatabasePanel />` (vite can build while runtime ReferenceError).
 
@@ -401,6 +401,7 @@ Must remain true:
 - [x] Default users recreated after reset
 - [x] Download / upload / restore snapshots (xlsx, db, zip)
 - [x] Recovery commands (`docs/RECOVERY.md`)
+- [x] Multiple materials × suppliers per MR (`mr_lines`; item 1 / supplier 1)
 
 When you complete or change a requirement, tick/retarget it here.
 

@@ -65,7 +65,7 @@ const GROUPS = [
     id: "request",
     title: "Request",
     hint: "Who needs what, and by when.",
-    keys: ["work_order_id", "department", "status", "priority", "assigned_to", "work_type", "location", "created_date", "due_date", "description"],
+    keys: ["work_order_id", "department", "status", "priority", "assigned_to", "work_type", "location", "created_date", "due_date"],
   },
   {
     id: "buy",
@@ -182,7 +182,7 @@ export default function WorkOrderDetail() {
         priority: "MEDIUM",
         created_date: new Date().toISOString().slice(0, 16).replace("T", " "),
         department: "SH5-SH1",
-        lines: [],
+        lines: [{ supplier: "", material: "", qty: "", unit: "", notes: "" }],
       };
       setForm(initial);
       setOriginal(initial);
@@ -234,7 +234,11 @@ export default function WorkOrderDetail() {
         ...o,
         supplier: Array.from(new Set([...(o.supplier || []), added])).sort((a, b) => a.localeCompare(b)),
       }));
-      setField("supplier", added);
+      setForm((f) => {
+        const current = Array.isArray(f.lines) && f.lines.length ? [...f.lines] : [emptyLine()];
+        current[0] = { ...emptyLine(), ...current[0], supplier: added };
+        return { ...f, supplier: added, lines: current };
+      });
       setNewSupplier("");
       setAddingSupplier(false);
       toast(`Supplier “${added}” added`, "success");
@@ -435,7 +439,18 @@ export default function WorkOrderDetail() {
           </select>
         ) : type === "supplier" ? (
           <div className="space-y-2">
-            <select value={form.supplier || ""} disabled={fieldLocked("supplier")} onChange={(e) => setField("supplier", e.target.value)}>
+            <select
+              value={form.supplier || ""}
+              disabled={fieldLocked("supplier")}
+              onChange={(e) => {
+                const value = e.target.value;
+                setForm((f) => {
+                  const current = Array.isArray(f.lines) && f.lines.length ? [...f.lines] : [emptyLine()];
+                  current[0] = { ...emptyLine(), ...current[0], supplier: value };
+                  return { ...f, supplier: value, lines: current };
+                });
+              }}
+            >
               <option value="">—</option>
               {(options.supplier || []).map((o) => (
                 <option key={o} value={o}>
@@ -518,6 +533,11 @@ export default function WorkOrderDetail() {
           {nextHint && <p className="text-sm text-slate-500 mt-2">{nextHint}</p>}
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
+          {isNew && canSave && (
+            <button className="btn-primary" onClick={() => save(false)} disabled={busy}>
+              {busy ? "Saving…" : "Create request"}
+            </button>
+          )}
           {!isNew && (
             <button
               className="btn-outline"
@@ -639,7 +659,7 @@ export default function WorkOrderDetail() {
           Details
         </button>
         <button type="button" className={`tab-btn ${tab === "lines" ? "is-on" : ""}`} onClick={() => setTab("lines")}>
-          Suppliers{lineCount ? ` · ${lineCount}` : ""}
+          Items{lineCount ? ` · ${lineCount}` : ""}
         </button>
         {!isNew && (
           <button type="button" className={`tab-btn ${tab === "activity" ? "is-on" : ""}`} onClick={() => setTab("activity")}>
@@ -651,12 +671,34 @@ export default function WorkOrderDetail() {
       {tab === "details" && (
         <div className="space-y-4">
           {GROUPS.map((group) => (
-            <div key={group.id} className="card p-5 space-y-3">
-              <div>
-                <div className="font-semibold">{group.title}</div>
-                <p className="text-xs text-slate-500">{group.hint}</p>
+            <div key={group.id}>
+              {group.id === "buy" && (
+                <div className="space-y-4">
+                  <LineItemsCard
+                    form={form}
+                    setForm={setForm}
+                    options={options}
+                    readOnly={readOnly}
+                    supplierLocked={fieldLocked("supplier")}
+                  />
+                  <div className="card p-5 space-y-3">
+                    <div>
+                      <div className="font-semibold">Material notes</div>
+                      <p className="text-xs text-slate-500">
+                        Excel keeps one material cell. Leave this blank and it is filled from the items above (item 1, item 2, …).
+                      </p>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-4">{renderField("description")}</div>
+                  </div>
+                </div>
+              )}
+              <div className="card p-5 space-y-3">
+                <div>
+                  <div className="font-semibold">{group.title}</div>
+                  <p className="text-xs text-slate-500">{group.hint}</p>
+                </div>
+                <div className="grid md:grid-cols-2 gap-4">{group.keys.map(renderField)}</div>
               </div>
-              <div className="grid md:grid-cols-2 gap-4">{group.keys.map(renderField)}</div>
             </div>
           ))}
           {showDelay && (
@@ -693,7 +735,15 @@ export default function WorkOrderDetail() {
         </div>
       )}
 
-      {tab === "lines" && <LineItemsCard form={form} setForm={setForm} options={options} readOnly={readOnly} />}
+      {tab === "lines" && (
+        <LineItemsCard
+          form={form}
+          setForm={setForm}
+          options={options}
+          readOnly={readOnly}
+          supplierLocked={fieldLocked("supplier")}
+        />
+      )}
 
       {tab === "activity" && !isNew && (
         <div className="space-y-4">
@@ -857,86 +907,94 @@ function emptyLine() {
   return { supplier: "", material: "", qty: "", unit: "", notes: "" };
 }
 
-function LineItemsCard({ form, setForm, options, readOnly }) {
-  const lines = Array.isArray(form.lines) ? form.lines : [];
+function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
+  const lines = Array.isArray(form.lines) && form.lines.length ? form.lines : [emptyLine()];
   const suppliers = options.supplier || [];
+  const locked = readOnly || supplierLocked;
 
   function setLine(index, patch) {
     setForm((f) => {
-      const next = [...(f.lines || [])];
+      const next = Array.isArray(f.lines) && f.lines.length ? [...f.lines] : [emptyLine()];
+      while (next.length <= index) next.push(emptyLine());
       next[index] = { ...emptyLine(), ...next[index], ...patch };
-      return { ...f, lines: next };
+      const extra = {};
+      if (index === 0 && Object.prototype.hasOwnProperty.call(patch, "supplier")) {
+        extra.supplier = patch.supplier;
+      }
+      return { ...f, lines: next, ...extra };
     });
   }
 
-  function addLine(supplier = "") {
-    setForm((f) => ({ ...f, lines: [...(f.lines || []), { ...emptyLine(), supplier }] }));
+  function addLine() {
+    setForm((f) => ({
+      ...f,
+      lines: [...(Array.isArray(f.lines) && f.lines.length ? f.lines : [emptyLine()]), emptyLine()],
+    }));
   }
 
   function removeLine(index) {
-    setForm((f) => ({ ...f, lines: (f.lines || []).filter((_, i) => i !== index) }));
+    setForm((f) => {
+      const current = Array.isArray(f.lines) ? f.lines : [];
+      const next = current.filter((_, i) => i !== index);
+      const extra = {};
+      if (index === 0) extra.supplier = next[0]?.supplier || "";
+      return { ...f, lines: next.length ? next : [emptyLine()], ...extra };
+    });
   }
 
-  const groups = [];
-  lines.forEach((line, index) => {
-    const name = line.supplier || "";
-    const last = groups[groups.length - 1];
-    if (!last || last.supplier !== name) groups.push({ supplier: name, items: [{ line, index }] });
-    else last.items.push({ line, index });
-  });
-
   return (
-    <div className="card p-5 space-y-3">
+    <div className="card p-5 space-y-3" data-tour="wo-lines">
       <div>
-        <div className="font-semibold">Suppliers & materials</div>
+        <div className="font-semibold">Items & suppliers</div>
         <p className="text-xs text-slate-500">
-          Extra suppliers and items on this MR are stored with the record and used for search. The Excel backup still has one supplier cell and one material cell.
+          One row per material. Item 1 can be supplier 1, item 2 a different supplier, and so on. The Excel backup still
+          has one supplier cell (item 1) and one material summary.
         </p>
       </div>
-      {groups.map((group) => (
-        <div key={`${group.supplier}-${group.items[0].index}`} className="rounded-xl border border-slate-200 dark:border-white/10 p-3 space-y-2">
-          {group.items.map(({ line, index }, i) => (
-            <div key={index} className="grid md:grid-cols-12 gap-2 items-end">
-              {i === 0 ? (
-                <div className="md:col-span-4">
-                  <label className="lbl">Supplier</label>
-                  <input
-                    list="wo-supplier-list"
-                    value={line.supplier || ""}
-                    disabled={readOnly}
-                    onChange={(e) => setLine(index, { supplier: e.target.value })}
-                    placeholder="Supplier"
-                  />
-                </div>
-              ) : (
-                <div className="md:col-span-4 text-xs text-slate-400 pb-2 pl-1">same supplier</div>
-              )}
-              <div className="md:col-span-4">
-                {i === 0 && <label className="lbl">Material</label>}
-                <input value={line.material || ""} disabled={readOnly} onChange={(e) => setLine(index, { material: e.target.value })} placeholder="Item" />
-              </div>
-              <div className="md:col-span-1">
-                {i === 0 && <label className="lbl">Qty</label>}
-                <input value={line.qty || ""} disabled={readOnly} onChange={(e) => setLine(index, { qty: e.target.value })} />
-              </div>
-              <div className="md:col-span-2">
-                {i === 0 && <label className="lbl">Unit</label>}
-                <input value={line.unit || ""} disabled={readOnly} onChange={(e) => setLine(index, { unit: e.target.value })} />
-              </div>
-              <div className="md:col-span-1">
-                {!readOnly && (
-                  <button type="button" className="btn-outline !py-1 !px-2 text-xs w-full" onClick={() => removeLine(index)}>
-                    ×
-                  </button>
-                )}
-              </div>
+      {lines.map((line, index) => (
+        <div key={index} className="rounded-xl border border-slate-200 dark:border-white/10 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Item {index + 1}</div>
+            {!readOnly && lines.length > 1 && (
+              <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => removeLine(index)}>
+                Remove
+              </button>
+            )}
+          </div>
+          <div className="grid md:grid-cols-12 gap-2">
+            <div className="md:col-span-5">
+              <label className="lbl">Material</label>
+              <input
+                value={line.material || ""}
+                disabled={readOnly}
+                onChange={(e) => setLine(index, { material: e.target.value })}
+                placeholder={`Item ${index + 1} material`}
+              />
             </div>
-          ))}
-          {!readOnly && (
-            <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => addLine(group.supplier)}>
-              + Add item for this supplier
-            </button>
-          )}
+            <div className="md:col-span-4">
+              <label className="lbl">Supplier</label>
+              <input
+                list="wo-supplier-list"
+                value={line.supplier || ""}
+                disabled={locked}
+                onChange={(e) => setLine(index, { supplier: e.target.value })}
+                placeholder={`Supplier ${index + 1}`}
+              />
+            </div>
+            <div className="md:col-span-1">
+              <label className="lbl">Qty</label>
+              <input value={line.qty || ""} disabled={readOnly} onChange={(e) => setLine(index, { qty: e.target.value })} />
+            </div>
+            <div className="md:col-span-2">
+              <label className="lbl">Unit</label>
+              <input
+                value={line.unit || ""}
+                disabled={readOnly}
+                onChange={(e) => setLine(index, { unit: e.target.value })}
+                placeholder="pcs"
+              />
+            </div>
+          </div>
         </div>
       ))}
       <datalist id="wo-supplier-list">
@@ -944,10 +1002,9 @@ function LineItemsCard({ form, setForm, options, readOnly }) {
           <option key={s} value={s} />
         ))}
       </datalist>
-      {!lines.length && <div className="text-sm text-slate-500">No extra suppliers or items yet.</div>}
       {!readOnly && (
-        <button type="button" className="btn-outline" onClick={() => addLine()}>
-          + Add supplier
+        <button type="button" className="btn-outline" onClick={addLine}>
+          + Add item
         </button>
       )}
     </div>
