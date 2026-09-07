@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -23,7 +23,9 @@ export default function Health() {
   const [backups, setBackups] = useState([]);
   const [healthMap, setHealthMap] = useState({});
   const [rowRestore, setRowRestore] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const uploadRef = useRef(null);
 
   function load() {
     setLoading(true);
@@ -39,6 +41,30 @@ export default function Health() {
   }
 
   useEffect(load, []);
+
+  async function uploadBackup(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const d = await api.upload("/api/settings/backups/upload", fd);
+      if (d.health) setHealthMap((prev) => ({ ...prev, [d.path]: d.health }));
+      toast(
+        d.health && !d.health.ok
+          ? `Saved as backup, but health check failed (${d.health.error || "row count mismatch"})`
+          : `Backup uploaded · ${d.name}`,
+        d.health && !d.health.ok ? "error" : "success"
+      );
+      api.get("/api/settings/backups").then((x) => setBackups(x.items || [])).catch(() => {});
+    } catch (err) {
+      toast(err.message || "Upload failed", "error");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   const c = data?.counts || {};
   const issues = data?.issues || {};
@@ -166,11 +192,23 @@ export default function Health() {
           <div className="px-4 py-3 border-b border-slate-100 dark:border-white/5 flex items-center justify-between gap-3">
             <div>
               <div className="font-semibold">Backup restore</div>
-              <div className="text-xs text-slate-500 mt-0.5">Verify row counts against live Excel, then restore the whole file or one row. Current workbook is copied aside first.</div>
+              <div className="text-xs text-slate-500 mt-0.5">Upload an older workbook into the backup folder without replacing live Excel. Then check, restore the file, or restore one row. Current workbook is copied aside first on restore.</div>
             </div>
-            <button className="btn-outline text-xs" onClick={() => nav("/settings")}>
-              Backup settings
-            </button>
+            <div className="flex gap-2">
+              <input
+                ref={uploadRef}
+                type="file"
+                accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="hidden"
+                onChange={uploadBackup}
+              />
+              <button className="btn-outline text-xs" type="button" onClick={() => uploadRef.current?.click()} disabled={uploading}>
+                {uploading ? "Uploading…" : "Upload backup"}
+              </button>
+              <button className="btn-outline text-xs" onClick={() => nav("/settings")}>
+                Backup settings
+              </button>
+            </div>
           </div>
           <table className="data">
             <thead>

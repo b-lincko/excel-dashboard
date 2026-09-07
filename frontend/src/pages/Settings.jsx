@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { CalendarClock, FolderOpen, HardDrive } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CalendarClock, FolderOpen, HardDrive, Upload } from "lucide-react";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
@@ -266,6 +266,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
   const [newFolder, setNewFolder] = useState("");
   const [rowRestore, setRowRestore] = useState(null);
   const [healthMap, setHealthMap] = useState({});
+  const uploadRef = useRef(null);
   const days = cfg.backup_days?.length ? cfg.backup_days : [0, 1, 2, 3, 4, 5, 6];
 
   async function openBrowse(path) {
@@ -317,6 +318,30 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
     }
   }
 
+  async function uploadBackup(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const d = await api.upload("/api/settings/backups/upload", fd);
+      if (d.health) setHealthMap((prev) => ({ ...prev, [d.path]: d.health }));
+      onReload();
+      toast(
+        d.health && !d.health.ok
+          ? `Saved as backup, but health check failed (${d.health.error || "row count mismatch"})`
+          : `Backup uploaded · ${d.name}`,
+        d.health && !d.health.ok ? "error" : "success"
+      );
+    } catch (err) {
+      toast(err.message || "Upload failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="card overflow-hidden">
       <div className="px-5 py-4 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3">
@@ -325,7 +350,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
             <HardDrive size={16} /> Backup system
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Copies of <span className="font-mono">file.xlsx</span> go to the folder you choose. Autobackup runs while the app is open.
+            Copies of <span className="font-mono">file.xlsx</span> go to the folder you choose. Upload an older workbook into that folder without replacing live Excel. Autobackup runs while the app is open.
           </p>
         </div>
         <label className="inline-flex items-center gap-2 text-sm font-medium">
@@ -424,6 +449,16 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
             </span>
           )}
           <span className="ml-auto flex gap-2">
+            <input
+              ref={uploadRef}
+              type="file"
+              accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={uploadBackup}
+            />
+            <button className="btn-outline !py-1 !px-2 text-xs" type="button" onClick={() => uploadRef.current?.click()} disabled={busy}>
+              <Upload size={12} /> Upload backup
+            </button>
             <button className="btn-outline !py-1 !px-2 text-xs" onClick={backupNow} disabled={busy}>
               {busy ? "Working…" : "Backup now"}
             </button>

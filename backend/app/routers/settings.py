@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
+from .. import database
 from ..backup import ensure_folder, list_folders, run_due_backup, schedule_status
 from ..config import AppConfig, load_config, save_config
 from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
@@ -151,6 +152,30 @@ def create_backup(user=Depends(require_permission("backup"))):
         "health": health,
         "items": excel_service.list_backups(),
         "schedule": schedule_status(cfg),
+    }
+
+
+@router.post("/backups/upload")
+async def upload_backup(file: UploadFile = File(...), user=Depends(require_permission("backup"))):
+    name = (file.filename or "backup.xlsx").lower()
+    if not name.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Please upload an Excel file (.xlsx or .xlsm).")
+    content = await file.read()
+    try:
+        stored = excel_service.store_uploaded_backup(content, filename=file.filename or name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}") from exc
+    database.add_audit(
+        user["username"],
+        "backup_upload",
+        details=f"Uploaded backup {stored.get('name')} ({stored.get('size') or 0} bytes)",
+    )
+    return {
+        **stored,
+        "items": excel_service.list_backups(),
+        "schedule": schedule_status(),
     }
 
 

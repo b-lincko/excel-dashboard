@@ -153,4 +153,19 @@ def test_claim_digest_timeline_mapping_similar_cards_backup(workbook):
     assert health["ok"] is True
     assert health["backup_count"] == health["live_count"] or health["backup_count"] >= 1
 
+    live_bytes = dest.read_bytes()
+    uploaded = client.post(
+        "/api/settings/backups/upload",
+        headers=headers,
+        files={"file": ("old-copy.xlsx", live_bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    stored = uploaded.json()
+    assert stored.get("path")
+    assert "upload" in (stored.get("name") or "")
+    listed = client.get("/api/settings/backups", headers=headers)
+    assert listed.status_code == 200
+    assert any(i.get("path") == stored["path"] for i in listed.json()["items"])
+    assert dest.read_bytes() == live_bytes
+
     _ = dest, svc

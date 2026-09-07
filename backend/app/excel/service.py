@@ -427,12 +427,63 @@ class ExcelService:
         database.set_sync_meta("last_backup", str(dest))
         return dest
 
+    def store_uploaded_backup(self, content: bytes, filename: str = "backup.xlsx") -> dict[str, Any]:
+        """Save an uploaded workbook into the backup folder. Does not replace live Excel."""
+        if not content or len(content) < 100:
+            raise ValueError("The uploaded file is empty or too small to be an Excel workbook.")
+        raw_name = Path(filename or "backup.xlsx").name
+        lower = raw_name.lower()
+        if lower.endswith(".xlsm"):
+            ext = ".xlsm"
+        elif lower.endswith(".xlsx"):
+            ext = ".xlsx"
+        else:
+            raise ValueError("Please upload an Excel file (.xlsx or .xlsm).")
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(raw_name).stem).strip("._") or "backup"
+        stem = stem[:60]
+        day = datetime.now().strftime("%Y-%m-%d")
+        ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        dest_dir = self.backup_dir() / day
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{stem}_{ts}_upload{ext}"
+        tmp = _temp_xlsx(dest_dir)
+        try:
+            tmp.write_bytes(content)
+            self._validate_saved(tmp)
+            os.replace(tmp, dest)
+        except Exception:
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+            raise
+        database.set_sync_meta("last_backup", str(dest))
+        health = None
+        try:
+            health = self.check_backup(str(dest))
+        except Exception as exc:
+            health = {"ok": False, "error": str(exc), "path": str(dest)}
+        return {
+            "path": str(dest),
+            "name": dest.name,
+            "size": dest.stat().st_size,
+            "reason": "upload",
+            "health": health,
+        }
+
     def list_backups(self, limit: int = 50) -> list[dict[str, Any]]:
         items = []
         root = self.backup_dir()
         if not root.exists():
             return items
-        for p in sorted(root.rglob("*.xlsx"), key=lambda x: x.stat().st_mtime, reverse=True):
+        files: list[Path] = []
+        for pattern in ("*.xlsx", "*.xlsm"):
+            files.extend(root.rglob(pattern))
+        files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        seen: set[str] = set()
+        for p in files:
+            key = str(p)
+            if key in seen:
+                continue
+            seen.add(key)
             reason = p.stem.rsplit("_", 1)[-1] if "_" in p.stem else ""
             items.append(
                 {
