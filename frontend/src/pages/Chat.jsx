@@ -4,6 +4,13 @@ import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 
+function mergeMessages(prev, incoming) {
+  if (!incoming?.length) return prev;
+  const seen = new Set(prev.map((m) => m.id));
+  const extra = incoming.filter((m) => m?.id != null && !seen.has(m.id));
+  return extra.length ? [...prev, ...extra] : prev;
+}
+
 export default function Chat() {
   const { user } = useAuth();
   const { toast } = useUi();
@@ -25,18 +32,19 @@ export default function Chat() {
     });
   }
 
+  const threadWanted = Number(params.get("thread") || 0);
+
   useEffect(() => {
     loadThreads()
       .then((d) => {
-        const want = Number(params.get("thread") || 0);
-        if (want) {
-          const hit = (d?.items || []).find((t) => Number(t.id) === want);
+        if (threadWanted) {
+          const hit = (d?.items || []).find((t) => Number(t.id) === threadWanted);
           if (hit) setActive(hit);
         }
       })
       .catch((e) => toast(e.message, "error"));
     api.get("/api/chat/people").then((d) => setPeople(d.items || [])).catch(() => {});
-  }, []);
+  }, [threadWanted]);
 
   useEffect(() => {
     if (!active) return;
@@ -52,7 +60,7 @@ export default function Chat() {
       api
         .get(`/api/chat/threads/${active.id}/messages?after=${lastId}`)
         .then((d) => {
-          if (d.items?.length) setMessages((prev) => [...prev, ...d.items]);
+          if (d.items?.length) setMessages((prev) => mergeMessages(prev, d.items));
         })
         .catch(() => {});
       loadThreads().catch(() => {});
@@ -71,7 +79,7 @@ export default function Chat() {
     setBusy(true);
     try {
       const d = await api.post(`/api/chat/threads/${active.id}/messages`, { body: text });
-      setMessages((prev) => [...prev, d.item]);
+      setMessages((prev) => mergeMessages(prev, d.item ? [d.item] : []));
       setBody("");
       loadThreads();
     } catch (err) {

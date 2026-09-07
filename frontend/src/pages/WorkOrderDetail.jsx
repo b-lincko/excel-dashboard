@@ -235,8 +235,24 @@ export default function WorkOrderDetail() {
           "is_status_open",
           "is_placed",
           "is_overdue",
+          "is_delayed",
           "is_pending",
           "is_in_progress",
+          "is_ntp",
+          "is_on_hold",
+          "is_delivered",
+          "is_pending_po",
+          "is_awaiting_po",
+          "is_need_rfq",
+          "is_rfq_sent",
+          "is_po_issued",
+          "is_eta_late",
+          "is_due_this_week",
+          "is_due_soon",
+          "days_until_due",
+          "days_to_eta",
+          "on_time",
+          "po_stage",
           "aging_days",
           "closing_days",
           "days_overdue",
@@ -400,7 +416,7 @@ export default function WorkOrderDetail() {
           )}
           {canSave && (
             <button className="btn-primary" onClick={() => save(false)} disabled={busy || (!isNew && !dirty)}>
-              {busy ? "Saving…" : isNew ? "Create in Excel" : "Save to Excel"}
+              {busy ? "Saving…" : isNew ? "Create order" : "Save to Excel"}
             </button>
           )}
         </div>

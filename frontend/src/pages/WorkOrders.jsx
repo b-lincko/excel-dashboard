@@ -455,6 +455,17 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
           <table className="data">
             <thead>
               <tr>
+                {can("edit") && (
+                  <th className="w-8">
+                    <input
+                      type="checkbox"
+                      className="w-auto"
+                      checked={allPageSelected}
+                      onChange={(e) => togglePage(e.target.checked)}
+                      aria-label="Select all on this page"
+                    />
+                  </th>
+                )}
                 {cols.map(([k, l]) => (
                   <th key={k} onClick={() => toggleSort(k)} className="cursor-pointer select-none">
                     {l}
@@ -469,6 +480,18 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
                   key={r.record_id || `${r._sheet}:${r._row}` || r.work_order_id}
                   onClick={() => nav(`/work-orders/${encodeURIComponent(r.record_id || r.work_order_id)}`)}
                 >
+                  {can("edit") && (
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="w-auto"
+                        checked={!!r.record_id && selected.has(r.record_id)}
+                        disabled={!r.record_id}
+                        onChange={(e) => toggleRow(r.record_id, e.target.checked)}
+                        aria-label={`Select ${r.work_order_id || r.record_id}`}
+                      />
+                    </td>
+                  )}
                   {cols.map(([k]) => (
                     <td key={k} className={k === "description" || k === "remarks" ? "max-w-[280px] truncate" : ""}>
                       {k === "status" || k === "priority" ? (
@@ -488,7 +511,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
               ))}
               {!loading && !rows.length && (
                 <tr>
-                  <td colSpan={cols.length} className="text-center text-slate-400 py-10">
+                  <td colSpan={cols.length + (can("edit") ? 1 : 0)} className="text-center text-slate-400 py-10">
                     No work orders match the current filters.
                   </td>
                 </tr>

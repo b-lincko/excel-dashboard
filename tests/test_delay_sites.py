@@ -47,6 +47,31 @@ def test_delay_excludes_close_placed_estimation_inspection():
         assert matches_filters({**past, "status": status}, {"flag": "overdue"}, cfg) is False
 
 
+def test_resolve_data_sheet_rejects_missing_office_tab():
+    from app.excel.service import resolve_data_sheet
+
+    labels = {
+        "Linkco_MR_Log (SH5 & SH1)": "SH5-SH1",
+        "Linkco_MR_Log (F5)": "F5",
+        "Linkco_MR_Log (Office)": "Office",
+        "Linkco_MR_Log (Accommodations)": "Accommodations",
+    }
+    available = ["Linkco_MR_Log (SH5 & SH1)", "Linkco_MR_Log (F5)"]
+    assert resolve_data_sheet("SH5-SH1", available, labels) == "Linkco_MR_Log (SH5 & SH1)"
+    assert resolve_data_sheet("F5", available, labels) == "Linkco_MR_Log (F5)"
+    assert resolve_data_sheet("", available, labels) == available[0]
+    try:
+        resolve_data_sheet("Office", available, labels)
+        raise AssertionError("Office without a sheet should fail")
+    except ValueError as exc:
+        assert "Office" in str(exc)
+    try:
+        resolve_data_sheet("Accommodations", available, labels)
+        raise AssertionError("Accommodations without a sheet should fail")
+    except ValueError as exc:
+        assert "Accommodations" in str(exc)
+
+
 def test_message_notifications_for_chat():
     from app import database, notify
 

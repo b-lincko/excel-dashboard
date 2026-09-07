@@ -34,6 +34,27 @@ DUE_OFFSETS = {
 DELAY_FIELDS = ("delay_kind", "delay_source", "delay_justification")
 
 
+def resolve_data_sheet(site: str, available: list[str], labels: Optional[dict[str, str]] = None) -> str:
+    """Map a site label to an existing worksheet. Never silently write to another site."""
+    site = str(site or "").strip()
+    labels = labels or {}
+    mapped = None
+    for sn, lab in labels.items():
+        if site in {sn, str(lab)}:
+            mapped = sn
+            break
+    if mapped and mapped in available:
+        return mapped
+    if site in available:
+        return site
+    if site:
+        shown = ", ".join(available) or "none"
+        raise ValueError(f'There is no Excel sheet for site "{site}". Available: {shown}.')
+    if not available:
+        raise ValueError("The workbook has no data sheets.")
+    return available[0]
+
+
 def _temp_xlsx(directory: Path) -> Path:
     fd, name = tempfile.mkstemp(suffix=".xlsx", dir=directory)
     os.close(fd)
@@ -1201,14 +1222,7 @@ class ExcelService:
             wb = self._load_workbook()
             try:
                 site = str(data.get("department") or data.get("_site") or data.get("_sheet") or "")
-                sheet_name = None
-                labels = self.cfg().worksheet_labels
-                for sn, lab in labels.items():
-                    if site in {sn, lab}:
-                        sheet_name = sn
-                        break
-                if not sheet_name:
-                    sheet_name = self.data_sheets(wb)[0]
+                sheet_name = resolve_data_sheet(site, self.data_sheets(wb), self.cfg().worksheet_labels)
                 ws = wb[sheet_name]
                 headers, sheet_recs = self._read_sheet_records(ws, sheet_name)
                 all_records = list(sheet_recs)
@@ -1367,13 +1381,7 @@ class ExcelService:
                             self._write_record_to_sheet(ws, target, headers, int(target["_row"]))
                             updated += 1
                             continue
-                        sheet_name = None
-                        for sn, lab in labels.items():
-                            if site in {sn, lab}:
-                                sheet_name = sn
-                                break
-                        if not sheet_name:
-                            sheet_name = self.data_sheets(wb)[0]
+                        sheet_name = resolve_data_sheet(site, list(sheet_headers.keys()) or self.data_sheets(wb), labels)
                         ws = wb[sheet_name]
                         headers = self._ensure_mapped_headers(ws, sheet_headers.get(sheet_name) or [])
                         sheet_headers[sheet_name] = headers

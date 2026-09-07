@@ -45,6 +45,7 @@ import {
   KPI_METRICS,
   MINDMAP_BRANCHES,
   buildMindmap,
+  chartRows,
   datasetById,
   metricValue,
 } from "../lib/widgets.js";
@@ -195,7 +196,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
         );
       case "kpi": {
         const meta = KPI_METRICS.find((m) => m.id === w.metric) || KPI_METRICS[0];
-        let value = k[meta.id];
+        let value = metricValue(data, meta.id);
         if (meta.suffix && value != null) value = `${value}${meta.suffix}`;
         return (
           <KPICard
@@ -333,6 +334,47 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
         return <GroupTable title="Priority" rows={data?.priorities} onRow={(r) => go({ priority: r.name })} columns={["Priority", "Total", "Open", "Closed", "Overdue"]} showRate={false} />;
       case "table_types":
         return <GroupTable title="Purchase type" rows={data?.work_types} onRow={(r) => go({ work_type: r.name })} columns={["Type", "Total", "Open", "Closed", "Overdue", "%"]} />;
+      case "chart_custom":
+        return <CustomChart widget={w} data={data} go={go} />;
+      case "table_custom": {
+        const ds = datasetById(w.dataset);
+        const rows = chartRows(data, w.dataset) || [];
+        if (ds.kind === "group") {
+          return (
+            <GroupTable
+              title={ds.label}
+              rows={rows}
+              onRow={(r) => ds.filterKey && go({ [ds.filterKey]: r.name })}
+              columns={[ds.label, "Total", "Open", "Closed", "Overdue", "%"]}
+            />
+          );
+        }
+        return (
+          <div className="card overflow-hidden h-full">
+            <div className="px-4 py-3 font-semibold border-b border-slate-100 dark:border-white/5">{ds.label}</div>
+            <div className="table-wrap max-h-[280px]">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={r.id || r.name || i}>
+                      <td className="font-medium">{r.name || r.label || r.id || "—"}</td>
+                      <td>{r.value ?? r.total ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      }
+      case "mindmap_custom":
+        return <MindMap data={buildMindmap(data, w.branches)} />;
       case "table_recent":
         return (
           <div className="card overflow-hidden">
