@@ -729,6 +729,55 @@ def reset_database() -> dict[str, Any]:
         return {"ok": False, "errors": errors}
 
 
+def snapshot_to(dest: Path) -> Path:
+    """Copy the live SQLite file with the backup API (safe while connections are open)."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    if tmp.exists():
+        tmp.unlink()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    src = sqlite3.connect(str(DB_PATH), timeout=15)
+    dst = sqlite3.connect(str(tmp), timeout=15)
+    try:
+        src.backup(dst)
+        dst.commit()
+    finally:
+        dst.close()
+        src.close()
+    tmp.replace(dest)
+    return dest
+
+
+def restore_from(src: Path) -> None:
+    """Replace live SQLite contents from a snapshot without deleting the open file."""
+    src = Path(src)
+    if not src.is_file():
+        raise FileNotFoundError("Database snapshot not found")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    incoming = sqlite3.connect(str(src), timeout=15)
+    live = sqlite3.connect(str(DB_PATH), timeout=15)
+    try:
+        incoming.backup(live)
+        live.commit()
+    finally:
+        live.close()
+        incoming.close()
+    init_db()
+
+
+def snapshot_wo_count(path: Path) -> int:
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError("Database snapshot not found")
+    conn = sqlite3.connect(str(path), timeout=5)
+    try:
+        row = conn.execute("SELECT COUNT(*) AS c FROM wo_cache").fetchone()
+        return int(row["c"] if isinstance(row, sqlite3.Row) else (row[0] if row else 0))
+    finally:
+        conn.close()
+
+
 def add_attachment(
     record_id: str,
     filename: str,

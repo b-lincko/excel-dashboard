@@ -85,6 +85,15 @@ export const TOUR_STEPS = [
     body: "Overdue, UNDER NTP, on hold, due soon and missed ETAs. Claim a row to put your name on Assign to. Follow an MR to get notified on changes.",
   },
   {
+    id: "backup",
+    path: "/settings",
+    target: "backup",
+    page: "settings",
+    need: "backup",
+    title: "Snapshots, not every save",
+    body: "Backup now and autobackup copy SQLite plus Excel. Restore rolls both back when a .db pair exists. Excel-only copies do not change live history.",
+  },
+  {
     id: "done",
     path: "/guide",
     title: "You’re ready",

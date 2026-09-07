@@ -133,8 +133,6 @@ def run_due_backup(force: bool = False) -> Optional[Path]:
     cfg = load_config()
     if not force and not is_due(datetime.now(), cfg, database.get_sync_meta("last_auto_backup")):
         return None
-    if not excel_service.available():
-        return None
     with _run_lock:
         if not force and not is_due(datetime.now(), cfg, database.get_sync_meta("last_auto_backup")):
             return None

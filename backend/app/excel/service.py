@@ -531,17 +531,30 @@ class ExcelService:
     def lists(self) -> dict[str, list[str]]:
         return {}
 
+    SNAPSHOT_REASONS = ("auto", "manual", "pre_restore")
+
     def create_backup(self, reason: str = "write") -> Optional[Path]:
         src = self.excel_path()
-        if not src.exists():
-            return None
         day = datetime.now().strftime("%Y-%m-%d")
         ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         dest_dir = self.backup_dir() / day
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / f"{src.stem}_{ts}_{reason}{src.suffix}"
-        shutil.copy2(src, dest)
-        database.set_sync_meta("last_backup", str(dest))
+        dest: Optional[Path] = None
+        stem = src.stem if src.exists() else "woms"
+        if src.exists():
+            dest = dest_dir / f"{stem}_{ts}_{reason}{src.suffix}"
+            shutil.copy2(src, dest)
+            database.set_sync_meta("last_backup", str(dest))
+        if reason in self.SNAPSHOT_REASONS:
+            db_dest = dest_dir / f"{stem}_{ts}_{reason}.db"
+            try:
+                database.snapshot_to(db_dest)
+                if dest is None:
+                    dest = db_dest
+                    database.set_sync_meta("last_backup", str(dest))
+            except Exception:
+                if db_dest.exists():
+                    db_dest.unlink(missing_ok=True)
         return dest
 
     def store_uploaded_backup(self, content: bytes, filename: str = "backup.xlsx") -> dict[str, Any]:
@@ -596,12 +609,20 @@ class ExcelService:
             files.extend(root.rglob(pattern))
         files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         seen: set[str] = set()
+        paired_db: set[str] = set()
         for p in files:
             key = str(p)
             if key in seen:
                 continue
             seen.add(key)
             reason = p.stem.rsplit("_", 1)[-1] if "_" in p.stem else ""
+            db_pair = p.with_suffix(".db")
+            has_db = db_pair.is_file()
+            if has_db:
+                try:
+                    paired_db.add(str(db_pair.resolve()))
+                except OSError:
+                    paired_db.add(str(db_pair))
             items.append(
                 {
                     "path": str(p),
@@ -610,10 +631,39 @@ class ExcelService:
                     "modified": datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
                     "reason": reason,
                     "folder": str(p.parent),
+                    "has_db": has_db,
+                    "db_path": str(db_pair) if has_db else None,
+                    "db_size": db_pair.stat().st_size if has_db else 0,
                 }
             )
             if len(items) >= limit:
                 break
+        if len(items) < limit:
+            db_files = [p for p in root.rglob("*.db") if p.is_file() and not p.name.endswith(".tmp")]
+            db_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            for p in db_files:
+                try:
+                    resolved = str(p.resolve())
+                except OSError:
+                    resolved = str(p)
+                if resolved in paired_db:
+                    continue
+                reason = p.stem.rsplit("_", 1)[-1] if "_" in p.stem else ""
+                items.append(
+                    {
+                        "path": str(p),
+                        "name": p.name,
+                        "size": p.stat().st_size,
+                        "modified": datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                        "reason": reason,
+                        "folder": str(p.parent),
+                        "has_db": True,
+                        "db_path": str(p),
+                        "db_size": p.stat().st_size,
+                    }
+                )
+                if len(items) >= limit:
+                    break
         return items
 
     def prune_backups(self, keep: int, reasons: tuple[str, ...] = ("auto", "manual")) -> int:
@@ -634,7 +684,10 @@ class ExcelService:
         for p in matched[keep_n:]:
             parent = p.parent
             try:
+                sibling = p.with_suffix(".db")
                 p.unlink()
+                if sibling.is_file():
+                    sibling.unlink()
                 removed += 1
                 if parent != root and parent.is_dir() and not any(parent.iterdir()):
                     parent.rmdir()
@@ -642,19 +695,28 @@ class ExcelService:
                 continue
         return removed
 
-    def restore_backup(self, backup_path: str) -> None:
-        src = Path(backup_path).expanduser().resolve()
-        root = self.backup_dir().resolve()
-        try:
-            inside = src.is_relative_to(root)
-        except AttributeError:
-            inside = str(src).startswith(str(root))
-        if not inside or not src.is_file():
-            raise FileNotFoundError("Backup file not found")
+    def restore_backup(self, backup_path: str) -> dict[str, Any]:
+        src = self._resolve_backup(backup_path)
         self.create_backup(reason="pre_restore")
-        with self._file_lock():
-            shutil.copy2(src, self.excel_path())
+        restored_excel = False
+        restored_db = False
+        suffix = src.suffix.lower()
+        if suffix in {".xlsx", ".xlsm"}:
+            dest = self.excel_path()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with self._file_lock():
+                shutil.copy2(src, dest)
+            restored_excel = True
+            db_src = src.with_suffix(".db")
+        elif suffix == ".db":
+            db_src = src
+        else:
+            raise ValueError("Backup must be an Excel workbook or a .db snapshot")
+        if db_src.is_file():
+            database.restore_from(db_src)
+            restored_db = True
         self.invalidate()
+        return {"excel": restored_excel, "database": restored_db, "path": str(src)}
 
     def _resolve_backup(self, backup_path: str) -> Path:
         src = Path(backup_path).expanduser().resolve()
@@ -976,24 +1038,40 @@ class ExcelService:
         src = self._resolve_backup(backup_path)
         err = None
         backup_count: Optional[int] = None
-        try:
-            recs = self.records_from_path(src)
-            backup_count = len(recs)
-        except Exception as exc:
-            err = str(exc)
+        suffix = src.suffix.lower()
+        if suffix in {".xlsx", ".xlsm"}:
+            try:
+                recs = self.records_from_path(src)
+                backup_count = len(recs)
+            except Exception as exc:
+                err = str(exc)
+        db_src = src if suffix == ".db" else src.with_suffix(".db")
+        has_db = db_src.is_file()
+        db_count: Optional[int] = None
+        if has_db:
+            try:
+                db_count = database.snapshot_wo_count(db_src)
+            except Exception as exc:
+                if err is None:
+                    err = str(exc)
+        if suffix == ".db":
+            backup_count = db_count
         try:
             live_count = len(self.get_all())
         except Exception:
             live_count = database.wo_cache_count()
-        healthy = err is None and backup_count is not None and backup_count > 0
+        compare = db_count if has_db and db_count is not None else backup_count
+        healthy = err is None and compare is not None and compare > 0
         if healthy and live_count:
-            healthy = backup_count >= max(1, int(live_count * 0.5))
+            healthy = compare >= max(1, int(live_count * 0.5))
         return {
             "path": str(src),
             "name": src.name,
             "backup_count": backup_count,
             "live_count": live_count,
-            "delta": None if backup_count is None else backup_count - int(live_count or 0),
+            "db_count": db_count,
+            "has_db": has_db,
+            "delta": None if compare is None else compare - int(live_count or 0),
             "ok": bool(healthy),
             "error": err,
         }

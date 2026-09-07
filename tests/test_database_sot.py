@@ -105,3 +105,46 @@ def test_seed_and_reset_confirm(workbook):
     )
     assert uploaded.status_code == 200, uploaded.text
     assert uploaded.json()["ok"] is True
+
+
+def test_manual_backup_pairs_database(workbook):
+    _, svc = workbook
+    recs = svc.get_all(force=True)
+    rid = recs[0]["record_id"]
+    original = str(recs[0].get("remarks") or "")
+    path = svc.create_backup(reason="manual")
+    assert path is not None and path.suffix.lower() == ".xlsx"
+    dbp = path.with_suffix(".db")
+    assert dbp.is_file()
+    items = svc.list_backups()
+    hit = next(i for i in items if i["path"] == str(path))
+    assert hit["has_db"] is True
+    patched = dict(database.get_wo_record(rid))
+    patched["remarks"] = "after-snapshot-marker"
+    database.upsert_wo_record(patched)
+    write_only = svc.create_backup(reason="update")
+    assert write_only is not None
+    assert not write_only.with_suffix(".db").exists()
+    result = svc.restore_backup(str(path))
+    assert result["database"] is True
+    assert result["excel"] is True
+    stored = database.get_wo_record(rid)
+    assert stored["remarks"] != "after-snapshot-marker"
+    assert stored["remarks"] == original
+
+
+def test_excel_only_restore_does_not_seed_db(workbook):
+    _, svc = workbook
+    recs = svc.get_all(force=True)
+    rid = recs[0]["record_id"]
+    path = svc.create_backup(reason="update")
+    assert path is not None
+    assert not path.with_suffix(".db").exists()
+    patched = dict(database.get_wo_record(rid))
+    patched["remarks"] = "live-db-must-stay"
+    database.upsert_wo_record(patched)
+    result = svc.restore_backup(str(path))
+    assert result["excel"] is True
+    assert result["database"] is False
+    stored = database.get_wo_record(rid)
+    assert stored["remarks"] == "live-db-must-stay"

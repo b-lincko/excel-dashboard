@@ -89,12 +89,12 @@ class RestoreRequest(BaseModel):
 @router.post("/backups/restore")
 def restore_backup(body: RestoreRequest, user=Depends(require_permission("backup"))):
     try:
-        excel_service.restore_backup(body.path)
+        result = excel_service.restore_backup(body.path)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Backup not found")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    return {"restored": True, "sync": excel_service.status()}
+    return {"restored": True, **result, "sync": excel_service.status()}
 
 
 @router.post("/backups/preview-row")

@@ -91,10 +91,21 @@ export default function Guide() {
           <Item k="Morning digest" v="Overdue / NTP / due soon by site then assignee." />
           <Item k="Suppliers / PO" v="RFQ → PO → ETA board and on-time rate." />
           <Item k="Materials" v="Who supplied an item before, plus aliases." />
-          {can("settings") && <Item k="Settings" v="Seed, upload Excel, reset DB. Column mapping stays." />}
+          {can("settings") && <Item k="Settings" v="Seed, upload Excel, reset DB. Backup now snapshots SQLite + Excel." />}
           {can("users") && <Item k="Users" v="Roles live in the app, not in Excel." />}
         </dl>
       </div>
+
+      {can("backup") && (
+        <div className="card p-5 space-y-2">
+          <div className="font-semibold">Snapshots</div>
+          <p className="text-sm text-slate-500">
+            Backup now and autobackup copy the SQLite history together with file.xlsx. Restoring a paired snapshot rolls
+            both back. Older Excel-only copies replace the replica only — they do not overwrite live records unless you
+            Seed from Excel afterwards.
+          </p>
+        </div>
+      )}
 
       <div className="card p-5 space-y-3">
         <div className="flex items-center gap-2 font-semibold">

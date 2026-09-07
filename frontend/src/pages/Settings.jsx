@@ -65,16 +65,22 @@ export default function Settings() {
   }
 
   async function restore(b) {
+    const full = !!b.has_db;
     const ok = await ask({
-      title: "Restore this backup?",
-      body: `${b.name}\nThe current workbook will be copied aside first.`,
-      confirmLabel: "Restore",
+      title: full ? "Restore this snapshot?" : "Restore Excel replica only?",
+      body: full
+        ? `${b.name}\nThis rolls back live work-order history (database) and the Excel replica. A pre-restore snapshot is taken first.`
+        : `${b.name}\nThis replaces file.xlsx only. Live records in the database are not changed. Seed from Excel afterwards if you want those rows.`,
+      confirmLabel: full ? "Restore snapshot" : "Restore Excel",
       danger: true,
     });
     if (!ok) return;
-    await api.post("/api/settings/backups/restore", { path: b.path });
+    const d = await api.post("/api/settings/backups/restore", { path: b.path });
     load();
-    toast("Backup restored", "success");
+    toast(
+      d.database ? "Snapshot restored (database + Excel)" : "Excel replica restored. Database was not changed.",
+      "success"
+    );
     window.dispatchEvent(new CustomEvent("woms:data"));
   }
 
@@ -389,7 +395,7 @@ function DatabasePanel({ toast, ask, onReload }) {
     <div className="card p-5 space-y-3">
       <div className="font-semibold">Work-order database</div>
       <p className="text-xs text-slate-500">
-        SQLite is the live material-request history. Saving a work order writes the database first, then copies that row into file.xlsx as a backup. A hard refresh does not pull Excel over the database.
+        SQLite is the live material-request history. Saving a work order writes the database first, then copies that row into file.xlsx as a backup. Backup now and autobackup snapshot the whole SQLite file plus Excel. A hard refresh does not pull Excel over the database.
       </p>
       <div className="text-xs text-slate-500">
         {info ? (
@@ -469,7 +475,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
     try {
       await api.post("/api/settings/backups");
       onReload();
-      toast("Backup created", "success");
+      toast("Snapshot created (database + Excel)", "success");
     } catch (e) {
       toast(e.message || "Backup failed", "error");
     } finally {
@@ -515,14 +521,14 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
   }
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card overflow-hidden" data-tour="backup">
       <div className="px-5 py-4 border-b border-slate-100 dark:border-white/5 flex items-start justify-between gap-3">
         <div>
           <div className="font-semibold flex items-center gap-2">
             <HardDrive size={16} /> Backup system
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Copies of <span className="font-mono">file.xlsx</span> go to the folder you choose. Upload an older workbook into that folder without replacing live Excel. Autobackup runs while the app is open.
+            Backup now and autobackup snapshot SQLite plus <span className="font-mono">file.xlsx</span>. Per-save copies (update/create/delete) stay Excel-only. Restore uses the paired .db when present; Excel-only copies do not overwrite live history.
           </p>
         </div>
         <label className="inline-flex items-center gap-2 text-sm font-medium">
@@ -646,6 +652,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
           <tr>
             <th>File</th>
             <th>Kind</th>
+            <th>DB</th>
             <th>Modified</th>
             <th>Size</th>
             <th>Health</th>
@@ -659,6 +666,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
               <tr key={b.path} className="!cursor-default">
                 <td className="font-mono text-xs">{b.name}</td>
                 <td className="uppercase text-[11px] text-slate-500">{b.reason || "—"}</td>
+                <td className="text-xs">{b.has_db ? "Yes" : "Excel only"}</td>
                 <td>{b.modified}</td>
                 <td>{Math.round(b.size / 1024)} KB</td>
                 <td className={`text-xs ${h && !h.ok ? "text-rose-600" : ""}`}>
@@ -681,7 +689,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
                       Check
                     </button>
                     <button className="btn-outline !py-1 !px-2 text-xs" onClick={() => onRestore(b)}>
-                      Restore file
+                      {b.has_db ? "Restore" : "Restore Excel"}
                     </button>
                     <button
                       className="btn-outline !py-1 !px-2 text-xs"
@@ -696,7 +704,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
           })}
           {!backups.length && (
             <tr className="!cursor-default">
-              <td colSpan={6} className="text-center text-slate-400 py-8">
+              <td colSpan={7} className="text-center text-slate-400 py-8">
                 No backups yet.
               </td>
             </tr>
