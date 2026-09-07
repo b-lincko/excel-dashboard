@@ -45,13 +45,13 @@ export default function ImportData() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Import / transfer</h1>
         <p className="text-sm text-slate-500">
-          Excel remains the source of truth. CSV and Excel files are mapped onto existing columns and matched by work-order id (no duplicates). PDFs are attached to a matching WO or imported as a new remark.
+          CSV and Excel files are mapped onto existing columns and matched by work-order id (no duplicates). Imported rows update the database, then the Excel backup. PDFs are attached to a matching WO or imported as a new remark.
         </p>
       </div>
       {error && <div className="rounded-xl bg-rose-50 text-rose-800 px-4 py-3 text-sm">{error}</div>}
       <div className="card p-5 space-y-3">
         <div className="font-semibold">Export current data</div>
-        <p className="text-sm text-slate-500">Download a CSV of every mapped field from the live workbook (also cached in SQLite for faster reads).</p>
+        <p className="text-sm text-slate-500">Download a CSV of every mapped field from live records.</p>
         <button className="btn-outline" type="button" onClick={exportCsv}>
           Download CSV
         </button>

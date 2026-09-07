@@ -43,7 +43,7 @@ export default function Alerts() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">SLA / due-date alerts</h1>
         <p className="text-sm text-slate-500">
-          Open MRs due today through {data?.window_days ?? 3} days · {data?.as_of || "—"} · live from Excel
+          Open MRs due today through {data?.window_days ?? 3} days · {data?.as_of || "—"}
           {loading ? " · updating…" : ""}
         </p>
       </div>

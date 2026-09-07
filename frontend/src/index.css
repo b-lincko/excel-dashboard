@@ -106,6 +106,29 @@ body {
   .mm-node.is-on {
     @apply ring-2 ring-brand-500 border-brand-500;
   }
+
+  .tab-bar {
+    @apply flex gap-1 p-1 rounded-xl bg-slate-100 dark:bg-white/5 w-fit;
+  }
+  .tab-btn {
+    @apply px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 transition;
+  }
+  .tab-btn.is-on {
+    @apply bg-white dark:bg-ink-800 text-slate-900 dark:text-white shadow-sm;
+  }
+
+  .sticky-save {
+    @apply sticky bottom-0 z-20 mt-4 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3;
+    @apply bg-white/90 dark:bg-ink-900/90 backdrop-blur border-t border-slate-200 dark:border-white/10;
+  }
+
+  .stat-tile {
+    @apply rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50/80 dark:bg-white/5 px-3 py-2;
+  }
+
+  .skel {
+    @apply animate-pulse rounded-lg bg-slate-200/80 dark:bg-white/10;
+  }
 }
 
 .widget-edit {

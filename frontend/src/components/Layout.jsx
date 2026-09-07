@@ -170,7 +170,7 @@ export default function Layout() {
           ? { ...prev, stale: true, warning: e.message }
           : {
               synchronized: false,
-              error: e.offline ? e.message : "Excel file is currently unavailable.",
+              error: e.offline ? e.message : "Could not reach the server.",
               offline: !!e.offline,
             }
       );
@@ -184,7 +184,7 @@ export default function Layout() {
       .catch((e) => {
         setSync({
           synchronized: false,
-          error: e.offline ? e.message : "Excel file is currently unavailable.",
+          error: e.offline ? e.message : "Could not reach the server.",
           offline: !!e.offline,
         });
       });
@@ -224,7 +224,7 @@ export default function Layout() {
       clearDashCache();
       setSync(next);
       window.dispatchEvent(new CustomEvent("woms:data", { detail: next }));
-      toast("Hard refresh from Excel", "success");
+      toast("Records reloaded", "success");
     } catch (e) {
       setSync((prev) => ({ ...(prev || {}), stale: true, warning: e.message }));
       toast(e.message || "Refresh failed", "error");
@@ -338,8 +338,8 @@ export default function Layout() {
                 aria-label="Search work orders"
               />
             </div>
-            <button type="submit" className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs whitespace-nowrap" title="Search Excel records now">
-              Hard search
+            <button type="submit" className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs whitespace-nowrap" title="Search material requests">
+              Search
             </button>
           </form>
           <div className="flex items-center gap-1.5 sm:gap-2 text-xs">
@@ -355,7 +355,15 @@ export default function Layout() {
             >
               <Activity size={12} />
               <span className="hidden sm:inline">
-                {sync?.stale ? "Updating…" : sync?.synchronized ? "Live" : sync?.error ? "Excel down" : "Checking…"}
+                {sync?.stale
+                  ? "Updating…"
+                  : sync?.synchronized
+                    ? sync?.excel_backup === false
+                      ? "Live · backup off"
+                      : "Live"
+                    : sync?.error
+                      ? "Offline"
+                      : "Checking…"}
               </span>
             </span>
             {can("edit") && (
@@ -371,7 +379,7 @@ export default function Layout() {
                   className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs"
                   onClick={() => fileRef.current?.click()}
                   disabled={uploading}
-                  title="Upload Excel workbook"
+                  title="Replace the Excel backup file"
                 >
                   <Upload size={14} className={uploading ? "animate-pulse" : ""} />
                   <span className="hidden md:inline">{uploading ? "Scanning…" : "Upload"}</span>
@@ -381,11 +389,11 @@ export default function Layout() {
             <button
               className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs whitespace-nowrap"
               onClick={refresh}
-              title="Reload work orders from the database and drop cached KPIs"
-              aria-label="Reload from database"
+              title="Reload records from the database"
+              aria-label="Refresh records"
             >
               <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
-              <span className="hidden md:inline">{refreshing ? "Refreshing…" : "Hard refresh"}</span>
+              <span className="hidden md:inline">{refreshing ? "Refreshing…" : "Refresh"}</span>
             </button>
             <div className="relative" ref={inboxRef}>
               <button

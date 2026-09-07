@@ -164,7 +164,7 @@ export default function ActionQueue() {
         });
         return next;
       });
-      toast(d.already ? "Already claimed" : "Claimed — Assign to written to Excel", "success");
+      toast(d.already ? "Already claimed" : "Claimed", "success");
     } catch (e) {
       if (e.status === 409) {
         const ok = await ask({
@@ -210,7 +210,7 @@ export default function ActionQueue() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Today’s action queue</h1>
           <p className="text-sm text-slate-500">
-            What to work now · {data?.as_of || "—"} · week {data?.week || "—"} · live from Excel
+            What to work now · {data?.as_of || "—"} · week {data?.week || "—"}
             {loading ? " · updating…" : ""}
           </p>
         </div>

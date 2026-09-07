@@ -80,7 +80,7 @@ export default function Suppliers() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Suppliers & POs</h1>
         <p className="text-sm text-slate-500">
-          Live from Excel (Supplier Name, PO NO #, RFQ/PO date, ETA, Delivery Status, delay source) · {data?.as_of || "—"}
+          Supplier, PO, RFQ date, ETA and delivery status · {data?.as_of || "—"}
           {loading ? " · updating…" : ""}
         </p>
       </div>
@@ -107,7 +107,7 @@ export default function Suppliers() {
       {tab === "scorecard" && (
         <div className="space-y-4">
           <div className="grid lg:grid-cols-2 gap-4">
-            <ChartCard title="On-time rate by supplier" subtitle="Delivered/closed vs due date from Excel">
+            <ChartCard title="On-time rate by supplier" subtitle="Delivered/closed vs due date">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={data?.on_time || []}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -185,7 +185,7 @@ export default function Suppliers() {
                 </table>
               </div>
             </div>
-            <ChartCard title="Delivery status" subtitle="Excel Delivery Status values">
+            <ChartCard title="Delivery status" subtitle="Live delivery status values">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -312,7 +312,7 @@ export default function Suppliers() {
         <div className="card overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 dark:border-white/5">
             <div className="font-semibold">Supplier cards</div>
-            <p className="text-xs text-slate-500">Phone, contact, lead time and notes live in the app catalog. On-time % is still counted from Excel.</p>
+            <p className="text-xs text-slate-500">Phone, contact, lead time and notes live in the catalog. On-time % is counted from live records.</p>
           </div>
           <div className="table-wrap max-h-[560px]">
             <table className="data">
@@ -359,7 +359,7 @@ export default function Suppliers() {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => setCard(null)}>
           <div className="card w-full max-w-lg p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
             <div className="font-semibold">{card.name}</div>
-            <p className="text-xs text-slate-500">On-time {card.scored ? `${card.on_time_rate}%` : "—"} from Excel. Card fields stay in SQLite.</p>
+            <p className="text-xs text-slate-500">On-time {card.scored ? `${card.on_time_rate}%` : "—"} from live records. Card fields stay with the catalog.</p>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="lbl">Contact</label>

@@ -24,7 +24,7 @@ export default function AuditLog() {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Audit log</h1>
-        <p className="text-sm text-slate-500">{total} events stored separately from the Excel workbook.</p>
+        <p className="text-sm text-slate-500">{total} events in the audit history.</p>
       </div>
       <form
         className="flex flex-wrap gap-3"

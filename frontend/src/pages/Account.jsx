@@ -41,7 +41,7 @@ export default function Account() {
     <div className="space-y-5 max-w-xl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Account</h1>
-        <p className="text-sm text-slate-500">Your profile and sign-in credentials. Work order data stays in Excel.</p>
+        <p className="text-sm text-slate-500">Your profile and sign-in credentials. Work-order history lives in the database.</p>
       </div>
       <div className="card p-5 space-y-2 text-sm">
         <Row label="Name" value={user?.full_name || "—"} />

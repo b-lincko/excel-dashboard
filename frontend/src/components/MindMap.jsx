@@ -110,7 +110,7 @@ export default function MindMap({ data, include }) {
             <GitBranch size={16} /> Workbook mind map
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Click a node to expand and inspect it. Open the list for the matching Excel rows.
+            Click a node to expand and inspect it. Open the list for the matching records.
           </p>
         </div>
       </div>

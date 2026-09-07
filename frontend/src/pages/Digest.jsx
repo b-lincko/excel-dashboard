@@ -45,7 +45,7 @@ export default function Digest() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Morning digest</h1>
           <p className="text-sm text-slate-500">
-            Overdue, UNDER NTP and due soon · grouped by site then assignee · {data?.as_of || "—"} · live from Excel
+            Overdue, UNDER NTP and due soon · grouped by site then assignee · {data?.as_of || "—"}
             {loading ? " · updating…" : ""}
           </p>
         </div>

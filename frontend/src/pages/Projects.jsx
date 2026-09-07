@@ -68,7 +68,7 @@ export default function Projects() {
 
   async function remove() {
     if (!selected) return;
-    const ok = await ask({ title: `Delete ${selected.name}?`, body: "Tasks and work-order links are removed. Excel is not changed.", confirmLabel: "Delete", danger: true });
+    const ok = await ask({ title: `Delete ${selected.name}?`, body: "Tasks and work-order links are removed. Material requests are not deleted.", confirmLabel: "Delete", danger: true });
     if (!ok) return;
     await api.del(`/api/projects/${selected.id}`);
     setSelected(null);
@@ -80,7 +80,7 @@ export default function Projects() {
       <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Projects</h1>
-          <p className="text-sm text-slate-500">Track work in the app database. Link Excel material requests without changing the workbook.</p>
+          <p className="text-sm text-slate-500">Track work in the app. Link material requests without changing their fields.</p>
         </div>
         {canEdit && (
           <form onSubmit={create} className="card p-4 space-y-3">

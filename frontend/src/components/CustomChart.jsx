@@ -117,7 +117,7 @@ export default function CustomChart({ widget, data, go }) {
   })();
 
   return (
-    <ChartCard title={title} subtitle="Click a slice or bar to open matching Excel rows">
+    <ChartCard title={title} subtitle="Click a slice or bar to open matching records">
       <ResponsiveContainer width="100%" height="100%">
         {chart}
       </ResponsiveContainer>

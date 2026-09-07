@@ -65,7 +65,7 @@ export default function Analytics() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
-        <p className="text-sm text-slate-500">All figures are computed from the live Excel workbook. Click a number to open the matching records.</p>
+        <p className="text-sm text-slate-500">All figures are computed from live material requests. Click a number to open the matching records.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         {TABS.map(([id, label]) => (

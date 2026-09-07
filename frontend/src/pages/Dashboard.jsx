@@ -101,7 +101,7 @@ export default function Dashboard() {
     return (
       <div className="card p-8 text-center max-w-xl mx-auto">
         <div className="text-lg font-semibold">
-          {offline ? "Backend API is not running" : excelDown ? "Excel file is currently unavailable." : "Could not load the dashboard"}
+          {offline ? "Backend API is not running" : excelDown ? "No work orders loaded yet." : "Could not load the dashboard"}
         </div>
         <p className="text-sm text-slate-500 mt-2">{typeof error === "string" ? error : JSON.stringify(error)}</p>
         {offline && (
@@ -126,7 +126,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Material Request dashboard</h1>
           <p className="text-sm text-slate-500">
-            Live from Excel · {data?.as_of || "—"} · {data?.sync?.record_count ?? data?.count ?? "—"} records
+            Live records · {data?.as_of || "—"} · {data?.sync?.record_count ?? data?.count ?? "—"} material requests
             {loading ? " · updating…" : ""}
           </p>
         </div>
@@ -169,7 +169,11 @@ export default function Dashboard() {
       )}
 
       {!data && loading ? (
-        <div className="card p-8 text-center text-slate-500">Loading dashboard…</div>
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="skel h-40" />
+          <div className="skel h-40" />
+          <div className="skel h-40" />
+        </div>
       ) : layout.length ? (
         <WidgetBoard data={data} recent={data?.recent} go={go} layout={layout} editing={editing} onChange={persist} />
       ) : (

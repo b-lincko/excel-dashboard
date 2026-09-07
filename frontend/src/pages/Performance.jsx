@@ -27,7 +27,7 @@ export default function Performance() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Employee performance</h1>
         <p className="text-sm text-slate-500">
-          Live metrics from Excel — open vs placed vs closed, overdue load, and closing speed by assignee.
+          Open vs placed vs closed, overdue load, and closing speed by assignee.
         </p>
       </div>
       {error && <div className="rounded-xl bg-rose-50 text-rose-800 px-4 py-3 text-sm">{error}</div>}
@@ -104,7 +104,7 @@ export default function Performance() {
             {!rows.length && (
               <tr className="!cursor-default">
                 <td colSpan={11} className="text-center text-slate-400 py-8">
-                  No assignees in the current Excel data.
+                  No assignees in the current records.
                 </td>
               </tr>
             )}

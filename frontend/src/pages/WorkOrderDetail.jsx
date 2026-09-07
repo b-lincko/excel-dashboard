@@ -59,6 +59,28 @@ const FIELDS = [
   ["remarks", "REMARKS / NOTES", "textarea"],
 ];
 
+const FIELD_MAP = Object.fromEntries(FIELDS.map((row) => [row[0], row]));
+const GROUPS = [
+  {
+    id: "request",
+    title: "Request",
+    hint: "Who needs what, and by when.",
+    keys: ["work_order_id", "department", "status", "priority", "assigned_to", "work_type", "location", "created_date", "due_date", "description"],
+  },
+  {
+    id: "buy",
+    title: "Procurement",
+    hint: "Supplier, PO and expected dates.",
+    keys: ["supplier", "po_number", "scheduled_date", "closed_date"],
+  },
+  {
+    id: "ship",
+    title: "Delivery",
+    hint: "What arrived, and the running notes.",
+    keys: ["issue", "completion_date", "remarks"],
+  },
+];
+
 function toInput(val) {
   if (!val) return "";
   return String(val).replace(" ", "T").slice(0, 16);
@@ -96,6 +118,7 @@ export default function WorkOrderDetail() {
   const [chatBody, setChatBody] = useState("");
   const [timeline, setTimeline] = useState([]);
   const [remarkRules, setRemarkRules] = useState(["*->ON HOLD", "*->CLOSED"]);
+  const [tab, setTab] = useState("details");
   const attachRef = useRef(null);
 
   const dirty = useMemo(() => {
@@ -164,6 +187,7 @@ export default function WorkOrderDetail() {
       setForm(initial);
       setOriginal(initial);
     }
+    setTab("details");
   }, [id, isNew]);
 
   useEffect(() => {
@@ -327,12 +351,12 @@ export default function WorkOrderDetail() {
     } catch (e) {
       if (e.status === 409) {
         setConflict(e.detail);
-        setError("Synchronization conflict: the Excel file changed since you loaded this record.");
+        setError("This record changed since you opened it. Reload or overwrite.");
       } else if (e.status === 422) {
         const d = e.detail;
         setError(Array.isArray(d) ? d.join(" ") : typeof d === "string" ? d : JSON.stringify(d));
       } else if (e.status === 423) {
-        setError("Excel file is currently being used by another process. Changes cannot be saved until the file becomes available.");
+        setError("Could not write the Excel backup (file in use). The database change is kept — retry the backup when the file is free.");
       } else {
         setError(e.message);
       }
@@ -374,8 +398,106 @@ export default function WorkOrderDetail() {
     }
   }
 
+  const lineCount = Array.isArray(form.lines) ? form.lines.filter((l) => l.supplier || l.material).length : 0;
+  const nextHint = !isNew && !form.work_order_id
+    ? ""
+    : !form.assigned_to
+    ? "Unassigned — claim it or pick a technician."
+    : meta?.is_overdue
+      ? "Past due — update status, delivery, or add a delay note."
+      : String(form.status || "").toUpperCase() === "OPEN" && !form.supplier
+        ? "Still open — add a supplier or place the PO."
+        : dirty
+          ? "Unsaved changes."
+          : "";
+
+  function renderField(key) {
+    const spec = FIELD_MAP[key];
+    if (!spec) return null;
+    const [, label, type, lock] = spec;
+    return (
+      <div key={key} className={type === "textarea" ? "md:col-span-2" : ""}>
+        <label className="lbl">{label}</label>
+        {type === "textarea" ? (
+          <>
+            <textarea rows={3} value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)} />
+            {key === "remarks" && (
+              <p className="text-[11px] text-slate-500 mt-1">Type @username in remarks to ping. Followers are notified on save.</p>
+            )}
+          </>
+        ) : type === "site" ? (
+          <select value={form[key] || ""} onChange={(e) => setField(key, e.target.value)} disabled={!isNew || readOnly}>
+            {Array.from(new Set([...(options.department || []), ...EXTRA_SITES])).map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        ) : type === "supplier" ? (
+          <div className="space-y-2">
+            <select value={form.supplier || ""} disabled={fieldLocked("supplier")} onChange={(e) => setField("supplier", e.target.value)}>
+              <option value="">—</option>
+              {(options.supplier || []).map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+            {!fieldLocked("supplier") && !addingSupplier && (
+              <button type="button" className="btn-outline !py-1 !px-2 text-xs" onClick={() => setAddingSupplier(true)}>
+                + Add supplier
+              </button>
+            )}
+            {addingSupplier && !fieldLocked("supplier") && (
+              <div className="flex gap-2">
+                <input value={newSupplier} onChange={(e) => setNewSupplier(e.target.value)} placeholder="New supplier name" autoFocus />
+                <button type="button" className="btn-primary !py-1 !px-2 text-xs" onClick={addSupplier} disabled={busy}>
+                  Add
+                </button>
+                <button type="button" className="btn-outline !py-1 !px-2 text-xs" onClick={() => setAddingSupplier(false)}>
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        ) : ["status", "priority", "assigned_to", "work_type", "issue"].includes(type) ? (
+          <select value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)}>
+            <option value="">—</option>
+            {form[key] && !(options[type] || []).includes(form[key]) && <option value={form[key]}>{form[key]}</option>}
+            {(options[type] || []).map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        ) : type === "datetime" ? (
+          <input
+            type="datetime-local"
+            disabled={fieldLocked(key, lock)}
+            value={toInput(form[key])}
+            onChange={(e) => setField(key, fromInput(e.target.value))}
+          />
+        ) : (
+          <input value={form[key] || ""} disabled={(lock && !isNew) || fieldLocked(key)} onChange={(e) => setField(key, e.target.value)} />
+        )}
+        {key === "status" && (remarkRules || []).length > 0 && (
+          <p className="text-[11px] text-slate-500 mt-1">
+            Transitions that need a remark: {(remarkRules || []).join(", ")}.
+          </p>
+        )}
+        {key === "due_date" && (
+          <p className="text-[11px] text-slate-500 mt-1">
+            {dueDays != null
+              ? `From “${form.work_type || "—"}”: +${dueDays} day${dueDays === 1 ? "" : "s"} after MR received.`
+              : "Due date follows purchase type and is not overwritten."}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="max-w-5xl mx-auto space-y-4 pb-8">
       <div className="flex items-start justify-between gap-4">
         <div>
           <button className="text-sm text-slate-500 mb-1" onClick={goBack}>
@@ -391,16 +513,17 @@ export default function WorkOrderDetail() {
             {form.department && <span className="text-xs text-slate-500">{form.department}</span>}
             {meta?.is_overdue && <StatusBadge value="Overdue" />}
             {meta?.aging_days != null && <span className="text-xs text-slate-500">Age {meta.aging_days} days</span>}
-            {dirty && <span className="text-xs text-amber-700 dark:text-amber-300">Unsaved changes</span>}
+            {dirty && <span className="text-xs text-amber-700 dark:text-amber-300">Unsaved</span>}
           </div>
+          {nextHint && <p className="text-sm text-slate-500 mt-2">{nextHint}</p>}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
           {!isNew && (
             <button
               className="btn-outline"
               onClick={() => api.download(`/api/work-orders/${encodeURIComponent(id)}/sheet`, `WO_${form.work_order_id || id}.pdf`)}
             >
-              Print sheet
+              Print
             </button>
           )}
           {!isNew && can("edit") && !fieldLocked("assigned_to") && (
@@ -414,7 +537,7 @@ export default function WorkOrderDetail() {
                   setForm(d.item);
                   setOriginal(d.item);
                   setMeta(d.item);
-                  toast(d.already ? "Already claimed" : "Claimed — written to Excel Assign to", "success");
+                  toast(d.already ? "Already claimed" : "Claimed", "success");
                 } catch (e) {
                   if (e.status === 409) {
                     const ok = await ask({
@@ -428,7 +551,7 @@ export default function WorkOrderDetail() {
                     setForm(d.item);
                     setOriginal(d.item);
                     setMeta(d.item);
-                    toast("Taken over — written to Excel Assign to", "success");
+                    toast("Taken over", "success");
                     return;
                   }
                   setError(e.message);
@@ -460,11 +583,6 @@ export default function WorkOrderDetail() {
               Delete
             </button>
           )}
-          {canSave && (
-            <button className="btn-primary" onClick={() => save(false)} disabled={busy || (!isNew && !dirty)}>
-              {busy ? "Saving…" : isNew ? "Create order" : "Save"}
-            </button>
-          )}
         </div>
       </div>
 
@@ -472,12 +590,12 @@ export default function WorkOrderDetail() {
       {success && <div className="rounded-xl bg-emerald-50 text-emerald-800 px-4 py-3 text-sm dark:bg-emerald-500/10 dark:text-emerald-200">{success}</div>}
       {conflict && (
         <div className="card p-4 border-amber-300">
-          <div className="font-semibold mb-2">Conflict warning</div>
+          <div className="font-semibold mb-2">Record changed</div>
           <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
-            The workbook was modified externally. Review the latest Excel values and choose whether to overwrite.
+            Someone else saved this material request. Reload their values or overwrite with yours.
           </p>
           <button className="btn-primary" onClick={() => save(true)}>
-            Overwrite Excel with my changes
+            Overwrite with my changes
           </button>
           <button
             className="btn-outline ml-2"
@@ -486,285 +604,254 @@ export default function WorkOrderDetail() {
               setConflict(null);
             }}
           >
-            Load latest Excel values
+            Load latest
           </button>
         </div>
       )}
 
-      <div className="card p-5 grid md:grid-cols-2 gap-4">
-        {FIELDS.map(([key, label, type, lock]) => (
-          <div key={key} className={type === "textarea" ? "md:col-span-2" : ""}>
-            <label className="lbl">{label}</label>
-            {type === "textarea" ? (
-              <>
-                <textarea rows={3} value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)} />
-                {key === "remarks" && (
-                  <p className="text-[11px] text-slate-500 mt-1">Type @username in remarks to ping that person. Followers are notified on save.</p>
-                )}
-              </>
-            ) : type === "site" ? (
-              <select value={form[key] || ""} onChange={(e) => setField(key, e.target.value)} disabled={!isNew || readOnly}>
-                {Array.from(new Set([...(options.department || []), ...EXTRA_SITES])).map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
-            ) : type === "supplier" ? (
-              <div className="space-y-2">
-                <select value={form.supplier || ""} disabled={fieldLocked("supplier")} onChange={(e) => setField("supplier", e.target.value)}>
-                  <option value="">—</option>
-                  {(options.supplier || []).map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-                {!fieldLocked("supplier") && !addingSupplier && (
-                  <button type="button" className="btn-outline !py-1 !px-2 text-xs" onClick={() => setAddingSupplier(true)}>
-                    + Add supplier
-                  </button>
-                )}
-                {addingSupplier && !fieldLocked("supplier") && (
-                  <div className="flex gap-2">
-                    <input
-                      value={newSupplier}
-                      onChange={(e) => setNewSupplier(e.target.value)}
-                      placeholder="New supplier name"
-                      autoFocus
-                    />
-                    <button type="button" className="btn-primary !py-1 !px-2 text-xs" onClick={addSupplier} disabled={busy}>
-                      Add
-                    </button>
-                    <button type="button" className="btn-outline !py-1 !px-2 text-xs" onClick={() => setAddingSupplier(false)}>
-                      Cancel
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : ["status", "priority", "assigned_to", "work_type", "issue"].includes(type) ? (
-              <select value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)}>
-                <option value="">—</option>
-                {form[key] && !(options[type] || []).includes(form[key]) && <option value={form[key]}>{form[key]}</option>}
-                {(options[type] || []).map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
-            ) : type === "datetime" ? (
-              <input
-                type="datetime-local"
-                disabled={fieldLocked(key, lock)}
-                value={toInput(form[key])}
-                onChange={(e) => setField(key, fromInput(e.target.value))}
-              />
-            ) : (
-              <input
-                value={form[key] || ""}
-                disabled={(lock && !isNew) || fieldLocked(key)}
-                onChange={(e) => setField(key, e.target.value)}
-              />
-            )}
-            {key === "status" && (remarkRules || []).length > 0 && (
-              <p className="text-[11px] text-slate-500 mt-1">
-                Configured transitions that need a remark: {(remarkRules || []).join(", ")}. Type it in Remarks before saving.
-              </p>
-            )}
-            {key === "due_date" && (
-              <p className="text-[11px] text-slate-500 mt-1">
-                {dueDays != null
-                  ? `From purchase type “${form.work_type || "—"}”: +${dueDays} day${dueDays === 1 ? "" : "s"} after MR received. Excel formula is not overwritten.`
-                  : "Direct Cash +3, Local PO +5, International +10, Service +10, Consumable +2, Emergency +0, Under Warranty +10, Alternative +10."}
-              </p>
-            )}
+      {!isNew && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          <div className="stat-tile">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">Assigned</div>
+            <div className="text-sm font-semibold truncate">{form.assigned_to || "—"}</div>
           </div>
-        ))}
+          <div className="stat-tile">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">Due</div>
+            <div className={`text-sm font-semibold truncate ${meta?.is_overdue ? "text-rose-600" : ""}`}>{(form.due_date || "").slice(0, 10) || "—"}</div>
+          </div>
+          <div className="stat-tile">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">Supplier</div>
+            <div className="text-sm font-semibold truncate">{form.supplier || "—"}</div>
+          </div>
+          <div className="stat-tile">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">PO</div>
+            <div className="text-sm font-semibold truncate">{form.po_number || "—"}</div>
+          </div>
+          <div className="stat-tile">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">Delivery</div>
+            <div className="text-sm font-semibold truncate">{form.issue || "—"}</div>
+          </div>
+        </div>
+      )}
+
+      <div className="tab-bar">
+        <button type="button" className={`tab-btn ${tab === "details" ? "is-on" : ""}`} onClick={() => setTab("details")}>
+          Details
+        </button>
+        <button type="button" className={`tab-btn ${tab === "lines" ? "is-on" : ""}`} onClick={() => setTab("lines")}>
+          Suppliers{lineCount ? ` · ${lineCount}` : ""}
+        </button>
+        {!isNew && (
+          <button type="button" className={`tab-btn ${tab === "activity" ? "is-on" : ""}`} onClick={() => setTab("activity")}>
+            Activity{chat.length || files.length ? ` · ${chat.length + files.length}` : ""}
+          </button>
+        )}
       </div>
-      <LineItemsCard form={form} setForm={setForm} options={options} readOnly={readOnly} />
-      {showDelay && (
-        <div className="card p-5 space-y-3">
-          <div>
-            <div className="font-semibold">Delay</div>
-            <p className="text-xs text-slate-500">
-              Open past due date, or Pending. Closed, Placed, Estimation Price and Delivered Material Inspection are not delays.
-            </p>
-          </div>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="lbl">Delay type</label>
-              <select value={form.delay_kind || ""} disabled={fieldLocked("delay_kind")} onChange={(e) => setField("delay_kind", e.target.value)}>
-                <option value="">—</option>
-                <option value="placement">Placement delay</option>
-                <option value="delivery">Delivery delay</option>
-              </select>
+
+      {tab === "details" && (
+        <div className="space-y-4">
+          {GROUPS.map((group) => (
+            <div key={group.id} className="card p-5 space-y-3">
+              <div>
+                <div className="font-semibold">{group.title}</div>
+                <p className="text-xs text-slate-500">{group.hint}</p>
+              </div>
+              <div className="grid md:grid-cols-2 gap-4">{group.keys.map(renderField)}</div>
             </div>
-            <div>
-              <label className="lbl">Delay source</label>
-              <select value={form.delay_source || ""} disabled={fieldLocked("delay_source")} onChange={(e) => setField("delay_source", e.target.value)}>
-                <option value="">—</option>
-                <option value="site">Site</option>
-                <option value="procurement">Procurement</option>
-                <option value="supplier">Supplier</option>
-              </select>
-            </div>
-            <div className="md:col-span-2">
-              <label className="lbl">Delay justification</label>
-              <textarea
-                rows={3}
-                value={form.delay_justification || ""}
-                disabled={fieldLocked("delay_justification")}
-                onChange={(e) => setField("delay_justification", e.target.value)}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-      {!isNew && (
-        <div className="card p-5 space-y-3">
-          <div>
-            <div className="font-semibold">Work-order chat</div>
-            <p className="text-xs text-slate-500">Thread is tied to this MR. Followers and @mentions are notified. Messages stay in the app, not Excel.</p>
-          </div>
-          <div className="max-h-64 overflow-y-auto space-y-2">
-            {chat.map((m) => (
-              <div key={m.id} className={`text-sm ${m.username === user?.username ? "text-right" : ""}`}>
-                <div className="text-[11px] text-slate-500">
-                  {m.username} · {m.created_at}
+          ))}
+          {showDelay && (
+            <div className="card p-5 space-y-3">
+              <div>
+                <div className="font-semibold">Delay</div>
+                <p className="text-xs text-slate-500">Open past due date, or Pending. Closed, Placed, Estimation Price and Delivered Material Inspection are not delays.</p>
+              </div>
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <label className="lbl">Delay type</label>
+                  <select value={form.delay_kind || ""} disabled={fieldLocked("delay_kind")} onChange={(e) => setField("delay_kind", e.target.value)}>
+                    <option value="">—</option>
+                    <option value="placement">Placement delay</option>
+                    <option value="delivery">Delivery delay</option>
+                  </select>
                 </div>
-                <div className={`inline-block rounded-2xl px-3 py-1.5 whitespace-pre-wrap ${m.username === user?.username ? "bg-brand-700 text-white" : "bg-slate-100 dark:bg-white/5"}`}>
-                  {m.body}
+                <div>
+                  <label className="lbl">Delay source</label>
+                  <select value={form.delay_source || ""} disabled={fieldLocked("delay_source")} onChange={(e) => setField("delay_source", e.target.value)}>
+                    <option value="">—</option>
+                    <option value="site">Site</option>
+                    <option value="procurement">Procurement</option>
+                    <option value="supplier">Supplier</option>
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="lbl">Delay justification</label>
+                  <textarea rows={3} value={form.delay_justification || ""} disabled={fieldLocked("delay_justification")} onChange={(e) => setField("delay_justification", e.target.value)} />
                 </div>
               </div>
-            ))}
-            {!chat.length && <div className="text-sm text-slate-500">No messages yet.</div>}
-          </div>
-          <form
-            className="flex gap-2"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const text = chatBody.trim();
-              if (!text) return;
-              try {
-                const d = await api.post(`/api/work-orders/${encodeURIComponent(id)}/chat`, { body: text });
-                setChat((prev) => [...prev, d.item]);
-                setChatBody("");
-                api.get(`/api/work-orders/${encodeURIComponent(id)}/timeline`).then((t) => setTimeline(t.items || [])).catch(() => {});
-              } catch (err) {
-                setError(err.message);
-              }
-            }}
-          >
-            <input value={chatBody} onChange={(e) => setChatBody(e.target.value)} placeholder="Message this MR… @username to ping" autoComplete="off" />
-            <button className="btn-primary" disabled={!chatBody.trim()}>
-              Send
-            </button>
-          </form>
-        </div>
-      )}
-      {!isNew && (
-        <div className="card p-5 space-y-3">
-          <div>
-            <div className="font-semibold">Attachments</div>
-            <p className="text-xs text-slate-500">PDFs and screenshots stay in the app database, not Excel. They can be linked to this work order or a remark note.</p>
-          </div>
-          <ul className="space-y-2">
-            {files.map((f) => (
-              <li key={f.id} className="flex items-center justify-between gap-3 text-sm">
-                <div className="min-w-0">
-                  <button className="text-brand-700 hover:underline truncate" type="button" onClick={() => api.download(`/api/files/${f.id}`, f.filename)}>
-                    {f.filename}
-                  </button>
-                  <div className="text-[11px] text-slate-500">
-                    {f.kind} · {f.created_by} · {f.created_at}
-                    {f.note ? ` · ${f.note}` : ""}
-                  </div>
-                </div>
-                {can("edit") && (
-                  <button
-                    type="button"
-                    className="btn-outline !py-1 !px-2 text-xs"
-                    onClick={async () => {
-                      await api.del(`/api/files/${f.id}`);
-                      setFiles((prev) => prev.filter((x) => x.id !== f.id));
-                    }}
-                  >
-                    Remove
-                  </button>
-                )}
-              </li>
-            ))}
-            {!files.length && <li className="text-sm text-slate-500">No files yet.</li>}
-          </ul>
-          {can("edit") && (
-            <div className="space-y-2">
-              <input value={fileNote} onChange={(e) => setFileNote(e.target.value)} placeholder="Optional remark / caption" />
-              <input
-                ref={attachRef}
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,application/pdf,image/*"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (!file) return;
-                  const fd = new FormData();
-                  fd.append("file", file);
-                  fd.append("note", fileNote);
-                  try {
-                    const d = await api.upload(`/api/work-orders/${encodeURIComponent(id)}/files`, fd);
-                    setFiles((prev) => [d.item, ...prev]);
-                    setFileNote("");
-                    toast("File attached", "success");
-                  } catch (err) {
-                    setError(err.message);
-                  }
-                }}
-              />
-              <button type="button" className="btn-outline" onClick={() => attachRef.current?.click()}>
-                Attach PDF or screenshot
-              </button>
             </div>
           )}
         </div>
       )}
-      {!isNew && (
-        <p className="text-xs text-slate-400">
-          Saving writes the database first, then copies the row into file.xlsx (SN, due-date and hyperlink formulas are left untouched). If Excel is locked, the database change is kept and you can retry the backup. Ctrl/⌘+S to save.
-        </p>
-      )}
-      {!isNew && (
-        <div className="card overflow-hidden">
-          <div className="px-4 py-3">
-            <div className="font-semibold">Timeline</div>
-            <p className="text-xs text-slate-500">Excel field changes, chat, attachments, follows and seen — one feed.</p>
+
+      {tab === "lines" && <LineItemsCard form={form} setForm={setForm} options={options} readOnly={readOnly} />}
+
+      {tab === "activity" && !isNew && (
+        <div className="space-y-4">
+          <div className="card p-5 space-y-3">
+            <div>
+              <div className="font-semibold">Chat</div>
+              <p className="text-xs text-slate-500">Tied to this MR. Followers and @mentions are notified.</p>
+            </div>
+            <div className="max-h-64 overflow-y-auto space-y-2">
+              {chat.map((m) => (
+                <div key={m.id} className={`text-sm ${m.username === user?.username ? "text-right" : ""}`}>
+                  <div className="text-[11px] text-slate-500">
+                    {m.username} · {m.created_at}
+                  </div>
+                  <div className={`inline-block rounded-2xl px-3 py-1.5 whitespace-pre-wrap ${m.username === user?.username ? "bg-brand-700 text-white" : "bg-slate-100 dark:bg-white/5"}`}>
+                    {m.body}
+                  </div>
+                </div>
+              ))}
+              {!chat.length && <div className="text-sm text-slate-500">No messages yet.</div>}
+            </div>
+            <form
+              className="flex gap-2"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const textBody = chatBody.trim();
+                if (!textBody) return;
+                try {
+                  const d = await api.post(`/api/work-orders/${encodeURIComponent(id)}/chat`, { body: textBody });
+                  setChat((prev) => [...prev, d.item]);
+                  setChatBody("");
+                  api.get(`/api/work-orders/${encodeURIComponent(id)}/timeline`).then((t) => setTimeline(t.items || [])).catch(() => {});
+                } catch (err) {
+                  setError(err.message);
+                }
+              }}
+            >
+              <input value={chatBody} onChange={(e) => setChatBody(e.target.value)} placeholder="Message this MR… @username to ping" autoComplete="off" />
+              <button className="btn-primary" disabled={!chatBody.trim()}>
+                Send
+              </button>
+            </form>
           </div>
-          <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-white/5">
-            {(timeline.length ? timeline : history.map((r) => ({ kind: "field", at: r.created_at, ...r }))).map((ev, i) => (
-              <div key={`${ev.kind}-${ev.at}-${i}`} className="px-4 py-2 text-sm">
-                <div className="text-[11px] text-slate-500">
-                  {ev.at} · {ev.username || "—"} · {ev.kind}
-                </div>
-                <div>
-                  {ev.kind === "chat"
-                    ? ev.body
-                    : ev.kind === "file"
-                      ? `Attached ${ev.filename || "file"}${ev.note ? ` — ${ev.note}` : ""}`
-                      : ev.kind === "follow"
-                        ? "Started following"
-                        : ev.kind === "seen"
-                          ? "Marked seen"
-                          : `${ev.field || ev.action || "update"}${ev.old_value || ev.new_value ? `: ${ev.old_value || "—"} → ${ev.new_value || ev.details || "—"}` : ""}`}
-                </div>
+          <div className="card p-5 space-y-3">
+            <div>
+              <div className="font-semibold">Attachments</div>
+              <p className="text-xs text-slate-500">PDFs and screenshots stay with this record.</p>
+            </div>
+            <ul className="space-y-2">
+              {files.map((f) => (
+                <li key={f.id} className="flex items-center justify-between gap-3 text-sm">
+                  <div className="min-w-0">
+                    <button className="text-brand-700 hover:underline truncate" type="button" onClick={() => api.download(`/api/files/${f.id}`, f.filename)}>
+                      {f.filename}
+                    </button>
+                    <div className="text-[11px] text-slate-500">
+                      {f.kind} · {f.created_by} · {f.created_at}
+                      {f.note ? ` · ${f.note}` : ""}
+                    </div>
+                  </div>
+                  {can("edit") && (
+                    <button
+                      type="button"
+                      className="btn-outline !py-1 !px-2 text-xs"
+                      onClick={async () => {
+                        await api.del(`/api/files/${f.id}`);
+                        setFiles((prev) => prev.filter((x) => x.id !== f.id));
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </li>
+              ))}
+              {!files.length && <li className="text-sm text-slate-500">No files yet.</li>}
+            </ul>
+            {can("edit") && (
+              <div className="space-y-2">
+                <input value={fileNote} onChange={(e) => setFileNote(e.target.value)} placeholder="Optional caption" />
+                <input
+                  ref={attachRef}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,application/pdf,image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!file) return;
+                    const fd = new FormData();
+                    fd.append("file", file);
+                    fd.append("note", fileNote);
+                    try {
+                      const d = await api.upload(`/api/work-orders/${encodeURIComponent(id)}/files`, fd);
+                      setFiles((prev) => [d.item, ...prev]);
+                      setFileNote("");
+                      toast("File attached", "success");
+                    } catch (err) {
+                      setError(err.message);
+                    }
+                  }}
+                />
+                <button type="button" className="btn-outline" onClick={() => attachRef.current?.click()}>
+                  Attach PDF or screenshot
+                </button>
               </div>
-            ))}
-            {!timeline.length && !history.length && <div className="px-4 py-6 text-sm text-slate-500">No events yet.</div>}
+            )}
+          </div>
+          <div className="card overflow-hidden">
+            <div className="px-4 py-3">
+              <div className="font-semibold">Timeline</div>
+              <p className="text-xs text-slate-500">Field changes, chat, files, follows and seen.</p>
+            </div>
+            <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-white/5">
+              {(timeline.length ? timeline : history.map((r) => ({ kind: "field", at: r.created_at, ...r }))).map((ev, i) => (
+                <div key={`${ev.kind}-${ev.at}-${i}`} className="px-4 py-2 text-sm">
+                  <div className="text-[11px] text-slate-500">
+                    {ev.at} · {ev.username || "—"} · {ev.kind}
+                  </div>
+                  <div>
+                    {ev.kind === "chat"
+                      ? ev.body
+                      : ev.kind === "file"
+                        ? `Attached ${ev.filename || "file"}${ev.note ? ` — ${ev.note}` : ""}`
+                        : ev.kind === "follow"
+                          ? "Started following"
+                          : ev.kind === "seen"
+                            ? "Marked seen"
+                            : `${ev.field || ev.action || "update"}${ev.old_value || ev.new_value ? `: ${ev.old_value || "—"} → ${ev.new_value || ev.details || "—"}` : ""}`}
+                  </div>
+                </div>
+              ))}
+              {!timeline.length && !history.length && <div className="px-4 py-6 text-sm text-slate-500">No events yet.</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {canSave && (
+        <div className="sticky-save flex items-center justify-between gap-3">
+          <div className="text-sm text-slate-500">
+            {busy ? "Saving…" : dirty || isNew ? "Ctrl/⌘+S to save" : "All changes saved."}
+          </div>
+          <div className="flex gap-2">
+            {!isNew && dirty && (
+              <button className="btn-outline" type="button" disabled={busy} onClick={() => setForm(original)}>
+                Discard
+              </button>
+            )}
+            <button className="btn-primary" onClick={() => save(false)} disabled={busy || (!isNew && !dirty)}>
+              {busy ? "Saving…" : isNew ? "Create request" : "Save"}
+            </button>
           </div>
         </div>
       )}
     </div>
   );
 }
+
 
 function emptyLine() {
   return { supplier: "", material: "", qty: "", unit: "", notes: "" };
@@ -803,7 +890,7 @@ function LineItemsCard({ form, setForm, options, readOnly }) {
       <div>
         <div className="font-semibold">Suppliers & materials</div>
         <p className="text-xs text-slate-500">
-          Excel keeps one Supplier Name and one Required Material Details cell. Extra suppliers and items on this MR are stored in the app and used for search and suggestions.
+          Extra suppliers and items on this MR are stored with the record and used for search. The Excel backup still has one supplier cell and one material cell.
         </p>
       </div>
       {groups.map((group) => (

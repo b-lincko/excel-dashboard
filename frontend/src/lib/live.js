@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-/** Increments whenever Excel data changes so pages can refresh in place. */
+/** Increments whenever live records change so pages can refresh in place. */
 export function useLiveReload() {
   const [tick, setTick] = useState(0);
   useEffect(() => {

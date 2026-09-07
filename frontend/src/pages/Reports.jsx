@@ -36,7 +36,7 @@ export default function Reports() {
     <div className="space-y-5 max-w-4xl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Reports</h1>
-        <p className="text-sm text-slate-500">Generated from the live Excel dataset. Export Excel, CSV or PDF.</p>
+        <p className="text-sm text-slate-500">Generated from live material requests. Export Excel, CSV or PDF.</p>
       </div>
       <div className="card p-4 w-64">
         <label className="lbl">Date period</label>

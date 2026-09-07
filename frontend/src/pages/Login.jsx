@@ -46,15 +46,14 @@ export default function Login() {
         </div>
         <div className="relative max-w-lg">
           <h1 className="text-4xl font-extrabold leading-tight tracking-tight">
-            Work orders stay in Excel.
-            <span className="block text-cyan-300">The dashboard stays in sync.</span>
+            Material requests in one place.
+            <span className="block text-cyan-300">Act on what is late, blocked, or due.</span>
           </h1>
           <p className="mt-5 text-slate-300 text-sm leading-relaxed">
-            Read, edit and report on the live workbook. Every save writes back to the source file,
-            with backups, audit history and conflict detection.
+            The database is the live history. Each save is copied to Excel as a backup. Claim, follow, and close MRs without hunting through the workbook.
           </p>
         </div>
-        <div className="relative text-xs text-slate-500">Work Order Management System · Source of truth: Excel</div>
+        <div className="relative text-xs text-slate-500">Linkco MR · Work order management</div>
       </div>
       <div className="grid place-items-center p-8 bg-slate-50 dark:bg-ink-900">
         <form onSubmit={submit} className="w-full max-w-sm card p-8">

@@ -81,7 +81,16 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
   const [order, setOrder] = useState(filters.order || "desc");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [visible, setVisible] = useState(() => new Set(ALL_COLS.map((c) => c[0])));
+  const [visible, setVisible] = useState(() => {
+    try {
+      const raw = localStorage.getItem("woms.columns");
+      const keys = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(keys) && keys.length) return new Set(keys.filter((k) => ALL_COLS.some((c) => c[0] === k)));
+    } catch {
+      /* ignore */
+    }
+    return new Set(ALL_COLS.map((c) => c[0]));
+  });
   const [showCols, setShowCols] = useState(false);
   const [q, setQ] = useState(filters.q || "");
   const [selected, setSelected] = useState(() => new Set());
@@ -220,8 +229,8 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
     }
     const ok = await ask({
       title: `Update ${ids.length} work order${ids.length === 1 ? "" : "s"}?`,
-      body: "Excel is written once (backup first). Remarks are appended, not overwritten.",
-      confirmLabel: "Write to Excel",
+      body: "The same assignee, status and/or remark will be applied to every selected material request. Remarks are appended.",
+      confirmLabel: "Apply",
     });
     if (!ok) return;
     setBulkBusy(true);
@@ -231,7 +240,10 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
       if (bulkStatus) body.status = bulkStatus;
       if (bulkRemark.trim()) body.remarks = bulkRemark.trim();
       const d = await api.post("/api/work-orders/bulk", body);
-      toast(`Updated ${d.updated} row${d.updated === 1 ? "" : "s"} in Excel`, "success");
+      toast(`Updated ${d.updated} record${d.updated === 1 ? "" : "s"}`, d.excel_backup_ok === false ? "error" : "success");
+      if (d.excel_backup_ok === false) {
+        toast(d.excel_backup_error || "Saved in the database. Excel backup failed.", "error");
+      }
       setSelected(new Set());
       setBulkRemark("");
       load();
@@ -297,6 +309,11 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
                         if (n.has(k)) n.delete(k);
                         else n.add(k);
                         setVisible(n);
+                        try {
+                          localStorage.setItem("woms.columns", JSON.stringify([...n]));
+                        } catch {
+                          /* ignore */
+                        }
                       }}
                     />
                     {l}
@@ -337,33 +354,31 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
         }}
         options={options}
         extra={
-          <div>
-            <label className="lbl">Search</label>
-            <div className="flex gap-2">
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    setFilters((f) => ({ ...f, q }));
-                    setPage(1);
-                    load();
-                  }
-                }}
-                placeholder="ID, description, technician…"
-              />
-              <button
-                type="button"
-                className="btn-outline whitespace-nowrap"
-                onClick={() => {
+          <div className="flex gap-2">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
                   setFilters((f) => ({ ...f, q }));
                   setPage(1);
                   load();
-                }}
-              >
-                Hard search
-              </button>
-            </div>
+                }
+              }}
+              placeholder="Search ID, material, technician…"
+              aria-label="Search work orders"
+            />
+            <button
+              type="button"
+              className="btn-outline whitespace-nowrap"
+              onClick={() => {
+                setFilters((f) => ({ ...f, q }));
+                setPage(1);
+                load();
+              }}
+            >
+              Search
+            </button>
           </div>
         }
       />
@@ -440,7 +455,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
             <input value={bulkRemark} onChange={(e) => setBulkRemark(e.target.value)} placeholder="Same note on every selected row" />
           </div>
           <button className="btn-primary" onClick={runBulk} disabled={bulkBusy}>
-            {bulkBusy ? "Writing…" : "Apply to Excel"}
+            {bulkBusy ? "Saving…" : "Apply"}
           </button>
           <button className="btn-outline" onClick={() => setSelected(new Set())} disabled={bulkBusy}>
             Clear

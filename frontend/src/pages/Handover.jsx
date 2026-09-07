@@ -60,7 +60,7 @@ export default function Handover() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Shift handover</h1>
           <p className="text-sm text-slate-500">
-            Live snapshot from Excel · {live.as_of || "—"} · notes are stored in the app, not the workbook
+            Live snapshot · {live.as_of || "—"} · notes stay in the app
           </p>
         </div>
         <button className="btn-primary no-print" onClick={() => window.print()}>

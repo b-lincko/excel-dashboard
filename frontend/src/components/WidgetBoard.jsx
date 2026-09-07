@@ -270,7 +270,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
         );
       case "chart_status":
         return (
-          <ChartCard title="Status" subtitle="From Excel STATUS values">
+          <ChartCard title="Status" subtitle="From live STATUS values">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={data?.status || []} dataKey="value" nameKey="name" innerRadius={52} outerRadius={80} isAnimationActive={false} onClick={(d) => d?.name && go({ status: d.name })}>
