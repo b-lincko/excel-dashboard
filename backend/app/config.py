@@ -67,14 +67,19 @@ class AppConfig(BaseModel):
         default_factory=lambda: [
             "Linkco_MR_Log (SH5 & SH1)",
             "Linkco_MR_Log (F5)",
+            "Linkco_MR_Log (Office)",
+            "Linkco_MR_Log (Accommodations)",
         ]
     )
     worksheet_labels: dict[str, str] = Field(
         default_factory=lambda: {
             "Linkco_MR_Log (SH5 & SH1)": "SH5-SH1",
             "Linkco_MR_Log (F5)": "F5",
+            "Linkco_MR_Log (Office)": "Office",
+            "Linkco_MR_Log (Accommodations)": "Accommodations",
         }
     )
+    extra_sites: list[str] = Field(default_factory=lambda: ["Office", "Accommodations"])
     lists_worksheet: str = ""
     header_row: int = 3
     data_start_row: int = 4
@@ -101,6 +106,17 @@ class AppConfig(BaseModel):
     status_open_values: list[str] = Field(default_factory=lambda: ["OPEN"])
     placed_statuses: list[str] = Field(default_factory=lambda: ["PLACED"])
     pending_statuses: list[str] = Field(default_factory=lambda: ["OPEN", "UNDER NTP", "ON HOLD"])
+    delay_open_statuses: list[str] = Field(default_factory=lambda: ["OPEN"])
+    delay_pending_statuses: list[str] = Field(default_factory=lambda: ["PENDING"])
+    delay_excluded_statuses: list[str] = Field(
+        default_factory=lambda: [
+            "CLOSED",
+            "CLOSE",
+            "PLACED",
+            "ESTIMATION PRICE",
+            "DELIVERED MATERIAL INSPECTION",
+        ]
+    )
     due_offsets: dict[str, int] = Field(
         default_factory=lambda: {
             "direct cash": 3,

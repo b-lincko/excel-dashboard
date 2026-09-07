@@ -100,3 +100,44 @@ def notify_watchers(
         notify(name, "watch", summary, record_id=rid, work_order_id=wo)
         sent.append(name)
     return sent
+
+
+def notify_thread_message(
+    actor: str,
+    thread: dict[str, Any],
+    text: str,
+    skip: Optional[set[str]] = None,
+) -> list[str]:
+    """Inbox ping for chat messages (DM, channel, work-order thread)."""
+    snippet = " ".join((text or "").split())
+    if len(snippet) > 180:
+        snippet = snippet[:177] + "…"
+    ignored = set(skip or set())
+    ignored.add(actor)
+    members = [str(n) for n in (thread.get("members") or []) if n]
+    kind = str(thread.get("kind") or "")
+    if kind in {"channel", "work_order"} and not members:
+        members = [u["username"] for u in database.list_users() if u.get("is_active") and u.get("username")]
+    title = str(thread.get("title") or "chat").strip() or "chat"
+    rid = str(thread.get("record_id") or "")
+    wo = str(thread.get("work_order_id") or "")
+    tid = thread.get("id")
+    try:
+        tid_int = int(tid) if tid is not None else None
+    except (TypeError, ValueError):
+        tid_int = None
+    sent: list[str] = []
+    for name in members:
+        if name in ignored:
+            continue
+        notify(
+            name,
+            "message",
+            f"{actor} in {title}: {snippet}",
+            record_id=rid,
+            work_order_id=wo,
+            thread_id=tid_int,
+        )
+        sent.append(name)
+        ignored.add(name)
+    return sent

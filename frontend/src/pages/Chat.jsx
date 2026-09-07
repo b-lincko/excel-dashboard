@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
@@ -7,6 +7,7 @@ import { useUi } from "../context/UiContext.jsx";
 export default function Chat() {
   const { user } = useAuth();
   const { toast } = useUi();
+  const [params] = useSearchParams();
   const [threads, setThreads] = useState([]);
   const [people, setPeople] = useState([]);
   const [active, setActive] = useState(null);
@@ -18,11 +19,22 @@ export default function Chat() {
   const lastId = messages.length ? messages[messages.length - 1].id : 0;
 
   function loadThreads() {
-    return api.get("/api/chat/threads").then((d) => setThreads(d.items || []));
+    return api.get("/api/chat/threads").then((d) => {
+      setThreads(d.items || []);
+      return d;
+    });
   }
 
   useEffect(() => {
-    loadThreads().catch((e) => toast(e.message, "error"));
+    loadThreads()
+      .then((d) => {
+        const want = Number(params.get("thread") || 0);
+        if (want) {
+          const hit = (d?.items || []).find((t) => Number(t.id) === want);
+          if (hit) setActive(hit);
+        }
+      })
+      .catch((e) => toast(e.message, "error"));
     api.get("/api/chat/people").then((d) => setPeople(d.items || [])).catch(() => {});
   }, []);
 

@@ -65,13 +65,53 @@ def is_placed(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
     return _norm(rec.get("status")) in status_set(values)
 
 
-def is_overdue(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optional[date] = None) -> bool:
-    if is_closed(rec, cfg):
+def site_choices(cfg: Optional[AppConfig] = None) -> list[str]:
+    """Known site labels for filters. All sites is a UI-only option, not a department value."""
+    cfg = cfg or load_config()
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw in list((cfg.worksheet_labels or {}).values()) + list(getattr(cfg, "extra_sites", None) or []):
+        name = str(raw or "").strip()
+        key = name.lower()
+        if not name or key in {"all sites", "all"} or key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
+
+
+def _delay_excluded(rec: dict[str, Any], cfg: AppConfig) -> bool:
+    st = _norm(rec.get("status"))
+    excluded = status_set(
+        list(cfg.closed_statuses or [])
+        + list(getattr(cfg, "placed_statuses", None) or ["PLACED"])
+        + list(getattr(cfg, "cancelled_statuses", None) or [])
+        + list(getattr(cfg, "delay_excluded_statuses", None) or [])
+    )
+    excluded.update({"close", "closed", "placed", "estimation price", "delivered material inspection"})
+    return st in excluded
+
+
+def is_delayed(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optional[date] = None) -> bool:
+    """Delay = OPEN past due date, or PENDING. Closed / placed / estimation / inspection are never delay."""
+    cfg = cfg or load_config()
+    if _delay_excluded(rec, cfg):
         return False
+    st = _norm(rec.get("status"))
+    pending = status_set(getattr(cfg, "delay_pending_statuses", None) or ["PENDING"])
+    open_vals = status_set(getattr(cfg, "delay_open_statuses", None) or getattr(cfg, "status_open_values", None) or ["OPEN"])
     due = to_date(rec.get("due_date"))
-    if not due:
-        return False
-    return due < (on or today())
+    if st in pending:
+        return True
+    if st in open_vals:
+        if not due:
+            return False
+        return due < (on or today())
+    return False
+
+
+def is_overdue(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optional[date] = None) -> bool:
+    return is_delayed(rec, cfg, on=on)
 
 
 def is_ntp(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
@@ -368,6 +408,8 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
         return False
     if flag == "overdue" and not is_overdue(rec, cfg):
         return False
+    if flag == "delayed" and not is_delayed(rec, cfg):
+        return False
     if flag == "pending" and not is_pending(rec, cfg):
         return False
     if flag == "in_progress" and not is_in_progress(rec, cfg):
@@ -511,6 +553,7 @@ def annotate(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> dict[str, 
     out["is_status_open"] = is_status_open(rec, cfg)
     out["is_placed"] = is_placed(rec, cfg)
     out["is_overdue"] = is_overdue(rec, cfg)
+    out["is_delayed"] = out["is_overdue"]
     out["is_pending"] = is_pending(rec, cfg)
     out["is_in_progress"] = is_in_progress(rec, cfg)
     out["aging_days"] = aging_days(rec)

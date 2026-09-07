@@ -177,6 +177,10 @@ export default function Settings() {
         <ListField label="Placed statuses" value={cfg.placed_statuses} onChange={(v) => setCfg({ ...cfg, placed_statuses: v })} disabled={!can("settings")} />
         <ListField label="Closed statuses" value={cfg.closed_statuses} onChange={(v) => setCfg({ ...cfg, closed_statuses: v })} disabled={!can("settings")} />
         <ListField label="Pending statuses" value={cfg.pending_statuses} onChange={(v) => setCfg({ ...cfg, pending_statuses: v })} disabled={!can("settings")} />
+        <ListField label="Delay: Open (only if due date passed)" value={cfg.delay_open_statuses} onChange={(v) => setCfg({ ...cfg, delay_open_statuses: v })} disabled={!can("settings")} />
+        <ListField label="Delay: Pending" value={cfg.delay_pending_statuses} onChange={(v) => setCfg({ ...cfg, delay_pending_statuses: v })} disabled={!can("settings")} />
+        <ListField label="Never count as delay" value={cfg.delay_excluded_statuses} onChange={(v) => setCfg({ ...cfg, delay_excluded_statuses: v })} disabled={!can("settings")} />
+        <ListField label="Extra sites" value={cfg.extra_sites} onChange={(v) => setCfg({ ...cfg, extra_sites: v })} disabled={!can("settings")} />
         <ListField label="In-progress statuses" value={cfg.in_progress_statuses} onChange={(v) => setCfg({ ...cfg, in_progress_statuses: v })} disabled={!can("settings")} />
         <ListField label="Cancelled statuses" value={cfg.cancelled_statuses} onChange={(v) => setCfg({ ...cfg, cancelled_statuses: v })} disabled={!can("settings")} />
         <div className="md:col-span-2">

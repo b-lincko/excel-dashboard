@@ -143,6 +143,13 @@ export default function Layout() {
     };
   }, []);
 
+  function loadInbox() {
+    api
+      .get("/api/notifications?limit=40")
+      .then(setInbox)
+      .catch(() => {});
+  }
+
   async function loadSync() {
     try {
       const next = await api.get("/api/sync/ping");
@@ -177,6 +184,12 @@ export default function Layout() {
         });
       });
     const id = setInterval(loadSync, 3000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    loadInbox();
+    const id = setInterval(loadInbox, 8000);
     return () => clearInterval(id);
   }, []);
 
@@ -372,7 +385,10 @@ export default function Layout() {
             <div className="relative" ref={inboxRef}>
               <button
                 className="btn-ghost !px-2 relative"
-                onClick={() => setInboxOpen((v) => !v)}
+                onClick={() => {
+                  setInboxOpen((v) => !v);
+                  loadInbox();
+                }}
                 title="Notifications"
                 aria-label="Notifications"
               >
@@ -409,7 +425,8 @@ export default function Layout() {
                           await api.post("/api/notifications/read", { ids: [n.id] });
                           loadInbox();
                           if (n.record_id) nav(`/work-orders/${encodeURIComponent(n.record_id)}`);
-                          else if (n.thread_id) nav("/chat");
+                          else if (n.thread_id) nav(`/chat?thread=${encodeURIComponent(n.thread_id)}`);
+                          else nav("/chat");
                           setInboxOpen(false);
                         }}
                       >
@@ -418,7 +435,7 @@ export default function Layout() {
                         <div className="text-[11px] text-slate-400 mt-0.5">{n.created_at}</div>
                       </button>
                     ))}
-                    {!inbox.items?.length && <div className="px-3 py-6 text-sm text-slate-500">No mentions or watch updates yet.</div>}
+                    {!inbox.items?.length && <div className="px-3 py-6 text-sm text-slate-500">No messages yet.</div>}
                   </div>
                 </div>
               )}

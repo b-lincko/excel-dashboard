@@ -6,6 +6,7 @@ import { useLiveReload } from "../lib/live.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 import Filters from "../components/Filters.jsx";
+import SiteSwitcher from "../components/SiteSwitcher.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 
 const ALL_COLS = [
@@ -71,6 +72,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
   const tick = useLiveReload();
   const [filters, setFilters] = useState(() => fromSearch(loc.search, presetFlag));
   const [options, setOptions] = useState({});
+  const [sites, setSites] = useState([]);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -112,7 +114,10 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
   }, [q]);
 
   useEffect(() => {
-    api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
+    api.get("/api/work-orders/options").then((d) => {
+      setOptions(d.options || {});
+      setSites(d.sites || []);
+    }).catch(() => {});
     api.get("/api/views").then((d) => setViews(d.items || [])).catch(() => {});
   }, []);
 
@@ -307,6 +312,19 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
           )}
         </div>
       </div>
+
+      <SiteSwitcher
+        value={filters.department || ""}
+        sites={sites}
+        onChange={(id) => {
+          setFilters((f) => {
+            const next = { ...f, department: id || undefined };
+            if (presetFlag && !next.flag) next.flag = presetFlag;
+            return next;
+          });
+          setPage(1);
+        }}
+      />
 
       <Filters
         value={filters}

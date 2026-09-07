@@ -6,7 +6,28 @@ import { useUi } from "../context/UiContext.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 
 const EXTRA_KEYS = ["delay_kind", "delay_source", "delay_justification"];
-const PENDING_STATUSES = new Set(["open", "under ntp", "on hold"]);
+const DELAY_OPEN = new Set(["open"]);
+const DELAY_PENDING = new Set(["pending"]);
+const DELAY_NEVER = new Set(["closed", "close", "placed", "estimation price", "delivered material inspection"]);
+const EXTRA_SITES = ["SH5-SH1", "F5", "Office", "Accommodations"];
+
+function duePassed(value) {
+  if (!value) return false;
+  const due = new Date(String(value).replace(" ", "T"));
+  if (Number.isNaN(due.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  return due < today;
+}
+
+function canAddDelay(form) {
+  const st = String(form.status || "").trim().toLowerCase();
+  if (!st || DELAY_NEVER.has(st)) return false;
+  if (DELAY_PENDING.has(st)) return true;
+  if (DELAY_OPEN.has(st)) return duePassed(form.due_date);
+  return false;
+}
 const DUE_OFFSET_FALLBACK = {
   "direct cash": 3,
   "local po": 5,
@@ -81,7 +102,7 @@ export default function WorkOrderDetail() {
     const keys = [...FIELDS.map(([key]) => key), ...EXTRA_KEYS];
     return keys.some((key) => String(form[key] ?? "") !== String(original[key] ?? ""));
   }, [form, original]);
-  const isPending = PENDING_STATUSES.has(String(form.status || "").trim().toLowerCase());
+  const showDelay = canAddDelay(form);
   const dueDays = dueOffsets[String(form.work_type || "").trim().toLowerCase()];
   const readOnly = isNew ? !can("create") : !can("edit");
   const canSave = isNew ? can("create") : can("edit");
@@ -421,7 +442,7 @@ export default function WorkOrderDetail() {
               </>
             ) : type === "site" ? (
               <select value={form[key] || ""} onChange={(e) => setField(key, e.target.value)} disabled={!isNew || readOnly}>
-                {(options.department || ["SH5-SH1", "F5"]).map((o) => (
+                {Array.from(new Set([...(options.department || []), ...EXTRA_SITES])).map((o) => (
                   <option key={o} value={o}>
                     {o}
                   </option>
@@ -497,12 +518,12 @@ export default function WorkOrderDetail() {
           </div>
         ))}
       </div>
-      {isPending && (
+      {showDelay && (
         <div className="card p-5 space-y-3">
           <div>
-            <div className="font-semibold">Delay (pending only)</div>
+            <div className="font-semibold">Delay</div>
             <p className="text-xs text-slate-500">
-              Placement delay, delivery delay and justification. Source: site, procurement or supplier. Stored in the app database, not Excel.
+              Open past due date, or Pending. Closed, Placed, Estimation Price and Delivered Material Inspection are not delays.
             </p>
           </div>
           <div className="grid md:grid-cols-2 gap-4">

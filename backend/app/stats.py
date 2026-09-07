@@ -22,6 +22,7 @@ from .domain import (
     is_status_open,
     matches_filters,
     reason_for_open,
+    site_choices,
     today,
 )
 from .excel.service import excel_service
@@ -562,6 +563,11 @@ def _options_from(records: list[dict[str, Any]]) -> dict[str, list[str]]:
     for field in fields:
         vals = {str(r.get(field)).strip() for r in records if str(r.get(field) or "").strip()}
         out[field] = sorted(vals, key=str.lower)
+    extra = site_choices()
+    depts = set(out.get("department") or [])
+    depts.update(extra)
+    out["department"] = sorted(depts, key=str.lower)
+    out["sites"] = extra
     return out
 
 
@@ -617,6 +623,7 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
         "recent": [annotate(r, cfg) for r in recent],
         "ops": ops_counts(records),
         "options": _options_from(all_records),
+        "sites": [{"id": "", "label": "All sites"}, *[{"id": s, "label": s} for s in site_choices(cfg)]],
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "as_of": t.isoformat(),
         "count": len(records),

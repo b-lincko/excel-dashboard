@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from .. import database, notify, reports
 from ..config import load_config
 from ..dates import to_date
-from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_for_open, today
+from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_for_open, site_choices, today
 from ..excel.service import DELAY_FIELDS, DUE_OFFSETS, ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
 from ..security import editable_fields, forbidden_fields, require_permission
 from ..stats import parse_query_filters
@@ -221,10 +221,16 @@ def options(user=Depends(require_permission("view"))):
     catalog_names = [s["name"] for s in database.list_suppliers() if s.get("name")]
     suppliers = sorted({*opts.get("supplier", []), *catalog_names}, key=str.lower)
     opts["supplier"] = suppliers
+    sites = site_choices(cfg)
+    for name in sites:
+        if name not in opts.get("department", []):
+            opts.setdefault("department", []).append(name)
+    opts["department"] = sorted(opts.get("department") or [], key=str.lower)
     offsets = dict(DUE_OFFSETS)
     offsets.update({str(k).lower(): int(v) for k, v in (cfg.due_offsets or {}).items()})
     return {
         "options": opts,
+        "sites": [{"id": "", "label": "All sites"}, *[{"id": s, "label": s} for s in sites]],
         "lists": lists,
         "mapping": cfg.mapping.model_dump(),
         "headers": excel_service.headers(),
@@ -514,12 +520,16 @@ def post_work_order_chat(wo_id: str, body: ChatBody, user=Depends(require_permis
         work_order_id=str(rec.get("work_order_id") or ""),
         thread_id=int(thread["id"]),
     )
-    notify.notify_watchers(
-        user["username"],
-        rec,
-        f"{user['username']} commented on {rec.get('work_order_id') or wo_id}",
-        skip=set(pinged),
+    skip = set(pinged)
+    skip.update(
+        notify.notify_watchers(
+            user["username"],
+            rec,
+            f"{user['username']} commented on {rec.get('work_order_id') or wo_id}",
+            skip=skip,
+        )
     )
+    notify.notify_thread_message(user["username"], thread, text, skip=skip)
     return {"thread": thread, "item": item}
 
 

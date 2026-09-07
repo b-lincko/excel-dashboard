@@ -134,13 +134,17 @@ def post_message(thread_id: int, body: ChatMessageIn, user=Depends(require_permi
         record_id=str(thread.get("record_id") or ""),
         work_order_id=str(thread.get("work_order_id") or ""),
     )
+    skip = set(pinged)
     if thread.get("kind") == "work_order" and thread.get("record_id"):
-        notify.notify_watchers(
-            user["username"],
-            {"record_id": thread.get("record_id"), "work_order_id": thread.get("work_order_id")},
-            f"{user['username']} commented on {thread.get('title') or thread.get('work_order_id')}",
-            skip=set(pinged),
+        skip.update(
+            notify.notify_watchers(
+                user["username"],
+                {"record_id": thread.get("record_id"), "work_order_id": thread.get("work_order_id")},
+                f"{user['username']} commented on {thread.get('title') or thread.get('work_order_id')}",
+                skip=skip,
+            )
         )
+    notify.notify_thread_message(user["username"], thread, text, skip=skip)
     return {"item": item}
 
 

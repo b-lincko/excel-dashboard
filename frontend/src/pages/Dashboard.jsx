@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { LayoutGrid, Plus, RotateCcw } from "lucide-react";
 import { api, qs } from "../lib/api.js";
 import Filters from "../components/Filters.jsx";
+import SiteSwitcher from "../components/SiteSwitcher.jsx";
 import WidgetBoard, { AddWidgetBar } from "../components/WidgetBoard.jsx";
 import {
   DEFAULT_LAYOUT,
@@ -151,6 +152,12 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      <SiteSwitcher
+        value={filters.department || ""}
+        sites={data?.sites || (options.sites || []).map((s) => (typeof s === "string" ? { id: s, label: s } : s))}
+        onChange={(id) => setFilters((f) => ({ ...f, department: id || undefined }))}
+      />
 
       <Filters value={filters} onChange={setFilters} options={options} />
 

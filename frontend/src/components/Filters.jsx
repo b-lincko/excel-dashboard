@@ -52,7 +52,7 @@ export default function Filters({ value, onChange, options = {}, extra }) {
         )}
         <Select label="Status" field="status" value={v} set={set} options={options.status} />
         <Select label="Priority" field="priority" value={v} set={set} options={options.priority} />
-        <Select label="Department" field="department" value={v} set={set} options={options.department} />
+        <Select label="Site" field="department" value={v} set={set} options={options.department} />
         <Select label="Assigned to" field="assigned_to" value={v} set={set} options={options.assigned_to} />
         <Select label="Location" field="location" value={v} set={set} options={options.location} />
         <Select label="Work type" field="work_type" value={v} set={set} options={options.work_type} />
