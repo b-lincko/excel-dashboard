@@ -10,9 +10,9 @@ See `SKILLS.md` for AI requirements and data-flow rules.
 
 | Sheet | Role |
 | ----- | ---- |
-| **Linkco_MR_Log (SH5 & SH1)** | Data — Shield 5 & Shield 1 (~1,980 MRs). Excel table `Table1` `A3:T11112` |
+| **Linkco_MR_Log (SH5 & SH1)** | Data — Shield 5 & Shield 1 (~1,986 MRs). Excel table `Table1` `A3:T11112` |
 | **SH1 & SH5 - REPORT** | Procurement report (formulas / charts) — **never written by the app** |
-| **Linkco_MR_Log (F5)** | Data — Falcon 5 (~202 MRs). Excel table `Table16` |
+| **Linkco_MR_Log (F5)** | Data — Falcon 5 (~207 MRs). Excel table `Table16` |
 | **F5 - REPORT** | Falcon 5 report — **never written** |
 | **File Pah** / **File Pah (F5)** | UNC paths used by hyperlink formulas |
 

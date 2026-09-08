@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (camp sites: SH5 Site-1/2/3/4A/5/7 and SH1 L1–L7 / LS1 / LS2 on the SH5-SH1 log).
+Last updated: 2026-09-08 (live workbook + DB seeded from Test 002 log; camp sites unchanged).
 
 ---
 
@@ -446,3 +446,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-08** Production audit: lockout, hide jwt_secret, attachment path, generic 500s, password min 8. Training deck `docs/training/index.html`. Go-live still requires password change, HTTPS off-LAN, autobackup on, off-box copies.
 - **2026-09-08** Users page is full CRUD + access matrix. Extra permissions union with role. Last admin cannot be removed. Account can edit name/email and password.
 - **2026-09-08** Audit follow-up: header search uses `/suggest`; `/api/sync/upload` is settings-only; default passwords must be changed (`must_change_password`, skipped under pytest); logout revokes JWT `jti`; extras cannot grant users/settings/backup; write-safety backups prune to 8; autobackup defaults on; refresh `hard: false`.
+- **2026-09-08** Live `file.xlsx` replaced from `1. Material Request_LOG - Test 002.xlsx` via `replace_from_bytes` (paired backup, then seed). `wo_cache` replaced 2182 → 2193 by `record_id`. Do not append a second copy of the log. Several MRs per IM WO stay — that is not a duplicate row.
