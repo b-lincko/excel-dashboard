@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (Priority case-fold, blockades exclude OPEN/PLACED, faster Excel seed, UpKeep-like UI).
+Last updated: 2026-09-08 (Three.js mind map + login scene).
 
 ---
 
@@ -179,7 +179,10 @@ backend/app/                 FastAPI app
 frontend/src/
   pages/                     Dashboard, WorkOrders, WorkOrderDetail, Queue, Settings, Guide, …
   components/Tour.jsx        First-run tour overlay
+  components/MindMap3D.jsx   Three.js live mind map
+  components/LoginScene.jsx  Three.js sign-in network
   lib/tour.js                TOUR_STEPS v1
+  lib/webgl.js               WebGL / reduced-motion helpers
   context/                   Auth, Ui (ask/toast), Tour, Theme
 data/                        woms.db, app_config.json, attachments/  (gitignored except examples)
 file.xlsx                    Live workbook at repo root — do not clobber in tests
@@ -275,6 +278,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 
 - React + Vite + Tailwind. Dev: `0.0.0.0:5173`, proxy `/api` → `127.0.0.1:8000`.
 - UI look: light canvas, teal brand (`#0D9F8A`), white sidebar, compact KPI tiles with a left accent (UpKeep-style CMMS). Do not invent dashboard numbers to match a mock.
+- **Three.js** (`three`): Dashboard mind map is a 3D graph of **live** `/api/dashboard` counts (`MindMap3D.jsx`). Click a node still filters real records. Sign-in left panel has a decorative network (`LoginScene.jsx`) — no fake KPIs. Pause off-screen; skip auto-rotate / login scene when `prefers-reduced-motion`. List view remains as a fallback when WebGL is missing.
 - Production: `npm run build` → FastAPI serves `frontend/dist` when present.
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
 - Header: Search (completes WO / supplier / item / person / camp site), command palette (`Ctrl/⌘+K`), Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
@@ -457,3 +461,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-08** Work Orders `/options.sites` is `filter_site_items` (camp chips + Site dropdown). Suggest search includes sites. Excel replace falls back to copy-into-inode when Docker bind-mount `os.replace` returns EBUSY.
 - **2026-09-08** Dashboard mind map Sites branch (and Site performance table) group by camp / sheet chips (`SH5-S3`, `L1`, `F5`, …), not only the Excel worksheet. Click still filters `department`.
 - **2026-09-08** Excel upload/seed and backup apply run off the event loop (thread + job). UI shows upload bar, applying-backup bar, then an applied notification. `/api/auth/me` timeout must not log the user out.
+- **2026-09-08** Three.js mind map (live counts, click → Open list) plus a decorative login network. No invented statistics. Reduced-motion / no-WebGL falls back to the 2D tree.

@@ -93,7 +93,7 @@ export default function Guide() {
           <CircleHelp size={16} /> What the pages are for
         </div>
         <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
-          <Item k="Dashboard" v="Live counts. Click a number to open the list." />
+          <Item k="Dashboard" v="Live counts. The mind map is a 3D graph of those same counts — drag to orbit, click a node, then Open list. Click a KPI to open the matching rows." />
           <Item k="Work orders" v="Every MR. Bulk assign, status, remarks." />
           <Item k="Action queue" v="What to work now, grouped by urgency." />
           <Item k="Morning digest" v="Overdue / NTP / due soon by site then assignee." />

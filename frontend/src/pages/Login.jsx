@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { firstPath, useAuth } from "../context/AuthContext.jsx";
+import LoginScene from "../components/LoginScene.jsx";
 
 export default function Login() {
   const { login } = useAuth();
@@ -38,7 +39,8 @@ export default function Login() {
     <div className="min-h-screen grid lg:grid-cols-2">
       <div className="hidden lg:flex flex-col justify-between bg-brand-700 text-white p-12 relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.12),transparent_40%),radial-gradient(circle_at_80%_80%,rgba(8,94,82,0.45),transparent_40%)]" />
-        <div className="relative">
+        <LoginScene />
+        <div className="relative z-10">
           <div className="flex items-center gap-3">
             <div className="h-12 w-12 rounded-2xl bg-white text-brand-700 grid place-items-center font-extrabold">
               WO
@@ -49,7 +51,7 @@ export default function Login() {
             </div>
           </div>
         </div>
-        <div className="relative max-w-lg">
+        <div className="relative z-10 max-w-lg">
           <h1 className="text-4xl font-extrabold leading-tight tracking-tight">
             Material requests in one place.
             <span className="block text-white/90">Act on what is late, blocked, or due.</span>
@@ -58,7 +60,7 @@ export default function Login() {
             The database is the live history. Each save is copied to Excel as a backup. Claim, follow, and close MRs without hunting through the workbook.
           </p>
         </div>
-        <div className="relative text-xs text-white/50">Linkco MR · Work order management</div>
+        <div className="relative z-10 text-xs text-white/50">Linkco MR · Work order management</div>
       </div>
       <div className="grid place-items-center p-8 bg-slate-50 dark:bg-ink-900">
         <form onSubmit={submit} className="w-full max-w-sm card p-8">
