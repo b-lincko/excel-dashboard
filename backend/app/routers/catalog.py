@@ -171,6 +171,15 @@ def save_supplier(supplier_id: int, body: SupplierUpdate, user=Depends(require_p
     return {"item": _with_items(item or current)}
 
 
+@router.delete("/suppliers/{supplier_id}")
+def remove_supplier(supplier_id: int, user=Depends(require_permission("edit"))):
+    item = database.delete_supplier(supplier_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    database.add_audit(user["username"], "supplier_delete", details=f"Removed supplier {item.get('name')}")
+    return {"deleted": True, "item": item}
+
+
 @router.post("/suppliers/{supplier_id}/items")
 def add_item(supplier_id: int, body: SupplierItemBody, user=Depends(require_permission("edit"))):
     current = database.get_supplier(supplier_id)

@@ -49,7 +49,7 @@ export default function Suppliers() {
   const [card, setCard] = useState(null);
   const [cardBusy, setCardBusy] = useState(false);
   const { can } = useAuth();
-  const { toast } = useUi();
+  const { toast, ask } = useUi();
 
   useEffect(() => {
     api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
@@ -383,6 +383,38 @@ export default function Suppliers() {
               </div>
             </div>
             <div className="flex justify-end gap-2">
+              {card.id && can("edit") && (
+                <button
+                  className="btn-ghost text-rose-600 mr-auto"
+                  type="button"
+                  disabled={cardBusy}
+                  onClick={async () => {
+                    const ok = await ask({
+                      title: `Remove ${card.name}?`,
+                      body: "This removes the vendor from the catalog. Existing material requests keep the name.",
+                      confirmLabel: "Remove",
+                      danger: true,
+                    });
+                    if (!ok) return;
+                    setCardBusy(true);
+                    try {
+                      await api.del(`/api/catalog/suppliers/${card.id}`);
+                      setData((prev) => {
+                        if (!prev?.suppliers) return prev;
+                        return { ...prev, suppliers: prev.suppliers.filter((r) => r.name !== card.name) };
+                      });
+                      toast("Supplier removed from catalog", "success");
+                      setCard(null);
+                    } catch (e) {
+                      toast(e.message, "error");
+                    } finally {
+                      setCardBusy(false);
+                    }
+                  }}
+                >
+                  Remove
+                </button>
+              )}
               <button className="btn-ghost" type="button" onClick={() => setCard(null)}>
                 Cancel
               </button>

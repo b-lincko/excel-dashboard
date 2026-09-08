@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (Three.js mind map + login scene).
+Last updated: 2026-09-08 (Chat clear/delete; no auto-thread; catalog remove).
 
 ---
 
@@ -284,7 +284,8 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - Header: Search (completes WO / supplier / item / person / camp site), command palette (`Ctrl/⌘+K`), Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
 - Work-order list columns persist in `localStorage["woms.columns"]`. The Site column shows the camp (`Site - 1`, `L1`, …) when it can be inferred from WO Asset Name; `department` in SQLite stays the worksheet (`SH5-SH1` / `F5`). Work Orders site chips and the Site dropdown use `filter_site_items` (same camps as Dashboard). The Dashboard mind map **Sites** branch and Site performance table use those same camp/sheet chips (`group_by_sites`). Search applies the filters currently set.
 - Reports (`/reports`): Daily and Weekly are on-screen briefings. Choose a calendar date (prev/next, Today / This week). Daily = that day only; weekly = ISO Monday–Sunday of that date. JSON at `GET /api/reports/{daily|weekly}?fmt=json&as_of=`. PDF is one A4 portrait page; XLSX is one sheet with `fitToHeight=1`. Other report kinds stay download-only under the More tab.
-- Work order editor: **one** Items & suppliers form. Type to complete supplier and item names (`TypeAhead`). Alt+Enter adds a row. No “Add supplier” on the MR page — add vendors on Materials. Supplier list is unique (`unique_supplier_names`). Type `@` in remarks/chat. Header search hits `GET /api/work-orders/suggest`. List search also matches `mr_lines`. Presence heartbeat shows who else has the MR open.
+- Work order editor: **one** Items & suppliers form. Type to complete supplier and item names (`TypeAhead`). Alt+Enter adds a row. No “Add supplier” on the MR page — add vendors on Materials (Catalog tab can **remove** them; `DELETE /api/catalog/suppliers/{id}`). Supplier list is unique (`unique_supplier_names`). Type `@` in remarks/chat. Header search hits `GET /api/work-orders/suggest`. List search also matches `mr_lines`. Presence heartbeat shows who else has the MR open.
+- **Chat:** `GET /api/work-orders/{id}/chat` does **not** create a thread. `POST` the first message does. Listing threads hides empty DMs and empty WO threads. UI: People click opens a draft until Send. **Clear chat** (`DELETE /api/chat/threads/{id}/messages`) and **Delete chat** (`DELETE /api/chat/threads/{id}`; General is protected). Author or admin can delete one message. Header ping/inbox polls every 8s (not 3s).
 - Filters start collapsed; chips remove filters. A **Search** button applies the current filters (Dashboard opens the matching Work Orders list).
 - Settings Excel upload / Upload & restore show a progress overlay (Uploading Excel → Applying backup → Applied). Work runs in a background job (`POST /api/settings/jobs/excel-upload` or `/jobs/backup-apply`, poll `GET /api/settings/jobs/{id}`) so login stays available. A request timeout must **not** clear the JWT.
 - After Settings StrReplace, **assert `function DatabasePanel` still exists** if you insert `<DatabasePanel />` (vite can build while runtime ReferenceError).
@@ -311,7 +312,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | `/api/dashboard` | KPIs / charts from live records |
 | `/api/ops` | queue, digest, alerts, handover, health scan |
 | `/api/catalog` | suppliers, materials, aliases, MR lines |
-| `/api/collab` | chat, projects, notifications, saved views |
+| `/api/collab` | chat (incl. clear/delete thread/message), projects, notifications, saved views |
 | `/api/files` | attachments |
 | `/api/reports` | Period briefings + Excel/CSV/PDF. `GET /{kind}` kinds: `daily`, `weekly`, `monthly`, `yearly`, `open`, `overdue`, `closed`, `delay`, `department`, `technician`. `fmt=pdf\|xlsx\|csv\|json`. Daily/weekly take `as_of` or `date` (ISO day). JSON for daily/weekly is `period_payload`. PDF for those kinds is inline, one page. |
 | `/api/audit` | field-level audit log |
@@ -343,6 +344,7 @@ cd frontend && npm run build
 | `tests/test_users_access.py` | User CRUD, extra grants, profile, password, last-admin guard |
 | `tests/test_audit_fixes.py` | Logout revoke, password invalidates token, upload needs settings, folder jail, write-backup prune |
 | `tests/test_priority_blockades.py` | Priority case-fold, blockades exclude OPEN/PLACED, flag=blockade |
+| `tests/test_business_flow.py` | Dummy multi-line MR, delete WO, mentions, chat clear/delete, supplier add/remove, backup pair |
 
 Pitfalls (do not repeat):
 
@@ -436,6 +438,7 @@ Must remain true:
 - [x] User management: create / modify / delete, access grants, Account profile + password
 - [x] Audit fixes: header suggest search, admin-only workbook seed, default-password gate, JWT logout revoke, extra-grant limits, write-backup prune, autobackup on by default
 - [x] Camp sites: SH5 Site - 1/2/3/4A/5/7 and SH1 L1, L2, L3, L4, L5, L7, LS1, LS2 (filters + create), no new Excel sheets
+- [x] Chat: Clear / Delete buttons; no conversation until the user sends; delete own message; catalog add/remove suppliers
 
 When you complete or change a requirement, tick/retarget it here.
 

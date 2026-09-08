@@ -239,7 +239,7 @@ export default function Layout() {
           offline: !!e.offline,
         });
       });
-    const id = setInterval(loadSync, 3000);
+    const id = setInterval(loadSync, 8000);
     return () => clearInterval(id);
   }, []);
 

@@ -98,7 +98,8 @@ export default function Guide() {
           <Item k="Action queue" v="What to work now, grouped by urgency." />
           <Item k="Morning digest" v="Overdue / NTP / due soon by site then assignee." />
           <Item k="Suppliers / PO" v="RFQ → PO → ETA board and on-time rate." />
-          <Item k="Materials" v="Who supplied an item before, plus aliases." />
+          <Item k="Materials" v="Who supplied an item before. Catalog tab adds and removes vendors. Aliases group spellings." />
+          <Item k="Chat" v="Type @ to ping someone. Clear chat / Delete chat on the thread. A DM or MR chat is created only when you send the first message." />
           {can("settings") && <Item k="Settings" v="Seed, upload Excel, reset DB. Every backup pairs SQLite + Excel." />}
           {can("users") && (
             <Item k="Users" v="Create, edit, disable or delete logins. Grant extra actions. Guests get selected pages. People change their own password on Account." />

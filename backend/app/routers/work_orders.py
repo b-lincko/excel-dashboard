@@ -653,11 +653,9 @@ def work_order_chat(wo_id: str, after: int = 0, limit: int = 200, user=Depends(r
     rec = excel_service.get_by_id(wo_id)
     if not rec:
         raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
-    thread = database.get_or_create_wo_thread(
-        str(rec.get("record_id") or ""),
-        str(rec.get("work_order_id") or ""),
-        user["username"],
-    )
+    thread = database.get_wo_thread(str(rec.get("record_id") or ""))
+    if not thread:
+        return {"thread": None, "items": []}
     items = database.list_chat_messages(int(thread["id"]), after_id=after, limit=limit)
     return {"thread": thread, "items": items}
 

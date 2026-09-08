@@ -132,6 +132,7 @@ export default function WorkOrderDetail() {
   const [watchers, setWatchers] = useState([]);
   const [editable, setEditable] = useState(null);
   const [chat, setChat] = useState([]);
+  const [chatThread, setChatThread] = useState(null);
   const [chatBody, setChatBody] = useState("");
   const [timeline, setTimeline] = useState([]);
   const [remarkRules, setRemarkRules] = useState(["*->ON HOLD", "*->CLOSED"]);
@@ -186,7 +187,10 @@ export default function WorkOrderDetail() {
             .catch(() => {});
           api
             .get(`/api/work-orders/${encodeURIComponent(rid)}/chat`)
-            .then((c) => setChat(c.items || []))
+            .then((c) => {
+              setChat(c.items || []);
+              setChatThread(c.thread || null);
+            })
             .catch(() => {});
           api
             .get(`/api/work-orders/${encodeURIComponent(rid)}/timeline`)
@@ -793,22 +797,56 @@ export default function WorkOrderDetail() {
       {tab === "activity" && !isNew && (
         <div className="space-y-4">
           <div className="card p-5 space-y-3">
-            <div>
-              <div className="font-semibold">Chat</div>
-              <p className="text-xs text-slate-500">Tied to this MR. Followers and @mentions are notified.</p>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="font-semibold">Chat</div>
+                <p className="text-xs text-slate-500">Tied to this MR. Opens only when you send a message. Followers and @mentions are notified.</p>
+              </div>
+              {chatThread && (
+                <button
+                  type="button"
+                  className="btn-ghost !px-2 !py-1 text-xs"
+                  onClick={async () => {
+                    const ok = await ask({
+                      title: "Clear this chat?",
+                      body: "Messages on this MR are removed. Send again to continue.",
+                      confirmLabel: "Clear chat",
+                      danger: true,
+                    });
+                    if (!ok) return;
+                    await api.del(`/api/chat/threads/${chatThread.id}/messages`);
+                    setChat([]);
+                    toast("Chat cleared", "success");
+                  }}
+                >
+                  Clear chat
+                </button>
+              )}
             </div>
             <div className="max-h-64 overflow-y-auto space-y-2">
               {chat.map((m) => (
-                <div key={m.id} className={`text-sm ${m.username === user?.username ? "text-right" : ""}`}>
+                <div key={m.id} className={`text-sm group ${m.username === user?.username ? "text-right" : ""}`}>
                   <div className="text-[11px] text-slate-500">
                     {m.username} · {m.created_at}
+                    {(m.username === user?.username || user?.role === "admin") && chatThread && (
+                      <button
+                        type="button"
+                        className="ml-2 text-rose-600 opacity-0 group-hover:opacity-100"
+                        onClick={async () => {
+                          await api.del(`/api/chat/threads/${chatThread.id}/messages/${m.id}`);
+                          setChat((prev) => prev.filter((x) => x.id !== m.id));
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                   <div className={`inline-block rounded-2xl px-3 py-1.5 whitespace-pre-wrap ${m.username === user?.username ? "bg-brand-700 text-white" : "bg-slate-100 dark:bg-white/5"}`}>
                     {m.body}
                   </div>
                 </div>
               ))}
-              {!chat.length && <div className="text-sm text-slate-500">No messages yet.</div>}
+              {!chat.length && <div className="text-sm text-slate-500">No messages yet. Send one to start this conversation.</div>}
             </div>
             <form
               className="flex gap-2"
@@ -819,6 +857,7 @@ export default function WorkOrderDetail() {
                 try {
                   const d = await api.post(`/api/work-orders/${encodeURIComponent(id)}/chat`, { body: textBody });
                   setChat((prev) => [...prev, d.item]);
+                  if (d.thread) setChatThread(d.thread);
                   setChatBody("");
                   api.get(`/api/work-orders/${encodeURIComponent(id)}/timeline`).then((t) => setTimeline(t.items || [])).catch(() => {});
                 } catch (err) {

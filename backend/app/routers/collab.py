@@ -148,6 +148,53 @@ def post_message(thread_id: int, body: ChatMessageIn, user=Depends(require_permi
     return {"item": item}
 
 
+@router.delete("/api/chat/threads/{thread_id}/messages/{message_id}")
+def delete_message(thread_id: int, message_id: int, user=Depends(require_permission("view"))):
+    if not database.user_can_access_thread(thread_id, user["username"]):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    item = database.get_chat_message(message_id)
+    if not item or int(item.get("thread_id") or 0) != thread_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    admin = user.get("role") == "admin"
+    try:
+        database.delete_chat_message(message_id, user["username"], admin=admin)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"deleted": True, "id": message_id}
+
+
+@router.delete("/api/chat/threads/{thread_id}/messages")
+def clear_thread_messages(thread_id: int, user=Depends(require_permission("view"))):
+    if not database.user_can_access_thread(thread_id, user["username"]):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    n = database.clear_chat_messages(thread_id)
+    return {"cleared": n, "id": thread_id}
+
+
+@router.delete("/api/chat/threads/{thread_id}")
+def delete_thread(thread_id: int, user=Depends(require_permission("view"))):
+    if not database.user_can_access_thread(thread_id, user["username"]):
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = database.get_chat_thread(thread_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    title = str(thread.get("title") or "").strip().lower()
+    if thread.get("kind") == "channel" and title == "general":
+        raise HTTPException(status_code=403, detail="The General channel cannot be deleted.")
+    admin = user.get("role") == "admin"
+    creator = str(thread.get("created_by") or "")
+    members = thread.get("members") or []
+    if not admin and creator != user["username"] and not (
+        thread.get("kind") == "direct" and user["username"] in members
+    ):
+        raise HTTPException(status_code=403, detail="Only the person who started this chat can delete it.")
+    try:
+        database.delete_chat_thread(thread_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"deleted": True, "id": thread_id}
+
+
 @router.get("/api/notifications")
 def list_notifications(limit: int = 40, unread: int = 0, user=Depends(require_permission("view"))):
     items = database.list_notifications(user["username"], unread_only=bool(unread), limit=limit)

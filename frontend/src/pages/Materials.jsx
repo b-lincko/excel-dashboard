@@ -6,6 +6,7 @@ import { useUi } from "../context/UiContext.jsx";
 
 const TABS = [
   { id: "directory", label: "Directory" },
+  { id: "catalog", label: "Catalog" },
   { id: "suggest", label: "Suggestions" },
   { id: "duplicates", label: "Duplicate names" },
   { id: "add", label: "Add supplier" },
@@ -24,10 +25,19 @@ export default function Materials({ mode = "directory" }) {
   const [aliases, setAliases] = useState([]);
   const [picked, setPicked] = useState({});
   const [form, setForm] = useState({ name: "", phone: "", email: "", contact: "", lead_time_days: "", notes: "", items: "" });
+  const [catalog, setCatalog] = useState([]);
 
   useEffect(() => {
     setTab(mode === "suggest" ? "suggest" : tab);
   }, [mode]);
+
+  useEffect(() => {
+    if (tab !== "catalog") return;
+    api
+      .get("/api/catalog/suppliers")
+      .then((d) => setCatalog(d.items || []))
+      .catch((e) => setError(e.message));
+  }, [tab]);
 
   useEffect(() => {
     if (tab !== "duplicates") return;
@@ -84,6 +94,10 @@ export default function Materials({ mode = "directory" }) {
       });
       toast(`Supplier “${name}” saved with ${items.length} item${items.length === 1 ? "" : "s"}`, "success");
       setForm({ name: "", phone: "", email: "", contact: "", lead_time_days: "", notes: "", items: "" });
+      if (tab === "catalog") {
+        const d = await api.get("/api/catalog/suppliers");
+        setCatalog(d.items || []);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -132,6 +146,8 @@ export default function Materials({ mode = "directory" }) {
       ? "Type an item. Suppliers who already provided it come from Excel history, line items, and the catalog."
       : tab === "directory"
         ? "Search a material to see who supplied it, or a supplier to see what they have provided."
+        : tab === "catalog"
+          ? "Catalog vendors you added in the app. Removing a name does not rewrite Excel history."
         : tab === "duplicates"
           ? "Excel has many spellings of the same vendor (W.L.L vs WLL, missing letters). Aliases group them without rewriting the workbook until you confirm."
           : "New suppliers and the items they can provide live in the app catalog. Excel still has one Supplier Name cell per MR.";
@@ -215,6 +231,65 @@ export default function Materials({ mode = "directory" }) {
             </div>
           ))}
           {!result.items?.length && <div className="card p-8 text-center text-sm text-slate-500">No matches in Excel, line items, or the catalog.</div>}
+        </div>
+      )}
+
+      {tab === "catalog" && (
+        <div className="card overflow-hidden">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Supplier</th>
+                <th>Items</th>
+                <th>Contact</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {catalog.map((s) => (
+                <tr key={s.id} className="!cursor-default">
+                  <td className="font-medium">{s.name}</td>
+                  <td className="text-xs text-slate-500 whitespace-normal max-w-[280px]">
+                    {(s.items || []).map((i) => i.material || i).filter(Boolean).slice(0, 8).join(" · ") || "—"}
+                  </td>
+                  <td className="text-xs text-slate-500">{s.contact || s.phone || s.email || "—"}</td>
+                  <td>
+                    {can("edit") && (
+                      <button
+                        type="button"
+                        className="btn-outline !py-1 !px-2 text-xs"
+                        onClick={async () => {
+                          const ok = await ask({
+                            title: `Remove ${s.name}?`,
+                            body: "This removes the vendor from the catalog. Existing material requests keep the name.",
+                            confirmLabel: "Remove",
+                            danger: true,
+                          });
+                          if (!ok) return;
+                          try {
+                            await api.del(`/api/catalog/suppliers/${s.id}`);
+                            setCatalog((prev) => prev.filter((x) => x.id !== s.id));
+                            toast(`Removed ${s.name}`, "success");
+                          } catch (err) {
+                            setError(err.message);
+                          }
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!catalog.length && (
+                <tr className="!cursor-default">
+                  <td colSpan={4} className="text-center text-slate-400 py-8">
+                    No catalog suppliers yet. Add one on the Add supplier tab.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       )}
 

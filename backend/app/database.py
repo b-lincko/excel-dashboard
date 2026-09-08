@@ -559,6 +559,21 @@ def add_supplier(name: str, created_by: str = "") -> dict[str, Any]:
     return dict(row)
 
 
+def delete_supplier(supplier_id: int) -> Optional[dict[str, Any]]:
+    item = get_supplier(supplier_id)
+    if not item:
+        return None
+    name = str(item.get("name") or "")
+    with connect() as conn:
+        conn.execute("DELETE FROM supplier_items WHERE supplier_name = ? COLLATE NOCASE", (name,))
+        conn.execute(
+            "DELETE FROM supplier_aliases WHERE canonical = ? COLLATE NOCASE OR alias = ? COLLATE NOCASE",
+            (name, name),
+        )
+        conn.execute("DELETE FROM suppliers WHERE id = ?", (supplier_id,))
+    return item
+
+
 def update_supplier(supplier_id: int, **fields: Any) -> Optional[dict[str, Any]]:
     allowed = {"name", "phone", "email", "contact", "lead_time_days", "notes"}
     sets = []
@@ -905,7 +920,11 @@ def list_chat_threads(username: str) -> list[dict[str, Any]]:
                       (SELECT COUNT(*) FROM chat_messages m WHERE m.thread_id = t.id) AS message_count
                FROM chat_threads t
                LEFT JOIN chat_members cm ON cm.thread_id = t.id AND cm.username = ?
-               WHERE t.kind IN ('channel', 'work_order') OR cm.username IS NOT NULL
+               WHERE (
+                       t.kind = 'channel'
+                    OR (t.kind = 'work_order' AND EXISTS (SELECT 1 FROM chat_messages m0 WHERE m0.thread_id = t.id))
+                    OR (cm.username IS NOT NULL AND EXISTS (SELECT 1 FROM chat_messages m0 WHERE m0.thread_id = t.id))
+                   )
                ORDER BY COALESCE(last_at, t.created_at) DESC""",
             (username,),
         ).fetchall()
@@ -1031,6 +1050,43 @@ def add_chat_message(thread_id: int, username: str, body: str) -> dict[str, Any]
         row = conn.execute("SELECT * FROM chat_messages WHERE id = ?", (mid,)).fetchone()
     assert row is not None
     return dict(row)
+
+
+def get_chat_message(message_id: int) -> Optional[dict[str, Any]]:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM chat_messages WHERE id = ?", (message_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def delete_chat_message(message_id: int, username: str, *, admin: bool = False) -> Optional[dict[str, Any]]:
+    item = get_chat_message(message_id)
+    if not item:
+        return None
+    if not admin and str(item.get("username") or "") != str(username or ""):
+        raise PermissionError("You can only delete your own messages.")
+    with connect() as conn:
+        conn.execute("DELETE FROM chat_messages WHERE id = ?", (message_id,))
+    return item
+
+
+def clear_chat_messages(thread_id: int) -> int:
+    with connect() as conn:
+        cur = conn.execute("DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,))
+        return int(cur.rowcount or 0)
+
+
+def delete_chat_thread(thread_id: int) -> Optional[dict[str, Any]]:
+    item = get_chat_thread(thread_id)
+    if not item:
+        return None
+    title = str(item.get("title") or "").strip().lower()
+    if item.get("kind") == "channel" and title == "general":
+        raise ValueError("The General channel cannot be deleted.")
+    with connect() as conn:
+        conn.execute("DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,))
+        conn.execute("DELETE FROM chat_members WHERE thread_id = ?", (thread_id,))
+        conn.execute("DELETE FROM chat_threads WHERE id = ?", (thread_id,))
+    return item
 
 
 def list_chat_messages(thread_id: int, after_id: int = 0, limit: int = 200) -> list[dict[str, Any]]:
