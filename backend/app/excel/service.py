@@ -23,6 +23,7 @@ from openpyxl.worksheet.formula import ArrayFormula
 from .. import database
 from ..config import AppConfig, load_config, norm_header
 from ..dates import format_date, parse_date
+from ..domain import apply_site_on_record, excel_sheet_alias
 
 DUE_OFFSETS = {
     "direct cash": 3,
@@ -40,7 +41,7 @@ DELAY_FIELDS = ("delay_kind", "delay_source", "delay_justification")
 
 def resolve_data_sheet(site: str, available: list[str], labels: Optional[dict[str, str]] = None) -> str:
     """Map a site label to an existing worksheet. Never silently write to another site."""
-    site = str(site or "").strip()
+    site = excel_sheet_alias(str(site or "").strip()) or str(site or "").strip()
     labels = labels or {}
     mapped = None
     for sn, lab in labels.items():
@@ -364,11 +365,13 @@ class ExcelService:
     def _merge_mapped(self, current: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
         target = dict(current)
         allowed = set(self.cfg().mapping.model_dump().keys())
+        allowed.add("camp_site")
         for k, v in (changes or {}).items():
             if str(k).startswith("_") or k in {"record_id", "department"}:
                 continue
             if k in allowed:
                 target[k] = v if v is not None else ""
+        target = apply_site_on_record(target, self.cfg())
         self._apply_due_date(target)
         return target
 
@@ -1405,6 +1408,7 @@ class ExcelService:
             if isinstance(exc, (KeyError, ValueError)) and "Database save failed" in str(exc):
                 raise
             recs = database.load_wo_cache()
+            data = apply_site_on_record(data, self.cfg())
             site = str(data.get("department") or data.get("_site") or data.get("_sheet") or "")
             sheet_name = site or ((self.cfg().worksheets or ["sheet"])[0])
             wo_id = str(data.get("work_order_id") or "").strip() or self._next_id(recs, sheet_name)
@@ -1781,6 +1785,7 @@ class ExcelService:
                 allowed = set(self.cfg().mapping.model_dump().keys())
                 for idx, data in enumerate(cleaned, start=1):
                     try:
+                        data = apply_site_on_record(data, self.cfg())
                         target = None
                         rid = str(data.get("record_id") or "").strip()
                         wo_id = str(data.get("work_order_id") or "").strip()

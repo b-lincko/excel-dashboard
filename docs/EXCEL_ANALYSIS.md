@@ -83,12 +83,13 @@ Open rows are grouped by **STATUS** (and delivery status when it is not “Deliv
 
 ## 7. Department / technician
 
-- Site: SH5-SH1 vs F5 (worksheet)  
-- Technician: Assign to  
-- Category: Purchase Type  
-- Asset: WO Asset Name  
+- Worksheet site: SH5-SH1 vs F5 (`department` / `_site`)
+- Camp site (app-only): SH5 Site - 1/2/3/4A/5/7 and SH1 L1, L2, L3, L4, L5, L7, LS1, LS2 — inferred from WO Asset Name, stored as `camp_site` in SQLite when set
+- Technician: Assign to
+- Category: Purchase Type
+- Asset: WO Asset Name
 
-There is no separate “department” column.
+There is no separate “department” or camp-site column in Excel. Do not add log sheets for those camps.
 
 ## 8. Missing / special fields
 

@@ -9,7 +9,17 @@ from pydantic import BaseModel, Field
 from .. import database, notify, reports
 from ..config import load_config
 from ..dates import to_date
-from ..domain import aging_days, annotate, is_overdue, matches_filters, reason_for_open, site_choices, today
+from ..domain import (
+    aging_days,
+    annotate,
+    camp_site_catalog,
+    filter_site_items,
+    is_overdue,
+    matches_filters,
+    reason_for_open,
+    site_choices,
+    today,
+)
 from ..excel.service import DELAY_FIELDS, DUE_OFFSETS, ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
 from ..materials import apply_lines_to_excel_fields, merge_choices, normalize_lines, persist_work_order_lines, unique_supplier_names
 from ..security import editable_fields, forbidden_fields, require_permission
@@ -276,10 +286,16 @@ def options(user=Depends(require_permission("view"))):
     opts["mention_users"] = mention_users
     opts["supplier_items"] = supplier_items
     sites = site_choices(cfg)
+    camps = camp_site_catalog(cfg)
     for name in sites:
         if name not in opts.get("department", []):
             opts.setdefault("department", []).append(name)
+    for camp in camps:
+        for name in (camp.get("label"), camp.get("group")):
+            if name and name not in opts.get("department", []):
+                opts.setdefault("department", []).append(name)
     opts["department"] = sorted(opts.get("department") or [], key=str.lower)
+    opts["camp_sites"] = camps
     offsets = dict(DUE_OFFSETS)
     offsets.update({str(k).lower(): int(v) for k, v in (cfg.due_offsets or {}).items()})
     return {

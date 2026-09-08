@@ -291,7 +291,14 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
     const header = cols.map((c) => c[1]);
     const lines = [header.join(",")];
     (d.items || []).forEach((r) => {
-      lines.push(cols.map((c) => `"${String(r[c[0]] ?? "").replace(/"/g, '""')}"`).join(","));
+      lines.push(
+        cols
+          .map((c) => {
+            const val = c[0] === "department" ? r.site_display || r.camp_site_label || r[c[0]] : r[c[0]];
+            return `"${String(val ?? "").replace(/"/g, '""')}"`;
+          })
+          .join(",")
+      );
     });
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
@@ -549,6 +556,8 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
                         <span className="font-mono text-xs font-semibold">{r[k]}</span>
                       ) : k === "days_overdue" ? (
                         r[k] ? <span className="text-rose-600 font-semibold">{r[k]}</span> : "—"
+                      ) : k === "department" ? (
+                        r.site_display || r.camp_site_label || r[k] || "—"
                       ) : (
                         r[k] ?? "—"
                       )}

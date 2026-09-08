@@ -7,7 +7,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app.config import AppConfig  # noqa: E402
-from app.domain import is_delayed, is_overdue, matches_filters, site_choices  # noqa: E402
+from app.domain import (  # noqa: E402
+    apply_site_on_record,
+    filter_site_items,
+    infer_camp_site,
+    is_delayed,
+    is_overdue,
+    matches_filters,
+    site_choices,
+)
 
 
 def test_site_choices_include_office_and_accommodations():
@@ -47,6 +55,60 @@ def test_delay_excludes_close_placed_estimation_inspection():
         assert matches_filters({**past, "status": status}, {"flag": "overdue"}, cfg) is False
 
 
+def test_camp_sites_are_filter_chips_not_worksheet_names():
+    cfg = AppConfig()
+    names = [n.lower() for n in site_choices(cfg)]
+    assert "site - 1" not in names
+    assert "l1" not in names
+    items = filter_site_items(cfg)
+    ids = [i["id"] for i in items]
+    labels = [i["label"] for i in items]
+    assert "SH5-S1" in ids
+    assert "Site - 1" in labels
+    assert "Site - 4A" in labels
+    assert "SH1-LS2" in ids
+    assert "LS2" in labels
+    assert "L7" in labels
+    assert "SH5" in ids
+    assert "SH1" in ids
+    assert "Office" in ids
+    assert "SH5-SH1" in ids
+
+
+def test_infer_camp_site_from_asset_name():
+    cfg = AppConfig()
+    assert infer_camp_site({"department": "SH5-SH1", "location": "S1-B406-RXXX-CRAC 01"}, cfg)["id"] == "SH5-S1"
+    assert infer_camp_site({"department": "SH5-SH1", "location": "S4A-B503-CIVIL GEN"}, cfg)["id"] == "SH5-S4A"
+    assert infer_camp_site({"department": "SH5-SH1", "location": "LS1-BCLC-RCOR-FIP 03"}, cfg)["id"] == "SH1-LS1"
+    assert infer_camp_site({"department": "SH5-SH1", "location": "L1-BCT-RTOP-CHWP P03"}, cfg)["id"] == "SH1-L1"
+    assert infer_camp_site({"department": "SH5-SH1", "location": "SITE - 7 PUMP"}, cfg)["id"] == "SH5-S7"
+    assert infer_camp_site({"department": "F5", "location": "S1-B406-x"}, cfg) is None
+
+
+def test_filter_matches_camp_and_group_not_sheet_rewrite():
+    cfg = AppConfig()
+    rec = {"department": "SH5-SH1", "location": "S7-B805-x", "status": "OPEN"}
+    assert matches_filters(rec, {"department": ["SH5-S7"]}, cfg) is True
+    assert matches_filters(rec, {"department": ["Site - 7"]}, cfg) is True
+    assert matches_filters(rec, {"department": ["SH5"]}, cfg) is True
+    assert matches_filters(rec, {"department": ["SH5-SH1"]}, cfg) is True
+    assert matches_filters(rec, {"department": ["SH1"]}, cfg) is False
+    assert matches_filters(rec, {"department": ["F5"]}, cfg) is False
+    sh1 = {"department": "SH5-SH1", "location": "L3-BGEN-RGEN-GEN", "status": "OPEN"}
+    assert matches_filters(sh1, {"department": ["SH1"]}, cfg) is True
+    assert matches_filters(sh1, {"department": ["L3"]}, cfg) is True
+    assert matches_filters(sh1, {"department": ["SH5"]}, cfg) is False
+
+
+def test_apply_site_keeps_excel_sheet_label():
+    out = apply_site_on_record({"department": "Site - 1"}, AppConfig())
+    assert out["department"] == "SH5-SH1"
+    assert out["camp_site"] == "SH5-S1"
+    out2 = apply_site_on_record({"department": "SH5-SH1", "camp_site": "LS2"}, AppConfig())
+    assert out2["department"] == "SH5-SH1"
+    assert out2["camp_site"] == "SH1-LS2"
+
+
 def test_resolve_data_sheet_rejects_missing_office_tab():
     from app.excel.service import resolve_data_sheet
 
@@ -59,6 +121,9 @@ def test_resolve_data_sheet_rejects_missing_office_tab():
     available = ["Linkco_MR_Log (SH5 & SH1)", "Linkco_MR_Log (F5)"]
     assert resolve_data_sheet("SH5-SH1", available, labels) == "Linkco_MR_Log (SH5 & SH1)"
     assert resolve_data_sheet("F5", available, labels) == "Linkco_MR_Log (F5)"
+    assert resolve_data_sheet("Site - 1", available, labels) == "Linkco_MR_Log (SH5 & SH1)"
+    assert resolve_data_sheet("SH5-S7", available, labels) == "Linkco_MR_Log (SH5 & SH1)"
+    assert resolve_data_sheet("LS1", available, labels) == "Linkco_MR_Log (SH5 & SH1)"
     assert resolve_data_sheet("", available, labels) == available[0]
     try:
         resolve_data_sheet("Office", available, labels)

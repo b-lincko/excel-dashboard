@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (audit fixes: header search, admin-only seed upload, JWT revoke, extra-grant limits, write-backup prune).
+Last updated: 2026-09-08 (camp sites: SH5 Site-1/2/3/4A/5/7 and SH1 L1–L7 / LS1 / LS2 on the SH5-SH1 log).
 
 ---
 
@@ -78,7 +78,7 @@ UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
 - Never write report sheets (`SH1 & SH5 - REPORT`, `F5 - REPORT`) or path sheets.
 - Never insert/shift columns. Missing mapped headers may be **appended** at the end only (`_ensure_mapped_headers`).
 - Identity for a row: `record_id` = `{site_label}:{excel_row}` e.g. `SH5-SH1:13`. **IM Work Order # is not unique** (several MRs per IM WO). Sync by record_id; on import, match by record_id then WO#+site.
-- Site (`department`) comes from the worksheet label, not a department column.
+- Site (`department`) comes from the worksheet label, not a department column. **Camp sites** (SH5 Site - 1/2/3/4A/5/7, SH1 L1/L2/L3/L4/L5/L7/LS1/LS2) are **not** extra Excel tabs and must not be stored as `department` (that would retarget `resolve_data_sheet`). Infer from `WO Asset Name` prefixes; persist `camp_site` in SQLite only. Filter `department=SH5-S1` / `Site - 1` / `SH5` matches the camp, not a new sheet.
 - Write path: **file lock → backup (Excel + SQLite pair) → temp xlsx → validate opens → `os.replace`**.
 - File lock required. HTTP **423** if locked, **503** if missing, **409** on sync-token conflict.
 
@@ -129,6 +129,7 @@ Inspected live file: repo-root `file.xlsx`. Details: `docs/EXCEL_ANALYSIS.md`.
 | `Linkco_MR_Log (SH5 & SH1)` | Data — Shield 5 & Shield 1. Site label `SH5-SH1`. Table `Table1`. |
 | `Linkco_MR_Log (F5)` | Data — Falcon 5. Site label `F5`. IDs like `LKF5-nnnn`. |
 | `Linkco_MR_Log (Office)` / `(Accommodations)` | Extra sites if present. |
+| *(no extra tabs)* | SH5 camps Site - 1/2/3/4A/5/7 and SH1 L1–L7 / LS1 / LS2 live **on** `SH5-SH1`. |
 | `SH1 & SH5 - REPORT`, `F5 - REPORT` | Reports — **never written**. |
 | `File Pah` / `File Pah (F5)` | UNC paths for hyperlink formulas — **never written**. |
 
@@ -272,7 +273,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - Production: `npm run build` → FastAPI serves `frontend/dist` when present.
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
 - Header: Search (completes WO / supplier / item / person), command palette (`Ctrl/⌘+K`), Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
-- Work-order list columns persist in `localStorage["woms.columns"]`.
+- Work-order list columns persist in `localStorage["woms.columns"]`. The Site column shows the camp (`Site - 1`, `L1`, …) when it can be inferred from WO Asset Name; `department` in SQLite stays the worksheet (`SH5-SH1` / `F5`).
 - Reports (`/reports`): Daily and Weekly are on-screen briefings. Choose a calendar date (prev/next, Today / This week). Daily = that day only; weekly = ISO Monday–Sunday of that date. JSON at `GET /api/reports/{daily|weekly}?fmt=json&as_of=`. PDF is one A4 portrait page; XLSX is one sheet with `fitToHeight=1`. Other report kinds stay download-only under the More tab.
 - Work order editor: **one** Items & suppliers form. Type to complete supplier and item names (`TypeAhead`). Alt+Enter adds a row. No “Add supplier” on the MR page — add vendors on Materials. Supplier list is unique (`unique_supplier_names`). Type `@` in remarks/chat. Header search hits `GET /api/work-orders/suggest`. List search also matches `mr_lines`. Presence heartbeat shows who else has the MR open.
 - Filters start collapsed; chips remove filters.
@@ -423,6 +424,7 @@ Must remain true:
 - [x] Production hardening (login lockout, no jwt_secret in API, attachment path check, password min 8) + operator training slides
 - [x] User management: create / modify / delete, access grants, Account profile + password
 - [x] Audit fixes: header suggest search, admin-only workbook seed, default-password gate, JWT logout revoke, extra-grant limits, write-backup prune, autobackup on by default
+- [x] Camp sites: SH5 Site - 1/2/3/4A/5/7 and SH1 L1, L2, L3, L4, L5, L7, LS1, LS2 (filters + create), no new Excel sheets
 
 When you complete or change a requirement, tick/retarget it here.
 

@@ -11,7 +11,23 @@ const EXTRA_KEYS = ["delay_kind", "delay_source", "delay_justification"];
 const DELAY_OPEN = new Set(["open"]);
 const DELAY_PENDING = new Set(["pending"]);
 const DELAY_NEVER = new Set(["closed", "close", "placed", "estimation price", "delivered material inspection"]);
-const EXTRA_SITES = ["SH5-SH1", "F5", "Office", "Accommodations"];
+const SHEET_SITES = ["SH5-SH1", "F5", "Office", "Accommodations"];
+const FALLBACK_CAMPS = [
+  { id: "SH5-S1", label: "Site - 1", group: "SH5", sheet: "SH5-SH1" },
+  { id: "SH5-S2", label: "Site - 2", group: "SH5", sheet: "SH5-SH1" },
+  { id: "SH5-S3", label: "Site - 3", group: "SH5", sheet: "SH5-SH1" },
+  { id: "SH5-S4A", label: "Site - 4A", group: "SH5", sheet: "SH5-SH1" },
+  { id: "SH5-S5", label: "Site - 5", group: "SH5", sheet: "SH5-SH1" },
+  { id: "SH5-S7", label: "Site - 7", group: "SH5", sheet: "SH5-SH1" },
+  { id: "SH1-L1", label: "L1", group: "SH1", sheet: "SH5-SH1" },
+  { id: "SH1-L2", label: "L2", group: "SH1", sheet: "SH5-SH1" },
+  { id: "SH1-L3", label: "L3", group: "SH1", sheet: "SH5-SH1" },
+  { id: "SH1-L4", label: "L4", group: "SH1", sheet: "SH5-SH1" },
+  { id: "SH1-L5", label: "L5", group: "SH1", sheet: "SH5-SH1" },
+  { id: "SH1-L7", label: "L7", group: "SH1", sheet: "SH5-SH1" },
+  { id: "SH1-LS1", label: "LS1", group: "SH1", sheet: "SH5-SH1" },
+  { id: "SH1-LS2", label: "LS2", group: "SH1", sheet: "SH5-SH1" },
+];
 
 function duePassed(value) {
   if (!value) return false;
@@ -124,7 +140,7 @@ export default function WorkOrderDetail() {
   const attachRef = useRef(null);
 
   const dirty = useMemo(() => {
-    const keys = [...FIELDS.map(([key]) => key), ...EXTRA_KEYS];
+    const keys = [...FIELDS.map(([key]) => key), ...EXTRA_KEYS, "camp_site"];
     const fieldsDirty = keys.some((key) => String(form[key] ?? "") !== String(original[key] ?? ""));
     const linesDirty = JSON.stringify(form.lines || []) !== JSON.stringify(original.lines || []);
     return fieldsDirty || linesDirty;
@@ -144,7 +160,7 @@ export default function WorkOrderDetail() {
     api
       .get("/api/work-orders/options")
       .then((d) => {
-        setOptions(d.options || {});
+        setOptions({ ...(d.options || {}), camp_sites: d.camp_sites || d.options?.camp_sites || [] });
         if (d.due_offsets) setDueOffsets(d.due_offsets);
         if (d.editable_fields) setEditable(d.editable_fields);
         if (d.status_change_remarks) setRemarkRules(d.status_change_remarks);
@@ -299,6 +315,9 @@ export default function WorkOrderDetail() {
           "record_id",
           "due_date",
           "lines",
+          "camp_site_label",
+          "site_group",
+          "site_display",
         ]);
         const changes = {};
         Object.keys(form).forEach((k) => {
@@ -319,6 +338,7 @@ export default function WorkOrderDetail() {
         setSyncToken(d.sync_token);
         const keys = Object.keys(changes);
         const extraOnly = keys.length > 0 && keys.every((k) => EXTRA_KEYS.includes(k));
+        const appOnly = keys.length > 0 && keys.every((k) => EXTRA_KEYS.includes(k) || k === "camp_site");
         const linesOnly = keys.length > 0 && keys.every((k) => k === "lines" || EXTRA_KEYS.includes(k));
         if (d.excel_backup_ok === false) {
           setSuccess("Saved in the database. Excel backup failed.");
@@ -337,11 +357,13 @@ export default function WorkOrderDetail() {
           setSuccess(
             extraOnly
               ? "Delay notes saved in the app database."
-              : linesOnly
-                ? "Supplier line items saved in the app database. Excel still has one supplier cell and one material cell."
-                : "Saved in the database and copied to Excel."
+              : appOnly
+                ? "Camp site saved in the app database."
+                : linesOnly
+                  ? "Supplier line items saved in the app database. Excel still has one supplier cell and one material cell."
+                  : "Saved in the database and copied to Excel."
           );
-          toast(extraOnly ? "Delay notes saved" : linesOnly ? "Line items saved" : "Saved", "success");
+          toast(extraOnly ? "Delay notes saved" : appOnly ? "Camp site saved" : linesOnly ? "Line items saved" : "Saved", "success");
         }
       }
     } catch (e) {
@@ -433,8 +455,50 @@ export default function WorkOrderDetail() {
             )}
           </>
         ) : type === "site" ? (
-          <select value={form[key] || ""} onChange={(e) => setField(key, e.target.value)} disabled={!isNew || readOnly}>
-            {Array.from(new Set([...(options.department || []), ...EXTRA_SITES])).map((o) => (
+          <select
+            value={form.camp_site || form.department || ""}
+            disabled={readOnly}
+            onChange={(e) => {
+              const id = e.target.value;
+              const camps = options.camp_sites?.length ? options.camp_sites : FALLBACK_CAMPS;
+              const camp = camps.find((c) => c.id === id || c.label === id);
+              if (camp) {
+                setForm((f) => ({
+                  ...f,
+                  camp_site: camp.id,
+                  department: isNew ? camp.sheet || "SH5-SH1" : f.department || camp.sheet || "SH5-SH1",
+                }));
+              } else {
+                setForm((f) => ({
+                  ...f,
+                  camp_site: "",
+                  department: isNew ? id : f.department,
+                }));
+              }
+            }}
+          >
+            {(isNew || form.department === "SH5-SH1" || form.camp_site) && (
+              <>
+                <option value="SH5-SH1">SH5-SH1 (unspecified)</option>
+                {["SH5", "SH1"].map((g) => (
+                  <optgroup key={g} label={g}>
+                    {(options.camp_sites?.length ? options.camp_sites : FALLBACK_CAMPS)
+                      .filter((c) => c.group === g)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </>
+            )}
+            {(isNew
+              ? SHEET_SITES.filter((s) => s !== "SH5-SH1")
+              : form.department && form.department !== "SH5-SH1"
+                ? [form.department]
+                : []
+            ).map((o) => (
               <option key={o} value={o}>
                 {o}
               </option>
@@ -499,7 +563,9 @@ export default function WorkOrderDetail() {
             <StatusBadge value={form.status} />
             <StatusBadge value={form.priority} />
             <StatusBadge value={form.issue} />
-            {form.department && <span className="text-xs text-slate-500">{form.department}</span>}
+            {(form.site_display || form.camp_site_label || form.department) && (
+              <span className="text-xs text-slate-500">{form.site_display || form.camp_site_label || form.department}</span>
+            )}
             {meta?.is_overdue && <StatusBadge value="Overdue" />}
             {meta?.aging_days != null && <span className="text-xs text-slate-500">Age {meta.aging_days} days</span>}
             {dirty && <span className="text-xs text-amber-700 dark:text-amber-300">Unsaved</span>}

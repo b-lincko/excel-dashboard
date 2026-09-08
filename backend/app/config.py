@@ -60,6 +60,45 @@ class ColumnMapping(BaseModel):
         return {k: norm_header(v) for k, v in self.model_dump().items() if norm_header(v)}
 
 
+def default_camp_sites() -> list[dict[str, Any]]:
+    """Operational camp sites on the SH5-SH1 log. Not Excel worksheets."""
+
+    def sh5(code: str, label: str, prefixes: list[str]) -> dict[str, Any]:
+        return {
+            "id": f"SH5-{code}",
+            "label": label,
+            "group": "SH5",
+            "sheet": "SH5-SH1",
+            "prefixes": prefixes,
+        }
+
+    def sh1(code: str) -> dict[str, Any]:
+        return {
+            "id": f"SH1-{code}",
+            "label": code,
+            "group": "SH1",
+            "sheet": "SH5-SH1",
+            "prefixes": [code],
+        }
+
+    return [
+        sh5("S1", "Site - 1", ["S1", "SITE-1", "SITE 1", "SITE-01", "SITE01", "SITE1"]),
+        sh5("S2", "Site - 2", ["S2", "SITE-2", "SITE 2", "SITE-02", "SITE02", "SITE2"]),
+        sh5("S3", "Site - 3", ["S3", "SITE-3", "SITE 3", "SITE-03", "SITE03", "SITE3"]),
+        sh5("S4A", "Site - 4A", ["S4A", "SITE-4A", "SITE 4A", "SITE4A"]),
+        sh5("S5", "Site - 5", ["S5", "SITE-5", "SITE 5", "SITE-05", "SITE05", "SITE5"]),
+        sh5("S7", "Site - 7", ["S7", "SITE-7", "SITE 7", "SITE-07", "SITE07", "SITE7"]),
+        sh1("L1"),
+        sh1("L2"),
+        sh1("L3"),
+        sh1("L4"),
+        sh1("L5"),
+        sh1("L7"),
+        sh1("LS1"),
+        sh1("LS2"),
+    ]
+
+
 class AppConfig(BaseModel):
     excel_path: str = str(DEFAULT_EXCEL)
     worksheet_name: str = "Linkco_MR_Log (SH5 & SH1)"
@@ -80,6 +119,7 @@ class AppConfig(BaseModel):
         }
     )
     extra_sites: list[str] = Field(default_factory=lambda: ["Office", "Accommodations"])
+    camp_sites: list[dict[str, Any]] = Field(default_factory=default_camp_sites)
     lists_worksheet: str = ""
     header_row: int = 3
     data_start_row: int = 4

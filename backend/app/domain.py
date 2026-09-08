@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
-from .config import AppConfig, load_config
+from .config import AppConfig, default_camp_sites, load_config
 from .dates import days_between, parse_date, quarter_of, to_date, week_bounds
 
 TODAY_OVERRIDE: Optional[date] = None  # used in tests
@@ -66,7 +67,7 @@ def is_placed(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
 
 
 def site_choices(cfg: Optional[AppConfig] = None) -> list[str]:
-    """Known site labels for filters. All sites is a UI-only option, not a department value."""
+    """Known worksheet site labels for filters. All sites is a UI-only option, not a department value."""
     cfg = cfg or load_config()
     names: list[str] = []
     seen: set[str] = set()
@@ -78,6 +79,181 @@ def site_choices(cfg: Optional[AppConfig] = None) -> list[str]:
         seen.add(key)
         names.append(name)
     return names
+
+
+def _compact_code(value: Any) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
+
+
+def camp_site_catalog(cfg: Optional[AppConfig] = None) -> list[dict[str, Any]]:
+    """SH5 / SH1 camp sites. They live on the SH5-SH1 worksheet — not extra Excel tabs."""
+    cfg = cfg or load_config()
+    raw = list(getattr(cfg, "camp_sites", None) or []) or default_camp_sites()
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("id") or "").strip()
+        label = str(item.get("label") or sid).strip()
+        if not sid or sid.lower() in seen:
+            continue
+        seen.add(sid.lower())
+        prefixes = [str(p).strip() for p in (item.get("prefixes") or []) if str(p).strip()]
+        out.append(
+            {
+                "id": sid,
+                "label": label or sid,
+                "group": str(item.get("group") or "").strip(),
+                "sheet": str(item.get("sheet") or "SH5-SH1").strip() or "SH5-SH1",
+                "prefixes": prefixes or [label or sid],
+            }
+        )
+    return out
+
+
+def find_camp_site(value: Any, cfg: Optional[AppConfig] = None) -> Optional[dict[str, Any]]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    key = _norm(text)
+    compact = _compact_code(text)
+    for camp in camp_site_catalog(cfg):
+        aliases = [camp["id"], camp["label"], *(camp.get("prefixes") or [])]
+        if camp.get("group"):
+            aliases.append(f"{camp['group']} {camp['label']}")
+        if key in {_norm(a) for a in aliases if a}:
+            return camp
+        if compact and compact in {_compact_code(a) for a in aliases if a}:
+            return camp
+    return None
+
+
+def excel_sheet_alias(site: str, cfg: Optional[AppConfig] = None) -> str:
+    """Map a camp / group / label to the Excel worksheet site label. Unknown values pass through."""
+    raw = str(site or "").strip()
+    if not raw:
+        return ""
+    camp = find_camp_site(raw, cfg)
+    if camp:
+        return str(camp.get("sheet") or "SH5-SH1")
+    if _norm(raw) in {"sh5", "sh1"}:
+        return "SH5-SH1"
+    return raw
+
+
+def apply_site_on_record(data: dict[str, Any], cfg: Optional[AppConfig] = None) -> dict[str, Any]:
+    """Keep department as the Excel sheet label; stash camp_site separately."""
+    out = dict(data or {})
+    camp = find_camp_site(out.get("camp_site"), cfg) or find_camp_site(out.get("department"), cfg)
+    if camp:
+        out["camp_site"] = camp["id"]
+        out["department"] = camp["sheet"]
+        out["_site"] = camp["sheet"]
+    elif _norm(out.get("department")) in {"sh5", "sh1"}:
+        out["department"] = "SH5-SH1"
+        out["_site"] = "SH5-SH1"
+    return out
+
+
+def infer_camp_site(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> Optional[dict[str, Any]]:
+    cfg = cfg or load_config()
+    stored = find_camp_site(rec.get("camp_site"), cfg)
+    if stored:
+        return stored
+    sheet = _norm(rec.get("department") or rec.get("_site") or "")
+    if sheet and sheet not in {"sh5-sh1", "sh5", "sh1", ""}:
+        return None
+    compact = _compact_code(rec.get("location"))
+    if not compact:
+        return None
+    ranked: list[tuple[int, str, dict[str, Any]]] = []
+    for camp in camp_site_catalog(cfg):
+        for prefix in camp.get("prefixes") or []:
+            code = _compact_code(prefix)
+            if code:
+                ranked.append((len(code), code, camp))
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    for _n, code, camp in ranked:
+        if not compact.startswith(code):
+            continue
+        rest = compact[len(code) :]
+        if rest and rest[0].isdigit():
+            continue
+        return camp
+    return None
+
+
+def camp_site_of(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> Optional[dict[str, Any]]:
+    return infer_camp_site(rec, cfg)
+
+
+def site_filter_match(rec: dict[str, Any], values: Optional[list[str]], cfg: Optional[AppConfig] = None) -> bool:
+    if not values:
+        return True
+    cfg = cfg or load_config()
+    wanted = {_norm(v) for v in values if str(v or "").strip()}
+    if not wanted:
+        return True
+    dept = str(rec.get("department") or rec.get("_site") or "").strip()
+    hay = {_norm(dept)} if dept else set()
+    camp = camp_site_of(rec, cfg)
+    if camp:
+        hay.update(
+            {
+                _norm(camp.get("id")),
+                _norm(camp.get("label")),
+                _norm(camp.get("group")),
+                _norm(f"{camp.get('group')} {camp.get('label')}"),
+            }
+        )
+        hay.update(_norm(p) for p in (camp.get("prefixes") or []) if p)
+    for needle in wanted:
+        if needle in hay:
+            return True
+        camp_hit = find_camp_site(needle, cfg)
+        if camp_hit and camp and camp_hit.get("id") == camp.get("id"):
+            return True
+        if needle in {"sh5", "sh1"}:
+            if camp and _norm(camp.get("group")) == needle:
+                return True
+            continue
+        if needle == _norm(dept):
+            return True
+    return False
+
+
+def filter_site_items(cfg: Optional[AppConfig] = None) -> list[dict[str, Any]]:
+    """SiteSwitcher chips: worksheet sites plus SH5 / SH1 camp sites."""
+    cfg = cfg or load_config()
+    items: list[dict[str, Any]] = [{"id": "", "label": "All sites", "kind": "all", "group": ""}]
+    sheets = site_choices(cfg)
+    camps = camp_site_catalog(cfg)
+    if "SH5-SH1" in sheets:
+        items.append({"id": "SH5-SH1", "label": "SH5-SH1", "kind": "sheet", "group": ""})
+    groups: list[str] = []
+    for camp in camps:
+        g = str(camp.get("group") or "").strip()
+        if g and g not in groups:
+            groups.append(g)
+    for group in groups:
+        items.append({"id": group, "label": group, "kind": "group", "group": group})
+        for camp in camps:
+            if camp.get("group") != group:
+                continue
+            items.append(
+                {
+                    "id": camp["id"],
+                    "label": camp["label"],
+                    "kind": "camp",
+                    "group": group,
+                }
+            )
+    for name in sheets:
+        if name == "SH5-SH1":
+            continue
+        items.append({"id": name, "label": name, "kind": "sheet", "group": ""})
+    return items
 
 
 def _delay_excluded(rec: dict[str, Any], cfg: AppConfig) -> bool:
@@ -365,7 +541,7 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
         return False
     if not in_list("priority", filters.get("priority")):
         return False
-    if not in_list("department", filters.get("department")):
+    if not site_filter_match(rec, filters.get("department"), cfg):
         return False
     if not in_list("location", filters.get("location")):
         return False
@@ -463,6 +639,7 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
                 "delay_kind",
                 "delay_source",
                 "delay_justification",
+                "camp_site",
             )
         ).lower()
         if q not in hay:
@@ -580,4 +757,9 @@ def annotate(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> dict[str, 
     out["po_stage"] = po_stage(rec, cfg)
     eta = eta_date(rec)
     out["days_to_eta"] = (eta - today()).days if eta else None
+    camp = camp_site_of(rec, cfg)
+    out["camp_site"] = camp["id"] if camp else str(rec.get("camp_site") or "")
+    out["camp_site_label"] = camp["label"] if camp else ""
+    out["site_group"] = camp["group"] if camp else ""
+    out["site_display"] = camp["label"] if camp else str(rec.get("department") or "")
     return out

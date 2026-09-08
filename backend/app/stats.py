@@ -12,7 +12,9 @@ from .dates import parse_date, quarter_of, to_date, week_bounds
 from .domain import (
     aging_days,
     annotate,
+    camp_site_catalog,
     closing_days,
+    filter_site_items,
     is_closed,
     is_in_progress,
     is_open,
@@ -566,6 +568,10 @@ def _options_from(records: list[dict[str, Any]]) -> dict[str, list[str]]:
     extra = site_choices()
     depts = set(out.get("department") or [])
     depts.update(extra)
+    for camp in camp_site_catalog():
+        depts.add(camp["label"])
+        if camp.get("group"):
+            depts.add(camp["group"])
     out["department"] = sorted(depts, key=str.lower)
     out["sites"] = extra
     return out
@@ -623,7 +629,7 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
         "recent": [annotate(r, cfg) for r in recent],
         "ops": ops_counts(records),
         "options": _options_from(all_records),
-        "sites": [{"id": "", "label": "All sites"}, *[{"id": s, "label": s} for s in site_choices(cfg)]],
+        "sites": filter_site_items(cfg),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "as_of": t.isoformat(),
         "count": len(records),
