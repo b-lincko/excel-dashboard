@@ -98,18 +98,18 @@ export default function Guide() {
           <Item k="Morning digest" v="Overdue / NTP / due soon by site then assignee." />
           <Item k="Suppliers / PO" v="RFQ → PO → ETA board and on-time rate." />
           <Item k="Materials" v="Who supplied an item before, plus aliases." />
-          {can("settings") && <Item k="Settings" v="Seed, upload Excel, reset DB. Backup now snapshots SQLite + Excel." />}
+          {can("settings") && <Item k="Settings" v="Seed, upload Excel, reset DB. Every backup pairs SQLite + Excel." />}
           {can("users") && <Item k="Users" v="Roles live in the app, not in Excel." />}
         </dl>
       </div>
 
       {can("backup") && (
         <div className="card p-5 space-y-2">
-          <div className="font-semibold">Snapshots</div>
+          <div className="font-semibold">Backups</div>
           <p className="text-sm text-slate-500">
-            Backup now copies SQLite plus file.xlsx. Download takes a zip of that pair. Upload & restore accepts
-            .xlsx, .db, or a zip — confirm Restore to roll live data back. Excel-only copies do not overwrite history
-            unless you Seed from Excel afterwards.
+            Each save, Backup now, and the schedule copy SQLite plus file.xlsx. Download takes a zip of that pair.
+            Upload & restore accepts .xlsx, .db, or a zip — confirm Restore to roll live data back. Excel-only copies
+            do not overwrite history unless you Seed from Excel afterwards.
           </p>
         </div>
       )}

@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (typeahead search, command palette, shortcuts, presence, WAL).
+Last updated: 2026-09-08 (typeahead search, command palette, shortcuts, presence, WAL; backup tour copy).
 
 ---
 
@@ -267,7 +267,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - `measureTarget` must pick a **visible** `[data-tour]` (desktop vs mobile sidebar).
 - Overlay click does **not** skip. Esc skips.
 - Current `data-tour` ids: `nav-work`, `search`, `live`, `dashboard`, `wo-list`, `filters`, `wo-new`, `wo-tabs`, `wo-save`, `queue`, `backup`, `command`, `shortcuts`, `presence`.
-- Admin backup step: `need: "backup"`, `page: "settings"`, target `backup`.
+- Admin backup step: `need: "backup"`, `page: "settings"`, target `backup`. Title/body must say every backup pairs Excel + SQLite (saves, Backup now, schedule) — not “snapshots, not every save”.
 
 ---
 
@@ -414,3 +414,5 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09** `X-Frame-Options: SAMEORIGIN` required for preview. Do not set `DENY`.
 - **2026-09** Pydantic ≥ 2.12 for Python 3.14; do not pin 2.9.x.
 - **2026-09** Backup UI: Download (zip pair), Upload & restore (.xlsx/.db/zip). Recovery commands in `docs/RECOVERY.md`.
+- **2026-09-08 (a18f4e3)** Typeahead search, Ctrl/⌘+K, list j/k/Enter/x, presence, WAL. Tour step `keys`. `GET /suggest` must stay before `/{wo_id}`.
+- **2026-09-08** Tour backup step no longer says “snapshots, not every save”. Every `create_backup` reason pairs `.xlsx`+`.db`.

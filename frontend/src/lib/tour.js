@@ -90,8 +90,8 @@ export const TOUR_STEPS = [
     target: "backup",
     page: "settings",
     need: "backup",
-    title: "Snapshots, not every save",
-    body: "Backup now copies SQLite plus Excel. Restore rolls both back when a .db pair exists. Excel-only leftover files do not change live history.",
+    title: "Excel and the database together",
+    body: "Every backup copies SQLite plus Excel — Backup now, the schedule, and each save. Download is a zip of both. Restore rolls both back when a .db pair exists. Excel-only leftover files do not change live history.",
   },
   {
     id: "keys",
