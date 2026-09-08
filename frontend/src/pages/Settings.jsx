@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { CalendarClock, Download, FolderOpen, HardDrive, Upload } from "lucide-react";
-import { api } from "../lib/api.js";
+import { api, waitForJob } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
+import JobProgress from "../components/JobProgress.jsx";
+
+function setJobBusy(on) {
+  if (on) sessionStorage.setItem("woms_job_busy", "1");
+  else sessionStorage.removeItem("woms_job_busy");
+}
 
 const DAYS = [
   { id: 0, label: "Mon" },
@@ -134,6 +140,7 @@ export default function Settings() {
           onRestore={restore}
           onReload={load}
           toast={toast}
+          ask={ask}
         />
       )}
 
@@ -285,6 +292,7 @@ function DatabasePanel({ toast, ask, onReload }) {
   const [info, setInfo] = useState(null);
   const [busy, setBusy] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [jobUi, setJobUi] = useState(null);
   const uploadRef = useRef(null);
 
   function loadInfo() {
@@ -366,19 +374,48 @@ function DatabasePanel({ toast, ask, onReload }) {
     });
     if (!ok) return;
     setBusy("upload");
+    setJobBusy(true);
+    setJobUi({
+      title: "Upload Excel then seed",
+      upload: 1,
+      apply: 0,
+      applyLabel: "Applying backup",
+      message: "Uploading Excel…",
+    });
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const d = await api.upload("/api/settings/database/upload", fd);
-      const seedErr = d.seed && !d.seed.ok ? d.seed.error : "";
-      toast(
-        seedErr ? `Excel replaced, but seed failed: ${seedErr}` : `Uploaded and seeded ${d.seed?.count ?? d.sync?.record_count ?? 0} rows`,
-        seedErr ? "error" : "success"
+      const started = await api.uploadWithProgress("/api/settings/jobs/excel-upload", fd, (pct) => {
+        setJobUi((prev) => prev && { ...prev, upload: pct, message: "Uploading Excel…" });
+      });
+      setJobUi((prev) => prev && { ...prev, upload: 100, apply: 8, message: "Applying backup…" });
+      const st = await waitForJob(started.job_id, (tick) => {
+        setJobUi((prev) =>
+          prev && {
+            ...prev,
+            upload: 100,
+            apply: Math.max(8, tick.progress || 0),
+            message: tick.message || "Applying backup…",
+          }
+        );
+      });
+      const count = st.result?.seed?.count ?? st.result?.sync?.record_count ?? 0;
+      setJobUi((prev) =>
+        prev && {
+          ...prev,
+          upload: 100,
+          apply: 100,
+          done: true,
+          doneLabel: `Applied backup · ${count} material requests seeded`,
+          message: "",
+        }
       );
+      toast(`Uploaded and seeded ${count} rows`, "success");
       loadInfo();
       onReload();
       window.dispatchEvent(new CustomEvent("woms:data"));
     } catch (err) {
+      setJobUi((prev) => prev && { ...prev, error: err.message || "Could not upload Excel." });
       const retry = await ask({
         title: "Upload failed",
         body: err.message || "Could not upload Excel.",
@@ -388,6 +425,7 @@ function DatabasePanel({ toast, ask, onReload }) {
       if (retry) uploadRef.current?.click();
     } finally {
       setBusy("");
+      setJobBusy(false);
     }
   }
 
@@ -433,17 +471,31 @@ function DatabasePanel({ toast, ask, onReload }) {
           </button>
         </div>
       </div>
+      {jobUi && (
+        <JobProgress
+          title={jobUi.title}
+          uploadPct={jobUi.upload}
+          applyPct={jobUi.apply}
+          applyLabel={jobUi.applyLabel}
+          message={jobUi.message}
+          error={jobUi.error}
+          done={jobUi.done}
+          doneLabel={jobUi.doneLabel}
+          onClose={() => setJobUi(null)}
+        />
+      )}
     </div>
   );
 }
 
-function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, onReload, toast }) {
+function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, onReload, toast, ask }) {
   const [browse, setBrowse] = useState(false);
   const [listing, setListing] = useState(null);
   const [busy, setBusy] = useState(false);
   const [newFolder, setNewFolder] = useState("");
   const [rowRestore, setRowRestore] = useState(null);
   const [healthMap, setHealthMap] = useState({});
+  const [jobUi, setJobUi] = useState(null);
   const uploadRef = useRef(null);
   const days = cfg.backup_days?.length ? cfg.backup_days : [0, 1, 2, 3, 4, 5, 6];
 
@@ -907,6 +959,19 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
             </div>
           </div>
         </div>
+      )}
+      {jobUi && (
+        <JobProgress
+          title={jobUi.title}
+          uploadPct={jobUi.upload}
+          applyPct={jobUi.apply}
+          applyLabel={jobUi.applyLabel}
+          message={jobUi.message}
+          error={jobUi.error}
+          done={jobUi.done}
+          doneLabel={jobUi.doneLabel}
+          onClose={() => setJobUi(null)}
+        />
       )}
     </div>
   );

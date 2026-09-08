@@ -8,6 +8,21 @@ export function setToken(token) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
+function fail(message, extra = {}) {
+  const err = new Error(message);
+  Object.assign(err, extra);
+  return err;
+}
+
+async function parseBody(res) {
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const data = await res.json();
+    return { json: true, data, detail: data.detail ?? data };
+  }
+  return { json: false, data: null, detail: await res.text() };
+}
+
 async function request(path, { method = "GET", body, headers, raw, timeoutMs = 60000 } = {}) {
   const token = getToken();
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -26,15 +41,12 @@ async function request(path, { method = "GET", body, headers, raw, timeoutMs = 6
     });
   } catch (e) {
     const aborted = e?.name === "AbortError";
-    const err = new Error(
+    throw fail(
       aborted
-        ? "The request timed out. Try again."
-        : "API is not running on port 8000. Keep the “Linkco MR API” window open (run.bat starts it)."
+        ? "The request timed out. The API may still be applying Excel — wait a moment and try again."
+        : "API is not running on port 8000. Keep the “Linkco MR API” window open (run.bat starts it).",
+      { status: 0, timeout: aborted, offline: !aborted, cause: e }
     );
-    err.status = 0;
-    err.offline = !aborted;
-    err.cause = e;
-    throw err;
   } finally {
     if (timer) window.clearTimeout(timer);
   }
@@ -45,31 +57,77 @@ async function request(path, { method = "GET", body, headers, raw, timeoutMs = 6
       window.dispatchEvent(new Event("woms:unauthorized"));
     }
   }
-  const contentType = res.headers.get("content-type") || "";
   if (!res.ok) {
-    let detail = res.statusText;
-    if (contentType.includes("application/json")) {
-      const data = await res.json();
-      detail = data.detail ?? data;
-      const err = new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
-      err.status = res.status;
-      err.detail = detail;
-      throw err;
-    }
-    const err = new Error(await res.text());
-    err.status = res.status;
-    throw err;
+    const parsed = await parseBody(res);
+    const detail = parsed.detail;
+    throw fail(typeof detail === "string" ? detail : JSON.stringify(detail), {
+      status: res.status,
+      detail,
+    });
   }
+  const contentType = res.headers.get("content-type") || "";
   if (contentType.includes("application/json")) return res.json();
   return res;
 }
 
+function uploadWithProgress(path, formData, onProgress, timeoutMs = 15 * 60 * 1000) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path);
+    const token = getToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.timeout = timeoutMs;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && typeof onProgress === "function") {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      const status = xhr.status;
+      let data = null;
+      try {
+        data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        data = null;
+      }
+      if (status === 401) {
+        setToken(null);
+        sessionStorage.setItem("woms_auth_reason", "expired");
+        window.dispatchEvent(new Event("woms:unauthorized"));
+      }
+      if (status < 200 || status >= 300) {
+        const detail = data?.detail ?? xhr.statusText ?? "Upload failed";
+        reject(
+          fail(typeof detail === "string" ? detail : JSON.stringify(detail), {
+            status,
+            detail,
+          })
+        );
+        return;
+      }
+      if (typeof onProgress === "function") onProgress(100);
+      resolve(data);
+    };
+    xhr.onerror = () =>
+      reject(fail("Network error while uploading. Check that the API is running.", { status: 0, offline: true }));
+    xhr.ontimeout = () =>
+      reject(
+        fail("The upload timed out. Try a smaller file or wait and retry.", {
+          status: 0,
+          timeout: true,
+        })
+      );
+    xhr.send(formData);
+  });
+}
+
 export const api = {
-  get: (path) => request(path),
-  post: (path, body) => request(path, { method: "POST", body }),
-  put: (path, body) => request(path, { method: "PUT", body }),
-  del: (path) => request(path, { method: "DELETE" }),
-  upload: (path, formData) => request(path, { method: "POST", body: formData, raw: true, timeoutMs: 120000 }),
+  get: (path, opts) => request(path, opts),
+  post: (path, body, opts) => request(path, { method: "POST", body, ...opts }),
+  put: (path, body, opts) => request(path, { method: "PUT", body, ...opts }),
+  del: (path, opts) => request(path, { method: "DELETE", ...opts }),
+  upload: (path, formData) => request(path, { method: "POST", body: formData, raw: true, timeoutMs: 15 * 60 * 1000 }),
+  uploadWithProgress,
   download: async (path, filename) => {
     const token = getToken();
     const res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
@@ -92,4 +150,18 @@ export function qs(params) {
   });
   const s = sp.toString();
   return s ? `?${s}` : "";
+}
+
+export async function waitForJob(jobId, onTick) {
+  const started = Date.now();
+  while (Date.now() - started < 15 * 60 * 1000) {
+    const st = await api.get(`/api/settings/jobs/${jobId}`, { timeoutMs: 20000 });
+    if (typeof onTick === "function") onTick(st);
+    if (st.status === "done") return st;
+    if (st.status === "error") {
+      throw fail(st.error || st.message || "Apply failed", { status: 400, detail: st });
+    }
+    await new Promise((r) => window.setTimeout(r, 400));
+  }
+  throw fail("Applying the file is taking too long. Check Settings in a minute.", { timeout: true, status: 0 });
 }

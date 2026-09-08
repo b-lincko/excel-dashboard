@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (mind map Sites branch uses SH5/SH1 camps).
+Last updated: 2026-09-08 (Excel upload/restore progress jobs; do not log out on request timeout).
 
 ---
 
@@ -277,6 +277,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - Reports (`/reports`): Daily and Weekly are on-screen briefings. Choose a calendar date (prev/next, Today / This week). Daily = that day only; weekly = ISO Monday–Sunday of that date. JSON at `GET /api/reports/{daily|weekly}?fmt=json&as_of=`. PDF is one A4 portrait page; XLSX is one sheet with `fitToHeight=1`. Other report kinds stay download-only under the More tab.
 - Work order editor: **one** Items & suppliers form. Type to complete supplier and item names (`TypeAhead`). Alt+Enter adds a row. No “Add supplier” on the MR page — add vendors on Materials. Supplier list is unique (`unique_supplier_names`). Type `@` in remarks/chat. Header search hits `GET /api/work-orders/suggest`. List search also matches `mr_lines`. Presence heartbeat shows who else has the MR open.
 - Filters start collapsed; chips remove filters. A **Search** button applies the current filters (Dashboard opens the matching Work Orders list).
+- Settings Excel upload / Upload & restore show a progress overlay (Uploading Excel → Applying backup → Applied). Work runs in a background job (`POST /api/settings/jobs/excel-upload` or `/jobs/backup-apply`, poll `GET /api/settings/jobs/{id}`) so login stays available. A request timeout must **not** clear the JWT.
 - After Settings StrReplace, **assert `function DatabasePanel` still exists** if you insert `<DatabasePanel />` (vite can build while runtime ReferenceError).
 
 ### Tour / Guide
@@ -306,7 +307,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | `/api/reports` | Period briefings + Excel/CSV/PDF. `GET /{kind}` kinds: `daily`, `weekly`, `monthly`, `yearly`, `open`, `overdue`, `closed`, `delay`, `department`, `technician`. `fmt=pdf\|xlsx\|csv\|json`. Daily/weekly take `as_of` or `date` (ISO day). JSON for daily/weekly is `period_payload`. PDF for those kinds is inline, one page. |
 | `/api/audit` | field-level audit log |
 | `/api/users` | list, access-catalog, CRUD, extra grants |
-| `/api/settings` | config, mapping scan, backups, database seed/reset/upload |
+| `/api/settings` | config, mapping scan, backups, database seed/reset/upload, `POST /jobs/excel-upload`, `POST /jobs/backup-apply`, `GET /jobs/{id}` |
 | `/api/sync` | ping, refresh (`hard: false` reloads DB), upload (settings / seed) |
 
 HTTP: 400 validation, 403 permission, 409 conflict, 422 business rules, 423 Excel locked, 503 Excel unavailable.
@@ -449,3 +450,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-08** Live `file.xlsx` replaced from `1. Material Request_LOG - Test 002.xlsx` via `replace_from_bytes` (paired backup, then seed). `wo_cache` replaced 2182 → 2193 by `record_id`. Do not append a second copy of the log. Several MRs per IM WO stay — that is not a duplicate row.
 - **2026-09-08** Work Orders `/options.sites` is `filter_site_items` (camp chips + Site dropdown). Suggest search includes sites. Excel replace falls back to copy-into-inode when Docker bind-mount `os.replace` returns EBUSY.
 - **2026-09-08** Dashboard mind map Sites branch (and Site performance table) group by camp / sheet chips (`SH5-S3`, `L1`, `F5`, …), not only the Excel worksheet. Click still filters `department`.
+- **2026-09-08** Excel upload/seed and backup apply run off the event loop (thread + job). UI shows upload bar, applying-backup bar, then an applied notification. `/api/auth/me` timeout must not log the user out.

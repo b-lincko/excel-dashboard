@@ -23,7 +23,12 @@ export default function Login() {
       const signedIn = await login(username.trim(), password);
       nav(signedIn?.must_change_password ? "/account" : firstPath(signedIn));
     } catch (err) {
-      setError(err.message || "Sign in failed");
+      const timedOut = err?.timeout || String(err.message || "").toLowerCase().includes("timed out");
+      setError(
+        timedOut
+          ? "Sign-in timed out. If you just uploaded Excel, wait until that finishes, then try again."
+          : err.message || "Sign in failed"
+      );
     } finally {
       setBusy(false);
     }

@@ -77,11 +77,15 @@ export function AuthProvider({ children }) {
       setLoading(false);
       return;
     }
+    if (sessionStorage.getItem("woms_job_busy")) {
+      setLoading(false);
+      return;
+    }
     try {
-      const me = await api.get("/api/auth/me");
+      const me = await api.get("/api/auth/me", { timeoutMs: 8000 });
       setUser(me);
     } catch (e) {
-      if (!e?.offline) {
+      if (e?.status === 401) {
         setToken(null);
         setUser(null);
       }
@@ -117,7 +121,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   async function login(username, password) {
-    const data = await api.post("/api/auth/login", { username, password });
+    const data = await api.post("/api/auth/login", { username, password }, { timeoutMs: 20000 });
     setToken(data.access_token);
     setUser(data.user);
     sessionStorage.removeItem("woms_auth_reason");

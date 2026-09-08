@@ -7,12 +7,15 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from .. import database
-from ..backup import ensure_folder, list_folders, run_due_backup, schedule_status
+from ..backup import ensure_folder, list_folders, require_app_folder, run_due_backup, schedule_status
 from ..config import AppConfig, load_config, save_config
 from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
-from ..security import require_permission
+from ..jobs import create_job, get_job, public_job, run_job
+from ..security import get_current_user, require_permission
+from ..stats import invalidate_dash_cache
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -67,6 +70,69 @@ def mapping_scan(user=Depends(require_permission("settings"))):
         raise HTTPException(status_code=500, detail=str(cop))
 
 
+@router.get("/jobs/{job_id}")
+def job_status(job_id: str, user=Depends(get_current_user)):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("username") != user.get("username") and user.get("role") != "admin":
+        raise HTTPException(status_code=404, detail="Job not found")
+    return public_job(job)
+
+
+@router.post("/jobs/excel-upload")
+async def job_excel_upload(file: UploadFile = File(...), user=Depends(require_permission("settings"))):
+    _require_admin(user)
+    name = (file.filename or "upload.xlsx").lower()
+    if not name.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Please upload an Excel file (.xlsx or .xlsm).")
+    content = await file.read()
+    filename = file.filename or name
+    jid = create_job("excel-upload", user["username"])
+
+    def work(report):
+        report(20, "Saving Excel…", "apply")
+        status = excel_service.replace_from_bytes(content, username=user["username"], filename=filename)
+        report(90, "Refreshing lists…", "apply")
+        invalidate_dash_cache()
+        count = status.get("record_count") if isinstance(status, dict) else None
+        return {"ok": True, "sync": status, "seed": {"ok": True, "count": count, "error": None}}
+
+    run_job(jid, work)
+    return {"job_id": jid}
+
+
+@router.post("/jobs/backup-apply")
+async def job_backup_apply(file: UploadFile = File(...), user=Depends(require_permission("backup"))):
+    name = (file.filename or "backup.xlsx").lower()
+    if not name.endswith((".xlsx", ".xlsm", ".db", ".zip")):
+        raise HTTPException(
+            status_code=400,
+            detail="Upload an Excel workbook (.xlsx/.xlsm), a SQLite snapshot (.db), or a zip of both.",
+        )
+    content = await file.read()
+    filename = file.filename or name
+    jid = create_job("backup-apply", user["username"])
+
+    def work(report):
+        report(25, "Storing backup…", "apply")
+        stored = excel_service.store_uploaded_backup(content, filename=filename)
+        report(55, "Applying backup…", "apply")
+        restored = excel_service.restore_backup(stored["path"])
+        report(88, "Refreshing lists…", "apply")
+        excel_service.invalidate()
+        invalidate_dash_cache()
+        database.add_audit(
+            user["username"],
+            "backup_upload",
+            details=f"Uploaded and applied backup {stored.get('name')}",
+        )
+        return {"ok": True, **stored, **restored, "sync": excel_service.status()}
+
+    run_job(jid, work)
+    return {"job_id": jid}
+
+
 @router.get("/backups")
 def list_backups(user=Depends(require_permission("backup"))):
     return {"items": excel_service.list_backups(), "schedule": schedule_status()}
@@ -94,14 +160,18 @@ class RestoreRequest(BaseModel):
 
 
 @router.post("/backups/restore")
-def restore_backup(body: RestoreRequest, user=Depends(require_permission("backup"))):
-    try:
+async def restore_backup(body: RestoreRequest, user=Depends(require_permission("backup"))):
+    def _run():
         result = excel_service.restore_backup(body.path)
+        invalidate_dash_cache()
+        return {"restored": True, **result, "sync": excel_service.status()}
+
+    try:
+        return await run_in_threadpool(_run)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Backup not found")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    return {"restored": True, **result, "sync": excel_service.status()}
 
 
 @router.post("/backups/preview-row")
@@ -197,22 +267,27 @@ async def upload_backup(file: UploadFile = File(...), user=Depends(require_permi
             detail="Upload an Excel workbook (.xlsx/.xlsm), a SQLite snapshot (.db), or a zip of both.",
         )
     content = await file.read()
+    filename = file.filename or name
+
+    def _run():
+        stored = excel_service.store_uploaded_backup(content, filename=filename)
+        database.add_audit(
+            user["username"],
+            "backup_upload",
+            details=f"Uploaded backup {stored.get('name')} ({stored.get('size') or 0} bytes)",
+        )
+        return {
+            **stored,
+            "items": excel_service.list_backups(),
+            "schedule": schedule_status(),
+        }
+
     try:
-        stored = excel_service.store_uploaded_backup(content, filename=file.filename or name)
+        return await run_in_threadpool(_run)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Upload failed: {exc}") from exc
-    database.add_audit(
-        user["username"],
-        "backup_upload",
-        details=f"Uploaded backup {stored.get('name')} ({stored.get('size') or 0} bytes)",
-    )
-    return {
-        **stored,
-        "items": excel_service.list_backups(),
-        "schedule": schedule_status(),
-    }
 
 
 @router.post("/backups/run-auto")
@@ -262,16 +337,23 @@ def get_database_status(user=Depends(require_permission("settings"))):
 
 
 @router.post("/database/seed")
-def seed_database(user=Depends(require_permission("settings"))):
+async def seed_database(user=Depends(require_permission("settings"))):
     _require_admin(user)
-    try:
+
+    def _run():
         result = excel_service.seed_from_excel(username=user["username"], replace_lines=True)
+        excel_service.invalidate()
+        invalidate_dash_cache()
+        if not result.get("ok"):
+            raise ValueError(result.get("error") or "Seed from Excel failed.")
+        return {**result, "sync": excel_service.status()}
+
+    try:
+        return await run_in_threadpool(_run)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Seed failed: {exc}") from exc
-    excel_service.invalidate()
-    if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error") or "Seed from Excel failed.")
-    return {**result, "sync": excel_service.status()}
 
 
 @router.post("/database/reset")
@@ -310,8 +392,16 @@ async def upload_excel_and_seed(file: UploadFile = File(...), user=Depends(requi
     if not name.endswith((".xlsx", ".xlsm")):
         raise HTTPException(status_code=400, detail="Please upload an Excel file (.xlsx or .xlsm).")
     content = await file.read()
+    filename = file.filename or name
+
+    def _run():
+        status = excel_service.replace_from_bytes(content, username=user["username"], filename=filename)
+        invalidate_dash_cache()
+        count = status.get("record_count") if isinstance(status, dict) else None
+        return {"ok": True, "sync": status, "seed": {"ok": True, "count": count, "error": None}}
+
     try:
-        status = excel_service.replace_from_bytes(content, username=user["username"], filename=file.filename or name)
+        return await run_in_threadpool(_run)
     except ExcelLocked as exc:
         raise HTTPException(status_code=423, detail=str(exc))
     except ExcelUnavailable as exc:
@@ -320,11 +410,6 @@ async def upload_excel_and_seed(file: UploadFile = File(...), user=Depends(requi
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Upload failed: {exc}") from exc
-    try:
-        seed = excel_service.seed_from_excel(username=user["username"], replace_lines=True)
-    except Exception as exc:
-        seed = {"ok": False, "error": str(exc), "count": 0}
-    return {"ok": True, "sync": status, "seed": seed}
 
 
 @router.post("/folders")

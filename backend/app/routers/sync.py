@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
 from ..security import require_permission
@@ -45,13 +46,19 @@ async def upload_excel(
     if not name.endswith((".xlsx", ".xlsm")):
         raise HTTPException(status_code=400, detail="Please upload an Excel file (.xlsx).")
     content = await file.read()
+    filename = file.filename or name
+
+    def _run():
+        status = excel_service.replace_from_bytes(content, username=user["username"], filename=filename)
+        invalidate_dash_cache()
+        dash = dashboard_payload({})
+        return {"ok": True, "sync": status, "kpis": dash.get("kpis"), "mindmap": dash.get("mindmap")}
+
     try:
-        status = excel_service.replace_from_bytes(content, username=user["username"], filename=file.filename or name)
+        return await run_in_threadpool(_run)
     except ExcelLocked as exc:
         raise HTTPException(status_code=423, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Upload failed: {exc}") from exc
-    dash = dashboard_payload({})
-    return {"ok": True, "sync": status, "kpis": dash.get("kpis"), "mindmap": dash.get("mindmap")}
