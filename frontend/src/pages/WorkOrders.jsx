@@ -391,6 +391,16 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
           setPage(1);
         }}
         options={options}
+        onSearch={(v) => {
+          const next = { ...v, q };
+          if (presetFlag && !next.flag) next.flag = presetFlag;
+          if (!next.q) {
+            delete next.q;
+            setQ("");
+          }
+          setFilters(next);
+          setPage(1);
+        }}
         extra={
           <div className="flex gap-2">
             <input
@@ -400,19 +410,17 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
                 if (e.key === "Enter") {
                   setFilters((f) => ({ ...f, q }));
                   setPage(1);
-                  load();
                 }
               }}
-              placeholder="Search ID, material, technician…"
+              placeholder="Search ID, material, technician, site…"
               aria-label="Search work orders"
             />
             <button
               type="button"
-              className="btn-outline whitespace-nowrap"
+              className="btn-primary whitespace-nowrap"
               onClick={() => {
                 setFilters((f) => ({ ...f, q }));
                 setPage(1);
-                load();
               }}
             >
               Search

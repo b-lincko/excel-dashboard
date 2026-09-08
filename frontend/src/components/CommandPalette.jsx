@@ -18,7 +18,7 @@ export default function CommandPalette({ open, onClose }) {
   const nav = useNavigate();
   const { can, canPage } = useAuth();
   const [q, setQ] = useState("");
-  const [hits, setHits] = useState({ orders: [], suppliers: [], materials: [], people: [] });
+  const [hits, setHits] = useState({ orders: [], suppliers: [], materials: [], people: [], sites: [] });
   const [idx, setIdx] = useState(0);
   const inputRef = useRef(null);
 
@@ -72,13 +72,22 @@ export default function CommandPalette({ open, onClose }) {
         to: `/work-orders?assigned_to=${encodeURIComponent(p.full_name || p.label)}`,
       })
     );
+    (hits.sites || []).forEach((s) =>
+      out.push({
+        id: `site-${s.id || s.label}`,
+        kind: "site",
+        label: s.label,
+        hint: s.hint || "Site",
+        to: `/work-orders?department=${encodeURIComponent(s.id || s.label)}`,
+      })
+    );
     return out.slice(0, 18);
   }, [pages, hits]);
 
   useEffect(() => {
     if (!open) return undefined;
     setQ("");
-    setHits({ orders: [], suppliers: [], materials: [], people: [] });
+    setHits({ orders: [], suppliers: [], materials: [], people: [], sites: [] });
     setIdx(0);
     const t = window.setTimeout(() => inputRef.current?.focus(), 20);
     return () => window.clearTimeout(t);
@@ -88,7 +97,7 @@ export default function CommandPalette({ open, onClose }) {
     if (!open) return undefined;
     const query = q.trim();
     if (query.length < 1) {
-      setHits({ orders: [], suppliers: [], materials: [], people: [] });
+      setHits({ orders: [], suppliers: [], materials: [], people: [], sites: [] });
       return undefined;
     }
     const timer = window.setTimeout(() => {
@@ -119,7 +128,7 @@ export default function CommandPalette({ open, onClose }) {
           ref={inputRef}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Jump to a page, WO, supplier, item, or person…"
+          placeholder="Jump to a page, WO, supplier, item, person, or site…"
           className="rounded-none border-0 border-b border-slate-200 dark:border-white/10 focus:ring-0"
           onKeyDown={(e) => {
             if (e.key === "Escape") onClose();

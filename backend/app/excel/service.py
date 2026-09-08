@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import os
@@ -64,6 +65,38 @@ def _temp_xlsx(directory: Path) -> Path:
     fd, name = tempfile.mkstemp(suffix=".xlsx", dir=directory)
     os.close(fd)
     return Path(name)
+
+
+def _busy_replace_errnos() -> tuple[int, ...]:
+    codes = [errno.EBUSY, errno.EXDEV]
+    if hasattr(errno, "ETXTBSY"):
+        codes.append(errno.ETXTBSY)
+    return tuple(codes)
+
+
+def _replace_excel_file(src: Path, dest: Path) -> None:
+    """Atomic replace, or copy into the existing inode when rename is busy.
+
+    Docker file bind-mounts (`/app/file.xlsx`) reject `os.replace` with EBUSY /
+    ETXTBSY. Writing the bytes into the mounted inode still updates the host file.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(src, dest)
+        return
+    except OSError as exc:
+        busy = _busy_replace_errnos()
+        if exc.errno not in busy and not (dest.exists() and exc.errno in {errno.EPERM, errno.EACCES}):
+            raise
+    if dest.exists():
+        with open(src, "rb") as inf, open(dest, "wb") as out:
+            shutil.copyfileobj(inf, out, length=1024 * 1024)
+            out.flush()
+            os.fsync(out.fileno())
+        src.unlink(missing_ok=True)
+        return
+    shutil.copy2(src, dest)
+    src.unlink(missing_ok=True)
 
 
 def _is_formula(value: Any) -> bool:
@@ -1195,7 +1228,7 @@ class ExcelService:
     def _atomic_replace(self, tmp_path: Path) -> None:
         dest = self.excel_path()
         self._validate_saved(tmp_path)
-        os.replace(tmp_path, dest)
+        _replace_excel_file(tmp_path, dest)
 
     def _formula_header_set(self) -> set[str]:
         return {norm_header(c) for c in self.cfg().formula_columns}
@@ -1919,7 +1952,7 @@ class ExcelService:
         try:
             if dest.exists():
                 self.create_backup(reason="upload")
-            os.replace(tmp, dest)
+            _replace_excel_file(tmp, dest)
             self.invalidate()
             seeded = self.seed_from_excel(username=username, replace_lines=True)
             records = list(self._cache or [])

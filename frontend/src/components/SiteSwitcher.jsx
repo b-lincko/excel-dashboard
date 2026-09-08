@@ -40,7 +40,11 @@ function Chip({ id, label, on, onChange }) {
 
 export default function SiteSwitcher({ value, onChange, sites }) {
   const current = value || "";
-  const raw = Array.isArray(sites) && sites.length ? sites : FALLBACK;
+  const incoming = Array.isArray(sites) ? sites : [];
+  const mapped = incoming.map((s) =>
+    typeof s === "string" ? { id: s, label: s, kind: "sheet" } : { kind: s.kind || "sheet", group: s.group || "", ...s }
+  );
+  const raw = mapped.some((s) => s.kind === "camp") ? mapped : FALLBACK;
   const items = raw.map((s) =>
     typeof s === "string" ? { id: s, label: s, kind: "sheet" } : { kind: s.kind || "sheet", group: s.group || "", ...s }
   );

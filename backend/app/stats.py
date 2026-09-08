@@ -12,7 +12,6 @@ from .dates import parse_date, quarter_of, to_date, week_bounds
 from .domain import (
     aging_days,
     annotate,
-    camp_site_catalog,
     closing_days,
     filter_site_items,
     is_closed,
@@ -566,13 +565,21 @@ def _options_from(records: list[dict[str, Any]]) -> dict[str, list[str]]:
         vals = {str(r.get(field)).strip() for r in records if str(r.get(field) or "").strip()}
         out[field] = sorted(vals, key=str.lower)
     extra = site_choices()
-    depts = set(out.get("department") or [])
-    depts.update(extra)
-    for camp in camp_site_catalog():
-        depts.add(camp["label"])
-        if camp.get("group"):
-            depts.add(camp["group"])
-    out["department"] = sorted(depts, key=str.lower)
+    items = filter_site_items()
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        sid = str(item.get("id") or "").strip()
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        ordered.append(sid)
+    for name in list(out.get("department") or []) + list(extra):
+        if name and name not in seen:
+            seen.add(name)
+            ordered.append(name)
+    out["department"] = ordered
+    out["department_items"] = items
     out["sites"] = extra
     return out
 

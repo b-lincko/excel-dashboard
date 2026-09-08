@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (live workbook + DB seeded from Test 002 log; camp sites unchanged).
+Last updated: 2026-09-08 (Work Orders camp chips + Search; Excel upload EBUSY fallback).
 
 ---
 
@@ -79,7 +79,7 @@ UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
 - Never insert/shift columns. Missing mapped headers may be **appended** at the end only (`_ensure_mapped_headers`).
 - Identity for a row: `record_id` = `{site_label}:{excel_row}` e.g. `SH5-SH1:13`. **IM Work Order # is not unique** (several MRs per IM WO). Sync by record_id; on import, match by record_id then WO#+site.
 - Site (`department`) comes from the worksheet label, not a department column. **Camp sites** (SH5 Site - 1/2/3/4A/5/7, SH1 L1/L2/L3/L4/L5/L7/LS1/LS2) are **not** extra Excel tabs and must not be stored as `department` (that would retarget `resolve_data_sheet`). Infer from `WO Asset Name` prefixes; persist `camp_site` in SQLite only. Filter `department=SH5-S1` / `Site - 1` / `SH5` matches the camp, not a new sheet.
-- Write path: **file lock → backup (Excel + SQLite pair) → temp xlsx → validate opens → `os.replace`**.
+- Write path: **file lock → backup (Excel + SQLite pair) → temp xlsx → validate opens → `os.replace`**. If `os.replace` raises EBUSY/ETXTBSY (Docker bind-mounted `file.xlsx`), copy bytes into the existing inode (`_replace_excel_file`) so Upload Excel then seed still works.
 - File lock required. HTTP **423** if locked, **503** if missing, **409** on sync-token conflict.
 
 ### Database / admin
@@ -202,7 +202,7 @@ Boot (`main._boot`): `init_db()`. If `wo_cache` is empty and Excel exists → `s
 - `_excel_update_record` etc. copy Excel with reason `update` / `bulk` / `create` / `delete` / `import` / `upload` / `reconcile`, and **also snapshot SQLite** (`.xlsx` + `.db` pair).
 - On Excel failure the DB row stays; response includes `_excel_backup_ok` / `_excel_backup_error`.
 - `seed_from_excel` reads the workbook and `replace_wo_cache`.
-- `replace_from_bytes` replaces live Excel then seeds.
+- `replace_from_bytes` replaces live Excel then seeds. Uses `_replace_excel_file` so a bind-mounted `file.xlsx` (Errno 16 busy) still updates.
 
 `resolve_excel_path`: if the configured path is not a file, substitute existing `ROOT/file.xlsx`. **Tests must not use `save_config(excel_path=missing.xlsx)` to simulate a missing workbook** — that still resolves to `file.xlsx` and can overwrite the real file. Stub `_excel_update_record` or `available()` instead. Always restore `file.xlsx` if a test hits it.
 
@@ -272,11 +272,11 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - React + Vite + Tailwind. Dev: `0.0.0.0:5173`, proxy `/api` → `127.0.0.1:8000`.
 - Production: `npm run build` → FastAPI serves `frontend/dist` when present.
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
-- Header: Search (completes WO / supplier / item / person), command palette (`Ctrl/⌘+K`), Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
-- Work-order list columns persist in `localStorage["woms.columns"]`. The Site column shows the camp (`Site - 1`, `L1`, …) when it can be inferred from WO Asset Name; `department` in SQLite stays the worksheet (`SH5-SH1` / `F5`).
+- Header: Search (completes WO / supplier / item / person / camp site), command palette (`Ctrl/⌘+K`), Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
+- Work-order list columns persist in `localStorage["woms.columns"]`. The Site column shows the camp (`Site - 1`, `L1`, …) when it can be inferred from WO Asset Name; `department` in SQLite stays the worksheet (`SH5-SH1` / `F5`). Work Orders site chips and the Site dropdown use `filter_site_items` (same camps as Dashboard). Search applies the filters currently set.
 - Reports (`/reports`): Daily and Weekly are on-screen briefings. Choose a calendar date (prev/next, Today / This week). Daily = that day only; weekly = ISO Monday–Sunday of that date. JSON at `GET /api/reports/{daily|weekly}?fmt=json&as_of=`. PDF is one A4 portrait page; XLSX is one sheet with `fitToHeight=1`. Other report kinds stay download-only under the More tab.
 - Work order editor: **one** Items & suppliers form. Type to complete supplier and item names (`TypeAhead`). Alt+Enter adds a row. No “Add supplier” on the MR page — add vendors on Materials. Supplier list is unique (`unique_supplier_names`). Type `@` in remarks/chat. Header search hits `GET /api/work-orders/suggest`. List search also matches `mr_lines`. Presence heartbeat shows who else has the MR open.
-- Filters start collapsed; chips remove filters.
+- Filters start collapsed; chips remove filters. A **Search** button applies the current filters (Dashboard opens the matching Work Orders list).
 - After Settings StrReplace, **assert `function DatabasePanel` still exists** if you insert `<DatabasePanel />` (vite can build while runtime ReferenceError).
 
 ### Tour / Guide
@@ -447,3 +447,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-08** Users page is full CRUD + access matrix. Extra permissions union with role. Last admin cannot be removed. Account can edit name/email and password.
 - **2026-09-08** Audit follow-up: header search uses `/suggest`; `/api/sync/upload` is settings-only; default passwords must be changed (`must_change_password`, skipped under pytest); logout revokes JWT `jti`; extras cannot grant users/settings/backup; write-safety backups prune to 8; autobackup defaults on; refresh `hard: false`.
 - **2026-09-08** Live `file.xlsx` replaced from `1. Material Request_LOG - Test 002.xlsx` via `replace_from_bytes` (paired backup, then seed). `wo_cache` replaced 2182 → 2193 by `record_id`. Do not append a second copy of the log. Several MRs per IM WO stay — that is not a duplicate row.
+- **2026-09-08** Work Orders `/options.sites` is `filter_site_items` (camp chips + Site dropdown). Suggest search includes sites. Excel replace falls back to copy-into-inode when Docker bind-mount `os.replace` returns EBUSY.

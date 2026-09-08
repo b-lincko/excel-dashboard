@@ -18,6 +18,7 @@ from ..domain import (
     matches_filters,
     reason_for_open,
     site_choices,
+    site_filter_match,
     today,
 )
 from ..excel.service import DELAY_FIELDS, DUE_OFFSETS, ExcelLocked, ExcelUnavailable, SyncConflict, excel_service
@@ -177,6 +178,13 @@ def list_work_orders(
     cfg = load_config()
     q_raw = str(filters.get("q") or "").strip()
     q_ids = database.record_ids_matching_q(q_raw) if q_raw else None
+    if q_raw and q_ids is not None:
+        for rec in records:
+            if not site_filter_match(rec, [q_raw], cfg):
+                continue
+            rid = str(rec.get("record_id") or "")
+            if rid:
+                q_ids.add(rid)
     matched = []
     for rec in records:
         if q_ids is not None:
@@ -287,14 +295,21 @@ def options(user=Depends(require_permission("view"))):
     opts["supplier_items"] = supplier_items
     sites = site_choices(cfg)
     camps = camp_site_catalog(cfg)
-    for name in sites:
-        if name not in opts.get("department", []):
-            opts.setdefault("department", []).append(name)
-    for camp in camps:
-        for name in (camp.get("label"), camp.get("group")):
-            if name and name not in opts.get("department", []):
-                opts.setdefault("department", []).append(name)
-    opts["department"] = sorted(opts.get("department") or [], key=str.lower)
+    site_items = filter_site_items(cfg)
+    dept_ids: list[str] = []
+    seen_dept: set[str] = set()
+    for item in site_items:
+        sid = str(item.get("id") or "").strip()
+        if not sid or sid in seen_dept:
+            continue
+        seen_dept.add(sid)
+        dept_ids.append(sid)
+    for name in list(opts.get("department") or []) + list(sites):
+        if name and name not in seen_dept:
+            seen_dept.add(name)
+            dept_ids.append(name)
+    opts["department"] = dept_ids
+    opts["department_items"] = site_items
     opts["camp_sites"] = camps
     offsets = dict(DUE_OFFSETS)
     offsets.update({str(k).lower(): int(v) for k, v in (cfg.due_offsets or {}).items()})

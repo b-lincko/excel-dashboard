@@ -159,7 +159,13 @@ export default function Dashboard() {
         onChange={(id) => setFilters((f) => ({ ...f, department: id || undefined }))}
       />
 
-      <Filters value={filters} onChange={setFilters} options={options} />
+      <Filters
+        value={filters}
+        onChange={setFilters}
+        options={options}
+        onSearch={(v) => go(v || {})}
+        searchLabel="Search"
+      />
 
       {adding && editing && (
         <AddWidgetBar

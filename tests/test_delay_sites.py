@@ -137,6 +137,43 @@ def test_resolve_data_sheet_rejects_missing_office_tab():
         assert "Accommodations" in str(exc)
 
 
+def test_search_q_matches_camp_site_label():
+    cfg = AppConfig()
+    rec = {"department": "SH5-SH1", "location": "S3-B201-x", "status": "OPEN", "work_order_id": "481000"}
+    assert matches_filters(rec, {"q": "Site - 3"}, cfg) is True
+    assert matches_filters(rec, {"q": "SH5-S3"}, cfg) is True
+    assert matches_filters(rec, {"q": "LS2"}, cfg) is False
+
+
+def test_suggest_includes_camp_sites():
+    from app import database
+
+    groups = database.suggest_workspace("Site - 3", limit=8)
+    ids = [s.get("id") for s in (groups.get("sites") or [])]
+    labels = [s.get("label") for s in (groups.get("sites") or [])]
+    assert "SH5-S3" in ids
+    assert "Site - 3" in labels
+
+
+def test_replace_excel_file_falls_back_when_busy(tmp_path, monkeypatch):
+    import errno
+
+    from app.excel.service import _replace_excel_file
+
+    src = tmp_path / "new.xlsx"
+    dest = tmp_path / "file.xlsx"
+    src.write_bytes(b"hello-new-bytes")
+    dest.write_bytes(b"old")
+
+    def boom(_a, _b):
+        raise OSError(errno.EBUSY, "Device or resource busy")
+
+    monkeypatch.setattr("app.excel.service.os.replace", boom)
+    _replace_excel_file(src, dest)
+    assert dest.read_bytes() == b"hello-new-bytes"
+    assert not src.exists()
+
+
 def test_message_notifications_for_chat():
     from app import database, notify
 

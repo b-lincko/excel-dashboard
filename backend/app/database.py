@@ -1796,7 +1796,30 @@ def suggest_workspace(q: str, limit: int = 8) -> dict[str, list[dict[str, Any]]]
         }
         for r in people_rows
     ]
-    return {"orders": orders, "suppliers": suppliers, "materials": materials, "people": people}
+    from .domain import filter_site_items
+
+    needle = " ".join(str(q or "").split()).lower()
+    compact = "".join(ch for ch in needle if ch.isalnum())
+    sites: list[dict[str, Any]] = []
+    for item in filter_site_items():
+        sid = str(item.get("id") or "").strip()
+        if not sid:
+            continue
+        blob = " ".join(str(item.get(k) or "") for k in ("id", "label", "group")).lower()
+        blob_c = "".join(ch for ch in blob if ch.isalnum())
+        if needle not in blob and not (compact and compact in blob_c):
+            continue
+        sites.append(
+            {
+                "kind": "site",
+                "id": sid,
+                "label": item.get("label") or sid,
+                "hint": item.get("group") or "Site",
+            }
+        )
+        if len(sites) >= limit_n:
+            break
+    return {"orders": orders, "suppliers": suppliers, "materials": materials, "people": people, "sites": sites}
 
 
 def touch_presence(record_id: str, username: str, full_name: str = "") -> dict[str, Any]:

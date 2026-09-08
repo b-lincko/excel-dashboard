@@ -642,7 +642,19 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
                 "camp_site",
             )
         ).lower()
-        if q not in hay:
+        camp = camp_site_of(rec, cfg)
+        if camp:
+            hay += " " + " ".join(
+                str(x or "")
+                for x in (
+                    camp.get("id"),
+                    camp.get("label"),
+                    camp.get("group"),
+                    f"{camp.get('group')} {camp.get('label')}",
+                    *(camp.get("prefixes") or []),
+                )
+            ).lower()
+        if q not in hay and not site_filter_match(rec, [q], cfg):
             return False
 
     start, end = date_window(filters)

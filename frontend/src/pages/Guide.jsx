@@ -71,10 +71,10 @@ export default function Guide() {
             <Search size={16} /> Find a request
           </div>
           <p className="text-sm text-slate-500">
-            Header search completes WO ids, supplier names, items and people as you type. On the list, filters stay collapsed —
-            open them when you need a site, status or period. Site chips include SH5 camps (Site - 1, 2, 3, 4A, 5, 7) and
-            SH1 (L1–L7, LS1, LS2) as well as SH5-SH1, F5, Office and Accommodations. Click a chip to remove it. Save a view
-            if you reuse the same set.
+            Header search completes WO ids, supplier names, items, people and camp sites as you type. Search on Dashboard
+            or Work orders applies the filters currently set (site, status, period) and opens the matching list. Site chips
+            and the Site dropdown include SH5 camps (Site - 1, 2, 3, 4A, 5, 7) and SH1 (L1–L7, LS1, LS2) as well as
+            SH5-SH1, F5, Office and Accommodations. Click a chip to remove it. Save a view if you reuse the same set.
           </p>
         </div>
         <div className="card p-5 space-y-2">

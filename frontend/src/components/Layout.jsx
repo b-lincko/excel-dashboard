@@ -298,6 +298,15 @@ export default function Layout() {
               to: `/work-orders?assigned_to=${encodeURIComponent(p.full_name || p.label)}`,
             })
           );
+          (groups.sites || []).forEach((s) =>
+            rows.push({
+              key: `site-${s.id || s.label}`,
+              kind: "site",
+              label: s.label,
+              hint: s.hint || "Site",
+              to: `/work-orders?department=${encodeURIComponent(s.id || s.label)}`,
+            })
+          );
           setHits(rows.slice(0, 12));
           setHitIdx(0);
           setHitsOpen(true);
@@ -444,7 +453,7 @@ export default function Layout() {
                     nav(hits[hitIdx].to);
                   }
                 }}
-                placeholder="Search WO, supplier, item, person…  /"
+                placeholder="Search WO, supplier, item, person, site…  /"
                 className="pl-9"
                 aria-label="Search work orders"
                 autoComplete="off"
