@@ -1,0 +1,31 @@
+{
+  "excel_path": "data/work_orders.xlsx",
+  "worksheet_name": "WorkOrders",
+  "lists_worksheet": "Lists",
+  "backup_dir": "backups",
+  "mapping": {
+    "work_order_id": "WO No",
+    "created_date": "Date Opened",
+    "scheduled_date": "Scheduled Date",
+    "due_date": "Due Date",
+    "completion_date": "Completion Date",
+    "closed_date": "Closing Date",
+    "status": "Status",
+    "priority": "Priority",
+    "department": "Department",
+    "location": "Location",
+    "assigned_to": "Assigned To",
+    "work_type": "Work Type",
+    "description": "Description",
+    "issue": "Issue",
+    "delay_reason": "Delay Reason",
+    "remarks": "Remarks",
+    "created_by": "Created By",
+    "last_updated": "Last Updated"
+  },
+  "closed_statuses": ["Closed", "Completed", "Cancelled"],
+  "pending_statuses": ["Pending", "On Hold", "New"],
+  "in_progress_statuses": ["In Progress", "Assigned"],
+  "id_prefix": "WO",
+  "auto_refresh_seconds": 60
+}
