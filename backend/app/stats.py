@@ -12,8 +12,10 @@ from .dates import parse_date, quarter_of, to_date, week_bounds
 from .domain import (
     aging_days,
     annotate,
+    canonical_priority,
     closing_days,
     filter_site_items,
+    is_blockade,
     is_closed,
     is_in_progress,
     is_open,
@@ -75,12 +77,7 @@ def kpis(records: list[dict[str, Any]]) -> dict[str, Any]:
             or to_date(r.get("completion_date")) == t
         )
     ]
-    blockades = [
-        r
-        for r in outstanding
-        if str(r.get("status") or "").strip().upper() in {"UNDER NTP", "ON HOLD", "OPEN"}
-        or is_overdue(r, cfg)
-    ]
+    blockades = [r for r in records if is_blockade(r, cfg)]
     return {
         "total": total,
         "open": len(open_),
@@ -134,12 +131,12 @@ def today_activity(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 def blockades(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     cfg = load_config()
-    open_recs = [r for r in records if is_open(r, cfg)]
+    stuck = [r for r in records if is_blockade(r, cfg)]
     counts = Counter()
-    for r in open_recs:
-        st = str(r.get("status") or "OPEN").strip() or "OPEN"
+    for r in stuck:
+        st = str(r.get("status") or "").strip() or "Unknown"
         counts[st] += 1
-    total = len(open_recs) or 1
+    total = len(stuck) or 1
     out = []
     for name, value in counts.most_common():
         out.append({"name": name, "value": value, "pct": round(value / total * 100, 1)})
@@ -213,7 +210,11 @@ def group_by(records: list[dict[str, Any]], field: str, limit: Optional[int] = N
     cfg = load_config()
     groups: dict[str, list] = defaultdict(list)
     for r in records:
-        groups[str(r.get(field) or "Unassigned")].append(r)
+        if field == "priority":
+            key = canonical_priority(r.get(field)) or "Unassigned"
+        else:
+            key = str(r.get(field) or "Unassigned")
+        groups[key].append(r)
     rows = []
     for name, recs in groups.items():
         closed = [r for r in recs if is_closed(r, cfg)]
@@ -602,9 +603,9 @@ def mindmap(
                 "id": "blockades",
                 "label": "Blockades",
                 "value": k["blockades"],
-                "filter": {"flag": "outstanding"},
+                "filter": {"flag": "blockade"},
                 "children": [
-                    {"id": f"st:{b['name']}", "label": b["name"], "value": b["value"], "filter": {"flag": "outstanding", "status": b["name"]}}
+                    {"id": f"st:{b['name']}", "label": b["name"], "value": b["value"], "filter": {"flag": "blockade", "status": b["name"]}}
                     for b in blockade_rows
                 ],
             },
@@ -641,7 +642,11 @@ def _options_from(records: list[dict[str, Any]]) -> dict[str, list[str]]:
     fields = ["status", "priority", "department", "location", "assigned_to", "work_type", "delay_reason", "issue", "supplier"]
     out: dict[str, list[str]] = {}
     for field in fields:
-        vals = {str(r.get(field)).strip() for r in records if str(r.get(field) or "").strip()}
+        if field == "priority":
+            vals = {canonical_priority(r.get(field)) for r in records if str(r.get(field) or "").strip()}
+            vals.discard("")
+        else:
+            vals = {str(r.get(field)).strip() for r in records if str(r.get(field) or "").strip()}
         out[field] = sorted(vals, key=str.lower)
     extra = site_choices()
     items = filter_site_items()

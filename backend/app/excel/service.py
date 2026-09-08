@@ -354,7 +354,11 @@ class ExcelService:
             empty_streak = 0
             wo_val = raw.get(id_field_header) if id_field_header else None
             if wo_val in (None, ""):
-                continue
+                # Keep STATUS=OPEN rows even when IM WO # is blank so the Open KPI matches the workbook.
+                status_header = next((h for h in headers if mapping.get(norm_header(h)) == "status"), None)
+                st = _cell_plain(raw.get(status_header)) if status_header else None
+                if st in (None, ""):
+                    continue
             records.append(
                 self.map_row(raw, idx, sheet_name, cfg=cfg, mapping=mapping, fields=fields, site=site)
             )
@@ -469,29 +473,23 @@ class ExcelService:
         return {"ok": True, "count": n, "error": None}
 
     def _seed_catalog(self, records: list[dict[str, Any]], username: str) -> None:
-        known = {s["name"].lower() for s in database.list_suppliers() if s.get("name")}
+        suppliers: list[str] = []
+        lines: list[tuple[str, str, str, str]] = []
+        seen: set[str] = set()
         for rec in records:
             name = str(rec.get("supplier") or "").strip()
-            if name and name.lower() not in known:
-                try:
-                    database.add_supplier(name, created_by=username)
-                    known.add(name.lower())
-                except Exception:
-                    continue
+            if name:
+                key = name.lower()
+                if key not in seen:
+                    seen.add(key)
+                    suppliers.append(name)
             rid = str(rec.get("record_id") or "")
             if not rid:
                 continue
             desc = str(rec.get("description") or "").strip()
             if name or desc:
-                try:
-                    database.replace_mr_lines(
-                        rid,
-                        [{"supplier": name, "material": desc}],
-                        created_by=username,
-                        work_order_id=str(rec.get("work_order_id") or ""),
-                    )
-                except Exception:
-                    continue
+                lines.append((rid, str(rec.get("work_order_id") or ""), name, desc))
+        database.bulk_seed_catalog(suppliers, lines, created_by=username)
 
     def load(self, force: bool = False) -> list[dict[str, Any]]:
         with self._lock:

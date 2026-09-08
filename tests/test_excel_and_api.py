@@ -14,9 +14,9 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.config import AppConfig, save_config, load_config  # noqa: E402
 from app.dates import parse_date  # noqa: E402
-from app.domain import is_closed, is_open, is_overdue, is_placed, is_status_open  # noqa: E402
+from app.domain import is_blockade, is_closed, is_open, is_overdue, is_placed, is_status_open  # noqa: E402
 from app.excel.service import ExcelService  # noqa: E402
-from app.stats import kpis  # noqa: E402
+from app.stats import blockades, kpis  # noqa: E402
 from app.validation import validate_work_order  # noqa: E402
 
 
@@ -72,9 +72,13 @@ def test_kpis_match_records(workbook):
     assert k["closed"] == sum(1 for r in recs if is_closed(r))
     assert k["open"] == sum(1 for r in recs if is_status_open(r))
     assert k["placed"] == sum(1 for r in recs if is_placed(r))
+    assert k["blockades"] == sum(1 for r in recs if is_blockade(r))
     assert k["open"] + k["closed"] <= k["total"]
     assert k["open"] + k["placed"] + k["closed"] <= k["total"]
     assert k["overdue"] == sum(1 for r in recs if is_overdue(r))
+    blockade_names = {row["name"].strip().upper() for row in blockades(recs)}
+    assert "OPEN" not in blockade_names
+    assert "PLACED" not in blockade_names
     assert 0 <= k["completion_rate"] <= 100
 
 

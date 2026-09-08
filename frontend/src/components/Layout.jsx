@@ -350,21 +350,21 @@ export default function Layout() {
   const sidebar = (
     <>
       <div className="px-5 py-5 flex items-center gap-3">
-        <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-400 to-brand-700 grid place-items-center font-extrabold text-white shadow-lg">
+        <div className="h-10 w-10 rounded-xl bg-brand-600 grid place-items-center font-extrabold text-white">
           WO
         </div>
         <div className="min-w-0">
-          <div className="font-bold tracking-tight text-white leading-tight">Linkco MR</div>
-          <div className="text-[11px] text-slate-400 truncate">IM Work Order · Material Request</div>
+          <div className="font-bold tracking-tight text-slate-900 dark:text-white leading-tight">Linkco MR</div>
+          <div className="text-[11px] text-slate-400 truncate">Work orders · Material requests</div>
         </div>
-        <button className="ml-auto lg:hidden btn-ghost !text-slate-300 !px-2" onClick={() => setMenu(false)} aria-label="Close menu">
+        <button className="ml-auto lg:hidden btn-ghost !px-2" onClick={() => setMenu(false)} aria-label="Close menu">
           <X size={18} />
         </button>
       </div>
       <nav className="px-3 flex-1 space-y-4 overflow-y-auto" aria-label="Main">
         {groups.map((g) => (
           <div key={g.group} data-tour={g.group === "Work" ? "nav-work" : undefined}>
-            <div className="px-3 mb-1 text-[10px] uppercase tracking-wider text-slate-500">{g.group}</div>
+            <div className="px-3 mb-1 text-[10px] uppercase tracking-wider text-slate-400">{g.group}</div>
             <div className="space-y-0.5">
               {g.items.map((n) => (
                 <NavLink
@@ -373,7 +373,9 @@ export default function Layout() {
                   end={n.end}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition ${
-                      isActive ? "bg-white/10 text-white" : "text-slate-400 hover:text-white hover:bg-white/5"
+                      isActive
+                        ? "bg-brand-50 text-brand-800 dark:bg-white/10 dark:text-white"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/5"
                     }`
                   }
                 >
@@ -385,12 +387,12 @@ export default function Layout() {
           </div>
         ))}
       </nav>
-      <div className="p-4 border-t border-white/5">
-        <NavLink to="/account" className="block text-xs text-slate-400 mb-1 truncate hover:text-white">
+      <div className="p-4 border-t border-slate-100 dark:border-white/5">
+        <NavLink to="/account" className="block text-xs text-slate-500 mb-1 truncate hover:text-brand-700 dark:text-slate-400 dark:hover:text-white">
           {user?.full_name || user?.username}
         </NavLink>
         <div className="flex items-center justify-between">
-          <span className="text-[11px] uppercase tracking-wider text-cyan-300/80">{user?.role}</span>
+          <span className="text-[11px] uppercase tracking-wider text-brand-700 dark:text-brand-400">{user?.role}</span>
           <button className="btn-ghost !text-slate-400 !px-2 !py-1" onClick={signOut} title="Sign out" aria-label="Sign out">
             <LogOut size={16} />
           </button>
@@ -405,9 +407,9 @@ export default function Layout() {
         Skip to content
       </a>
       {menu && <button className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setMenu(false)} aria-label="Close menu overlay" />}
-      <aside className="hidden lg:flex w-[250px] shrink-0 bg-ink-900 text-slate-200 flex-col border-r border-white/5">{sidebar}</aside>
+      <aside className="hidden lg:flex w-[250px] shrink-0 bg-white dark:bg-ink-900 text-slate-700 flex-col border-r border-slate-200 dark:border-white/5">{sidebar}</aside>
       <aside
-        className={`fixed z-40 inset-y-0 left-0 w-[250px] bg-ink-900 text-slate-200 flex flex-col border-r border-white/5 transition-transform lg:hidden ${
+        className={`fixed z-40 inset-y-0 left-0 w-[250px] bg-white dark:bg-ink-900 text-slate-700 flex flex-col border-r border-slate-200 dark:border-white/5 transition-transform lg:hidden ${
           menu ? "translate-x-0" : "-translate-x-full"
         }`}
       >

@@ -13,6 +13,7 @@ from ..domain import (
     aging_days,
     annotate,
     camp_site_catalog,
+    canonical_priority,
     filter_site_items,
     is_overdue,
     matches_filters,
@@ -260,7 +261,10 @@ def options(user=Depends(require_permission("view"))):
         for f in fields:
             v = rec.get(f)
             if v not in (None, ""):
-                buckets[f].add(str(v))
+                if f == "priority":
+                    buckets[f].add(canonical_priority(v) or str(v))
+                else:
+                    buckets[f].add(str(v))
     opts = {f: sorted(buckets[f], key=str.lower) for f in fields}
     lists = excel_service.lists()
     cfg = load_config()

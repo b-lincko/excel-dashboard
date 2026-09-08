@@ -34,7 +34,7 @@ body {
 
 @layer components {
   .card {
-    @apply bg-white dark:bg-ink-800 rounded-2xl border border-slate-200 dark:border-white/5 shadow-card;
+    @apply bg-white dark:bg-ink-800 rounded-xl border border-slate-200 dark:border-white/5 shadow-card;
   }
 
   .btn {
@@ -44,7 +44,7 @@ body {
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition;
     @apply disabled:opacity-50 disabled:pointer-events-none;
-    @apply bg-brand-700 text-white hover:bg-brand-600 shadow-sm;
+    @apply bg-brand-600 text-white hover:bg-brand-700 shadow-sm;
   }
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition;

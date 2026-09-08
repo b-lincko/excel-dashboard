@@ -36,29 +36,29 @@ export default function Login() {
 
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
-      <div className="hidden lg:flex flex-col justify-between bg-ink-900 text-white p-12 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(34,211,238,0.18),transparent_40%),radial-gradient(circle_at_80%_80%,rgba(14,116,144,0.25),transparent_40%)]" />
+      <div className="hidden lg:flex flex-col justify-between bg-brand-700 text-white p-12 relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.12),transparent_40%),radial-gradient(circle_at_80%_80%,rgba(8,94,82,0.45),transparent_40%)]" />
         <div className="relative">
           <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-cyan-400 to-brand-700 grid place-items-center font-extrabold">
+            <div className="h-12 w-12 rounded-2xl bg-white text-brand-700 grid place-items-center font-extrabold">
               WO
             </div>
             <div>
               <div className="text-xl font-bold">Linkco MR</div>
-              <div className="text-sm text-slate-400">IM Work Order · Material Request log</div>
+              <div className="text-sm text-white/70">Work orders · Material requests</div>
             </div>
           </div>
         </div>
         <div className="relative max-w-lg">
           <h1 className="text-4xl font-extrabold leading-tight tracking-tight">
             Material requests in one place.
-            <span className="block text-cyan-300">Act on what is late, blocked, or due.</span>
+            <span className="block text-white/90">Act on what is late, blocked, or due.</span>
           </h1>
-          <p className="mt-5 text-slate-300 text-sm leading-relaxed">
+          <p className="mt-5 text-white/75 text-sm leading-relaxed">
             The database is the live history. Each save is copied to Excel as a backup. Claim, follow, and close MRs without hunting through the workbook.
           </p>
         </div>
-        <div className="relative text-xs text-slate-500">Linkco MR · Work order management</div>
+        <div className="relative text-xs text-white/50">Linkco MR · Work order management</div>
       </div>
       <div className="grid place-items-center p-8 bg-slate-50 dark:bg-ink-900">
         <form onSubmit={submit} className="w-full max-w-sm card p-8">

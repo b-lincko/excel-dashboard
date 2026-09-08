@@ -253,6 +253,9 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=15000")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        conn.execute("PRAGMA cache_size=-80000")
+        conn.execute("PRAGMA mmap_size=268435456")
     except sqlite3.Error:
         pass
     try:
@@ -1470,6 +1473,63 @@ def list_all_mr_lines() -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute("SELECT * FROM mr_lines ORDER BY id").fetchall()
         return [dict(r) for r in rows]
+
+
+def bulk_seed_catalog(
+    suppliers: list[str],
+    lines: list[tuple[str, str, str, str]],
+    created_by: str = "",
+) -> None:
+    """Replace MR lines for a full Excel seed in one transaction.
+
+    ``lines`` is (record_id, work_order_id, supplier, material).
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw in suppliers or []:
+        name = " ".join(str(raw or "").split())
+        key = name.lower()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    rows: list[tuple[Any, ...]] = []
+    rids: list[str] = []
+    for item in lines or []:
+        if not item:
+            continue
+        rid = str(item[0] or "").strip()
+        if not rid:
+            continue
+        wo = str(item[1] or "").strip()
+        supplier = " ".join(str(item[2] or "").split())
+        material = " ".join(str(item[3] or "").split())
+        if not supplier and not material:
+            continue
+        rids.append(rid)
+        rows.append((rid, wo, supplier, material, "", "", "", "", 0, now_iso(), created_by))
+    ts = now_iso()
+    with connect() as conn:
+        conn.execute("PRAGMA foreign_keys=OFF")
+        if names:
+            conn.executemany(
+                "INSERT OR IGNORE INTO suppliers (name, created_at, created_by) VALUES (?, ?, ?)",
+                [(n, ts, created_by) for n in names],
+            )
+        if rids:
+            uniq = list(dict.fromkeys(rids))
+            chunk = 400
+            for i in range(0, len(uniq), chunk):
+                part = uniq[i : i + chunk]
+                placeholders = ",".join("?" for _ in part)
+                conn.execute(f"DELETE FROM mr_lines WHERE record_id IN ({placeholders})", part)
+        if rows:
+            conn.executemany(
+                """INSERT INTO mr_lines
+                   (record_id, work_order_id, supplier, material, qty, unit, notes, needed_date, sort_order, created_at, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
 
 
 def replace_mr_lines(

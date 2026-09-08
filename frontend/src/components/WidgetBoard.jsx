@@ -50,7 +50,7 @@ import {
   metricValue,
 } from "../lib/widgets.js";
 
-const PIE = ["#0F3D5E", "#1D6A96", "#0EA5E9", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#64748B", "#14B8A6"];
+const PIE = ["#0D9F8A", "#12B5A0", "#0EA5E9", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#64748B", "#14B8A6"];
 
 const ICONS = {
   created_today: ClipboardList,
@@ -152,7 +152,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
             <KPICard label="Jobs in today" value={k.created_today} hint="MR received today" icon={ClipboardList} accent="brand" onClick={() => go({ period: "today" })} />
             <KPICard label="Jobs done today" value={k.done_today} hint="Closed / ETA today" icon={CheckCircle2} accent="emerald" onClick={() => go({ flag: "closed", period: "today" })} />
             <KPICard label="Delivered today" value={k.delivered_today} icon={Truck} accent="sky" />
-            <KPICard label="Blockades" value={k.blockades} hint="NTP, hold, open, overdue" icon={Ban} accent="rose" onClick={() => go({ flag: "outstanding" })} />
+            <KPICard label="Blockades" value={k.blockades} hint="NTP, hold, gatepass — not OPEN or PLACED" icon={Ban} accent="rose" onClick={() => go({ flag: "blockade" })} />
             <KPICard label="In progress" value={k.in_progress} hint="Placed / gatepass" icon={Wrench} accent="indigo" onClick={() => go({ flag: "in_progress" })} />
             <KPICard label="Overdue" value={k.overdue} icon={AlertTriangle} accent="rose" onClick={() => go({ flag: "overdue" })} />
           </div>
@@ -212,6 +212,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
               else if (meta.id === "overdue") go({ flag: "overdue" });
               else if (meta.id === "pending") go({ flag: "pending" });
               else if (meta.id === "in_progress") go({ flag: "in_progress" });
+              else if (meta.id === "blockades") go({ flag: "blockade" });
               else if (meta.id === "created_today" || meta.id === "done_today") go({ period: "today" });
               else go({});
             }}
@@ -230,7 +231,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="created" name="Created" fill="#0F3D5E" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                <Bar dataKey="created" name="Created" fill="#0D9F8A" radius={[4, 4, 0, 0]} isAnimationActive={false} />
                 <Bar dataKey="done" name="Done" fill="#10B981" radius={[4, 4, 0, 0]} isAnimationActive={false} />
               </BarChart>
             </ResponsiveContainer>
@@ -262,7 +263,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
                 <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
                 <Tooltip />
                 <Legend />
-                <Line type="monotone" dataKey="created" stroke="#0F3D5E" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="created" stroke="#0D9F8A" strokeWidth={2} dot={false} isAnimationActive={false} />
                 <Line type="monotone" dataKey="closed" stroke="#10B981" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>

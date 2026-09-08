@@ -6,6 +6,7 @@ export default {
     extend: {
       fontFamily: {
         sans: [
+          "DM Sans",
           "ui-sans-serif",
           "system-ui",
           "-apple-system",
@@ -24,17 +25,17 @@ export default {
           700: "#1A2740",
         },
         brand: {
-          50: "#E8F6FA",
-          100: "#CDEAF3",
-          400: "#3A8FB5",
-          500: "#1D6A96",
-          600: "#155A80",
-          700: "#0F3D5E",
-          800: "#0C314C",
+          50: "#E6F7F3",
+          100: "#C5EEE6",
+          400: "#2BBFA8",
+          500: "#12A38C",
+          600: "#0D9F8A",
+          700: "#0B7A6A",
+          800: "#085E52",
         },
       },
       boxShadow: {
-        card: "0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04)",
+        card: "0 1px 2px rgba(15, 23, 42, 0.05), 0 6px 16px rgba(15, 23, 42, 0.04)",
       },
     },
   },

@@ -24,6 +24,28 @@ def _norm(s: Any) -> str:
     return str(s or "").strip().lower()
 
 
+def _status_token(s: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", _norm(s))
+
+
+def canonical_priority(value: Any) -> str:
+    """Collapse LOW/Low/low (and Medium/MEDIUM) into one label for charts and filters."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    key = re.sub(r"[^a-z]", "", raw.lower())
+    mapping = {
+        "low": "Low",
+        "medium": "Medium",
+        "med": "Medium",
+        "normal": "Medium",
+        "high": "High",
+        "critical": "Critical",
+        "none": "None",
+    }
+    return mapping.get(key, raw)
+
+
 def status_set(values: list[str]) -> set[str]:
     return {_norm(v) for v in values}
 
@@ -57,13 +79,29 @@ def is_status_open(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool
     """Excel STATUS is OPEN — used for the Open KPI and /open page."""
     cfg = cfg or load_config()
     values = getattr(cfg, "status_open_values", None) or ["OPEN"]
-    return _norm(rec.get("status")) in status_set(values)
+    token = _status_token(rec.get("status"))
+    wanted = {_status_token(v) for v in values} | {"open"}
+    return bool(token) and token in wanted
 
 
 def is_placed(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
     cfg = cfg or load_config()
     values = getattr(cfg, "placed_statuses", None) or ["PLACED"]
-    return _norm(rec.get("status")) in status_set(values)
+    token = _status_token(rec.get("status"))
+    wanted = {_status_token(v) for v in values} | {"placed"}
+    return bool(token) and token in wanted
+
+
+def is_blockade(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> bool:
+    """Stuck MRs: NTP / hold / gatepass / pending — not OPEN, PLACED, or CLOSED."""
+    cfg = cfg or load_config()
+    if is_closed(rec, cfg) or is_cancelled(rec, cfg):
+        return False
+    if is_status_open(rec, cfg) or is_placed(rec, cfg):
+        return False
+    if not str(rec.get("status") or "").strip():
+        return False
+    return True
 
 
 def site_choices(cfg: Optional[AppConfig] = None) -> list[str]:
@@ -596,6 +634,8 @@ def matches_filters(rec: dict[str, Any], filters: dict[str, Any], cfg: Optional[
         return False
     if flag == "on_hold" and not is_on_hold(rec, cfg):
         return False
+    if flag == "blockade" and not is_blockade(rec, cfg):
+        return False
     if flag == "due_week" and not is_due_this_week(rec, cfg):
         return False
     if flag == "due_soon" and not is_due_soon(rec, cfg):
@@ -755,6 +795,9 @@ def annotate(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> dict[str, 
     out["open_reason"] = reason_for_open(rec) if out["is_open"] else ""
     out["is_ntp"] = is_ntp(rec, cfg)
     out["is_on_hold"] = is_on_hold(rec, cfg)
+    out["is_blockade"] = is_blockade(rec, cfg)
+    if rec.get("priority") not in (None, ""):
+        out["priority"] = canonical_priority(rec.get("priority")) or rec.get("priority")
     out["is_delivered"] = is_delivered(rec)
     out["is_pending_po"] = is_pending_po(rec, cfg)
     out["is_awaiting_po"] = is_awaiting_po(rec, cfg)

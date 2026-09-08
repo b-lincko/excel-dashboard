@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (Excel upload/restore progress jobs; do not log out on request timeout).
+Last updated: 2026-09-08 (Priority case-fold, blockades exclude OPEN/PLACED, faster Excel seed, UpKeep-like UI).
 
 ---
 
@@ -84,7 +84,8 @@ UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
 
 ### Database / admin
 
-- Live path: `data/woms.db`. Schema in `backend/app/database.py` (`SCHEMA` + `init_db` migrations). Connections use WAL + `busy_timeout=15000` so several people can save at once.
+- Live path: `data/woms.db`. Schema in `backend/app/database.py` (`SCHEMA` + `init_db` migrations). Connections use WAL + `busy_timeout=15000` + `cache_size`/`mmap` so several people can save at once.
+- Excel seed (`seed_from_excel(replace_lines=True)`) writes `wo_cache` then `bulk_seed_catalog` (one transaction, `executemany`). Do **not** call `replace_mr_lines` per row on upload.
 - Admin **Reset database**: wipe users, chat, settings, attachments, work orders; recreate schema + default logins via `init_db`; then seed from current/uploaded Excel. Confirm body must be exactly `DELETE`.
 - **Do not delete `app_config.json`** on reset (column mapping lives there).
 - Default logins after reset / empty DB (UI and API block other work until that user sets a new password; pytest skips the block via `PYTEST_CURRENT_TEST`):
@@ -98,6 +99,9 @@ UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
 ### Product rules
 
 - Calculate statistics dynamically from live records (`backend/app/stats.py`, `domain.py`). No fake numbers.
+- **Priority charts/filters** collapse case (`LOW`/`Low` → `Low`, `MEDIUM`/`Medium` → `Medium`) via `canonical_priority`. Do not invent extra priority values.
+- **Open KPI / `/open`** = `is_status_open` (STATUS token `open`, including `OPEN.` / extra spaces). Excel rows with a STATUS but a blank IM WO # are still seeded so the count matches the workbook.
+- **Blockades KPI / pie / mind map** = `is_blockade`: outstanding statuses that are **not OPEN, not PLACED, not CLOSED** (NTP, hold, gatepass, pending, …). Filter flag `blockade`. Do not count OPEN or PLACED as blockades.
 - Do not hard-code statuses if Excel/DB/config has different values. Business rules are configurable (`closed_statuses`, `pending_statuses`, delay rules, due offsets, required fields, field-edit roles).
 - Conflicts: show a warning; user reloads or force-overwrites.
 - Deliver a working app, not a prototype.
@@ -270,6 +274,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 ## 10. Frontend
 
 - React + Vite + Tailwind. Dev: `0.0.0.0:5173`, proxy `/api` → `127.0.0.1:8000`.
+- UI look: light canvas, teal brand (`#0D9F8A`), white sidebar, compact KPI tiles with a left accent (UpKeep-style CMMS). Do not invent dashboard numbers to match a mock.
 - Production: `npm run build` → FastAPI serves `frontend/dist` when present.
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
 - Header: Search (completes WO / supplier / item / person / camp site), command palette (`Ctrl/⌘+K`), Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
@@ -333,6 +338,7 @@ cd frontend && npm run build
 | `tests/test_production_hardening.py` | Login lockout, jwt_secret stripped from Settings, password min 8 |
 | `tests/test_users_access.py` | User CRUD, extra grants, profile, password, last-admin guard |
 | `tests/test_audit_fixes.py` | Logout revoke, password invalidates token, upload needs settings, folder jail, write-backup prune |
+| `tests/test_priority_blockades.py` | Priority case-fold, blockades exclude OPEN/PLACED, flag=blockade |
 
 Pitfalls (do not repeat):
 
