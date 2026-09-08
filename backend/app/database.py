@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from .config import ATTACHMENTS_DIR, DB_PATH, DATA_DIR
-from .passwords import hash_password
+from .passwords import hash_password, verify_password
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -274,6 +274,19 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
         if "extra_permissions" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN extra_permissions TEXT")
+        if "must_change_password" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0")
+            cols.add("must_change_password")
+        if "token_version" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
+            cols.add("token_version")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS revoked_tokens (
+                jti TEXT PRIMARY KEY,
+                username TEXT,
+                exp INTEGER
+            )"""
+        )
         chat_cols = {r[1] for r in conn.execute("PRAGMA table_info(chat_threads)")}
         if "record_id" not in chat_cols:
             conn.execute("ALTER TABLE chat_threads ADD COLUMN record_id TEXT")
@@ -302,8 +315,8 @@ def init_db() -> None:
         if count == 0:
             for u in DEFAULT_USERS:
                 conn.execute(
-                    """INSERT INTO users (username, full_name, email, password_hash, role, is_active, created_at)
-                       VALUES (?, ?, ?, ?, ?, 1, ?)""",
+                    """INSERT INTO users (username, full_name, email, password_hash, role, is_active, created_at, must_change_password)
+                       VALUES (?, ?, ?, ?, ?, 1, ?, 1)""",
                     (
                         u["username"],
                         u["full_name"],
@@ -313,6 +326,17 @@ def init_db() -> None:
                         now_iso(),
                     ),
                 )
+        for u in DEFAULT_USERS:
+            row = conn.execute(
+                "SELECT id, password_hash, must_change_password FROM users WHERE username = ?",
+                (u["username"],),
+            ).fetchone()
+            if (
+                row
+                and not row["must_change_password"]
+                and verify_password(u["password"], row["password_hash"])
+            ):
+                conn.execute("UPDATE users SET must_change_password = 1 WHERE id = ?", (row["id"],))
 
 
 def row_to_dict(row: Optional[sqlite3.Row]) -> Optional[dict[str, Any]]:
@@ -336,7 +360,8 @@ def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
 def list_users() -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
-            """SELECT id, username, full_name, email, role, is_active, created_at, last_login, extra_permissions
+            """SELECT id, username, full_name, email, role, is_active, created_at, last_login, extra_permissions,
+                      must_change_password, token_version
                FROM users ORDER BY id"""
         ).fetchall()
         return [dict(r) for r in rows]
@@ -357,8 +382,8 @@ def create_user(
 ) -> dict[str, Any]:
     with connect() as conn:
         cur = conn.execute(
-            """INSERT INTO users (username, full_name, email, password_hash, role, is_active, created_at, extra_permissions)
-               VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+            """INSERT INTO users (username, full_name, email, password_hash, role, is_active, created_at, extra_permissions, must_change_password, token_version)
+               VALUES (?, ?, ?, ?, ?, 1, ?, ?, 0, 0)""",
             (username, full_name, email, hash_password(password), role, now_iso(), extra_permissions),
         )
         uid = cur.lastrowid
@@ -368,7 +393,7 @@ def create_user(
 
 
 def update_user(user_id: int, **fields: Any) -> Optional[dict[str, Any]]:
-    allowed = {"full_name", "email", "role", "is_active", "password", "extra_permissions"}
+    allowed = {"full_name", "email", "role", "is_active", "password", "extra_permissions", "must_change_password"}
     sets = []
     values: list[Any] = []
     for k, v in fields.items():
@@ -377,6 +402,8 @@ def update_user(user_id: int, **fields: Any) -> Optional[dict[str, Any]]:
         if k == "password":
             sets.append("password_hash = ?")
             values.append(hash_password(v))
+            sets.append("must_change_password = 0")
+            sets.append("token_version = COALESCE(token_version, 0) + 1")
         else:
             sets.append(f"{k} = ?")
             values.append(v)
@@ -392,6 +419,28 @@ def delete_user(user_id: int) -> bool:
     with connect() as conn:
         cur = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         return cur.rowcount > 0
+
+
+def revoke_token(jti: str, username: str = "", exp: int = 0) -> None:
+    key = str(jti or "").strip()
+    if not key:
+        return
+    now = int(datetime.now(timezone.utc).timestamp())
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO revoked_tokens (jti, username, exp) VALUES (?, ?, ?)",
+            (key, username or "", int(exp or 0)),
+        )
+        conn.execute("DELETE FROM revoked_tokens WHERE exp > 0 AND exp < ?", (now,))
+
+
+def token_revoked(jti: str) -> bool:
+    key = str(jti or "").strip()
+    if not key:
+        return False
+    with connect() as conn:
+        row = conn.execute("SELECT jti FROM revoked_tokens WHERE jti = ?", (key,)).fetchone()
+        return bool(row)
 
 
 def add_audit(

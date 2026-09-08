@@ -60,7 +60,7 @@ const emptyForm = () => ({
 });
 
 export default function Users() {
-  const { user: me } = useAuth();
+  const { user: me, refresh } = useAuth();
   const { toast, ask } = useUi();
   const [items, setItems] = useState([]);
   const [catalog, setCatalog] = useState({ actions: [], pages: GUEST_PAGES, role_defaults: {}, roles: Object.keys(ROLE_LABELS) });
@@ -197,6 +197,7 @@ export default function Users() {
         extra_permissions: form.role === "admin" ? [] : form.extra_permissions,
       });
       toast(`Updated ${editing.username}`, "success");
+      if (editing.id === me?.id) await refresh?.();
       closePanel();
       load();
     } catch (err) {
@@ -461,6 +462,7 @@ export default function Users() {
                   <>
                     <p className="text-xs text-slate-500">
                       Ticks from the role cannot be removed. Extra ticks grant this person more than their role.
+                      Settings, users, and backup stay with administrators.
                     </p>
                     <div className="space-y-1.5">
                       {actions.map((id) => (

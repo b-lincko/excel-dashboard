@@ -96,8 +96,24 @@ export function AuthProvider({ children }) {
       setUser(null);
       setToken(null);
     };
+    const onFocus = () => {
+      if (getToken()) loadMe();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && getToken()) loadMe();
+    };
     window.addEventListener("woms:unauthorized", onUnauth);
-    return () => window.removeEventListener("woms:unauthorized", onUnauth);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    const id = window.setInterval(() => {
+      if (getToken()) loadMe();
+    }, 30000);
+    return () => {
+      window.removeEventListener("woms:unauthorized", onUnauth);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(id);
+    };
   }, []);
 
   async function login(username, password) {

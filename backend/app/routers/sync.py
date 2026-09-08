@@ -31,7 +31,7 @@ def refresh(user=Depends(require_permission("view"))):
     invalidate_dash_cache()
     status = excel_service.status()
     status["record_count"] = len(records)
-    status["hard"] = True
+    status["hard"] = False
     status["source"] = "database"
     return status
 
@@ -39,7 +39,7 @@ def refresh(user=Depends(require_permission("view"))):
 @router.post("/upload")
 async def upload_excel(
     file: UploadFile = File(...),
-    user=Depends(require_permission("edit")),
+    user=Depends(require_permission("settings")),
 ):
     name = (file.filename or "upload.xlsx").lower()
     if not name.endswith((".xlsx", ".xlsm")):

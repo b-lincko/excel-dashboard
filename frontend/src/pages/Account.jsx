@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../lib/api.js";
+import { api, setToken } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useTour } from "../context/TourContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
@@ -48,10 +48,12 @@ export default function Account() {
     }
     setPwBusy(true);
     try {
-      await api.post("/api/auth/password", { current_password: current, new_password: next });
+      const data = await api.post("/api/auth/password", { current_password: current, new_password: next });
+      if (data?.access_token) setToken(data.access_token);
       setCurrent("");
       setNext("");
       setAgain("");
+      await refresh?.();
       toast("Password updated.", "success");
     } catch (err) {
       setPwError(err.message || "Could not update password");
@@ -66,6 +68,11 @@ export default function Account() {
         <h1 className="text-2xl font-bold tracking-tight">Account</h1>
         <p className="text-sm text-slate-500">Your profile, password, and what this login can do.</p>
       </div>
+      {user?.must_change_password && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+          This login still uses a default password. Set a new one (at least 8 characters) before you can use the rest of the app.
+        </div>
+      )}
       <div className="card p-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="font-semibold">New here?</div>

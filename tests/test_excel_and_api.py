@@ -378,7 +378,7 @@ def test_roles_guest_and_catalog(workbook):
     assert recs_placed.json()["total"] == k["placed"]
     refresh = client.post("/api/sync/refresh", headers=headers)
     assert refresh.status_code == 200
-    assert refresh.json().get("hard") is True
+    assert refresh.json().get("hard") is False
 
 
 def test_delay_fields_roundtrip_excel(workbook):

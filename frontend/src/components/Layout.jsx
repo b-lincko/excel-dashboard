@@ -112,12 +112,10 @@ export default function Layout() {
   const [hitIdx, setHitIdx] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [menu, setMenu] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [inbox, setInbox] = useState({ items: [], unread: 0 });
-  const fileRef = useRef(null);
   const searchRef = useRef(null);
   const accountRef = useRef(null);
   const inboxRef = useRef(null);
@@ -259,34 +257,55 @@ export default function Layout() {
     }
     const timer = setTimeout(() => {
       api
-        .get(`/api/work-orders?q=${encodeURIComponent(query)}&page_size=8`)
+        .get(`/api/work-orders/suggest?q=${encodeURIComponent(query)}&limit=6`)
         .then((d) => {
-          setHits(d.items || []);
+          const groups = d.groups || {};
+          const rows = [];
+          (groups.orders || []).forEach((o) =>
+            rows.push({
+              key: `o-${o.record_id}`,
+              kind: "order",
+              label: o.label,
+              hint: o.hint,
+              extra: o.description,
+              to: `/work-orders/${encodeURIComponent(o.record_id)}`,
+            })
+          );
+          (groups.suppliers || []).forEach((s) =>
+            rows.push({
+              key: `s-${s.label}`,
+              kind: "supplier",
+              label: s.label,
+              hint: "Supplier",
+              to: `/work-orders?q=${encodeURIComponent(s.label)}`,
+            })
+          );
+          (groups.materials || []).forEach((m) =>
+            rows.push({
+              key: `m-${m.label}`,
+              kind: "material",
+              label: m.label,
+              hint: m.hint,
+              to: `/work-orders?q=${encodeURIComponent(m.label)}`,
+            })
+          );
+          (groups.people || []).forEach((p) =>
+            rows.push({
+              key: `p-${p.username || p.label}`,
+              kind: "person",
+              label: p.full_name || p.label,
+              hint: p.username || p.hint,
+              to: `/work-orders?assigned_to=${encodeURIComponent(p.full_name || p.label)}`,
+            })
+          );
+          setHits(rows.slice(0, 12));
+          setHitIdx(0);
           setHitsOpen(true);
         })
         .catch(() => setHits([]));
     }, 220);
     return () => clearTimeout(timer);
   }, [q]);
-
-  async function onUpload(e) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await api.upload("/api/sync/upload", fd);
-      setSync(res.sync);
-      window.dispatchEvent(new CustomEvent("woms:data", { detail: res.sync }));
-      toast(`Workbook scanned · ${res.sync?.record_count ?? 0} rows`, "success");
-    } catch (err) {
-      toast(err.message || "Upload failed", "error");
-    } finally {
-      setUploading(false);
-    }
-  }
 
   async function refresh() {
     setRefreshing(true);
@@ -494,26 +513,6 @@ export default function Layout() {
                       : "Checking…"}
               </span>
             </span>
-            {can("edit") && (
-              <>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  className="hidden"
-                  onChange={onUpload}
-                />
-                <button
-                  className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={uploading}
-                  title="Replace the Excel backup file"
-                >
-                  <Upload size={14} className={uploading ? "animate-pulse" : ""} />
-                  <span className="hidden md:inline">{uploading ? "Scanning…" : "Upload"}</span>
-                </button>
-              </>
-            )}
             <button
               className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs whitespace-nowrap"
               onClick={refresh}

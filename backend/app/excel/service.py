@@ -535,6 +535,7 @@ class ExcelService:
         return {}
 
     SNAPSHOT_REASONS = ("auto", "manual", "pre_restore")
+    WRITE_REASONS = ("write", "update", "bulk", "create", "delete", "import", "upload", "reconcile")
 
     def create_backup(self, reason: str = "write") -> Optional[Path]:
         src = self.excel_path()
@@ -759,18 +760,35 @@ class ExcelService:
             return 0
         matched: list[Path] = []
         want = {str(r).lower() for r in reasons}
-        for p in root.rglob("*.xlsx"):
+        seen: set[str] = set()
+        for pattern in ("*.xlsx", "*.xlsm"):
+            for p in root.rglob(pattern):
+                tag = p.stem.rsplit("_", 1)[-1].lower() if "_" in p.stem else ""
+                if tag in want:
+                    key = str(p)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    matched.append(p)
+        for p in root.rglob("*.db"):
             tag = p.stem.rsplit("_", 1)[-1].lower() if "_" in p.stem else ""
-            if tag in want:
-                matched.append(p)
+            if tag not in want:
+                continue
+            if p.with_suffix(".xlsx").is_file() or p.with_suffix(".xlsm").is_file():
+                continue
+            key = str(p)
+            if key in seen:
+                continue
+            seen.add(key)
+            matched.append(p)
         matched.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         removed = 0
         for p in matched[keep_n:]:
             parent = p.parent
             try:
-                sibling = p.with_suffix(".db")
+                sibling = p.with_suffix(".db") if p.suffix.lower() != ".db" else None
                 p.unlink()
-                if sibling.is_file():
+                if sibling is not None and sibling.is_file():
                     sibling.unlink()
                 removed += 1
                 if parent != root and parent.is_dir() and not any(parent.iterdir()):

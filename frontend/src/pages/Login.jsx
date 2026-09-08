@@ -21,7 +21,7 @@ export default function Login() {
     setError("");
     try {
       const signedIn = await login(username.trim(), password);
-      nav(firstPath(signedIn));
+      nav(signedIn?.must_change_password ? "/account" : firstPath(signedIn));
     } catch (err) {
       setError(err.message || "Sign in failed");
     } finally {

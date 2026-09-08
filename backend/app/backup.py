@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from . import database
-from .config import ROOT, AppConfig, load_config
+from .config import DATA_DIR, ROOT, AppConfig, load_config
 
 _stop = threading.Event()
 _thread: Optional[threading.Thread] = None
@@ -191,17 +191,86 @@ def _safe_path(raw: str) -> Path:
         return path
 
 
+_BLOCKED_ROOTS = (
+    Path("/proc"),
+    Path("/sys"),
+    Path("/dev"),
+    Path("/etc"),
+    Path("/root"),
+    Path("/boot"),
+    Path("/usr"),
+    Path("/bin"),
+    Path("/sbin"),
+    Path("/lib"),
+    Path("/var"),
+    Path("/run"),
+)
+
+
+def _folder_roots(cfg: Optional[AppConfig] = None) -> list[Path]:
+    cfg = cfg or load_config()
+    out: list[Path] = []
+    seen: set[str] = set()
+    for path in (ROOT, DATA_DIR, Path(cfg.backup_dir)):
+        try:
+            resolved = path.expanduser().resolve()
+        except OSError:
+            continue
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(resolved)
+    return out
+
+
+def _under_roots(path: Path, roots: list[Path]) -> bool:
+    try:
+        current = path.resolve()
+    except OSError:
+        current = path
+    for root in roots:
+        try:
+            if current == root or current.is_relative_to(root):
+                return True
+        except AttributeError:
+            if str(current) == str(root) or str(current).startswith(str(root) + os.sep):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def _is_blocked(path: Path) -> bool:
+    try:
+        current = path.resolve()
+    except OSError:
+        current = path
+    for blocked in _BLOCKED_ROOTS:
+        try:
+            if current == blocked or current.is_relative_to(blocked):
+                return True
+        except AttributeError:
+            if str(current) == str(blocked) or str(current).startswith(str(blocked) + os.sep):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
 def list_folders(raw: Optional[str] = None) -> dict[str, Any]:
     cfg = load_config()
+    roots = _folder_roots(cfg)
     if not raw:
         current = _safe_path(cfg.backup_dir)
     else:
         current = _safe_path(raw)
-    blocked = {Path("/proc"), Path("/sys"), Path("/dev")}
-    if current in blocked or any(current == b or b in current.parents for b in blocked if b.exists()):
-        raise ValueError("That folder cannot be listed.")
+    if _is_blocked(current) or not _under_roots(current, roots):
+        raise ValueError("Folder listing is limited to the application, data, and backup folders.")
     exists = current.exists() and current.is_dir()
-    parent = str(current.parent) if current.parent != current else None
+    parent: Optional[str] = str(current.parent) if current.parent != current else None
+    if parent and not _under_roots(Path(parent), roots):
+        parent = None
     folders: list[dict[str, str]] = []
     error = None
     if exists:
@@ -218,45 +287,28 @@ def list_folders(raw: Optional[str] = None) -> dict[str, Any]:
         except OSError as exc:
             error = str(exc)
     writable = bool(exists and os.access(current, os.W_OK))
-    roots = _roots()
     return {
         "path": str(current),
         "parent": parent,
         "exists": exists,
         "writable": writable,
         "folders": folders,
-        "roots": roots,
+        "roots": [{"name": p.name or str(p), "path": str(p)} for p in roots],
         "error": error,
     }
 
 
-def _roots() -> list[dict[str, str]]:
-    items: list[Path] = [ROOT, Path.home(), Path(load_config().backup_dir)]
-    if os.name == "nt":
-        import string
-
-        for letter in string.ascii_uppercase:
-            drive = Path(f"{letter}:/")
-            if drive.exists():
-                items.append(drive)
-    else:
-        items.append(Path("/"))
-    out: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for path in items:
-        try:
-            resolved = str(path.expanduser().resolve())
-        except OSError:
-            resolved = str(path)
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        out.append({"name": path.name or resolved, "path": resolved})
-    return out
+def require_app_folder(raw: str) -> Path:
+    path = _safe_path(raw)
+    if _is_blocked(path) or not _under_roots(path, _folder_roots()):
+        raise ValueError("Folders can only be created under the application, data, or backup folders.")
+    return path
 
 
 def ensure_folder(raw: str) -> Path:
     path = _safe_path(raw)
+    if _is_blocked(path):
+        raise ValueError("That folder cannot be used.")
     path.mkdir(parents=True, exist_ok=True)
     if not path.is_dir():
         raise ValueError("That path is not a folder.")

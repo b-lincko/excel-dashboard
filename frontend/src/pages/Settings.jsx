@@ -329,7 +329,7 @@ function DatabasePanel({ toast, ask, onReload }) {
     }
     const ok = await ask({
       title: "Wipe the entire database?",
-      body: "Users, chat, settings, attachments and work orders are deleted. Default logins are recreated (admin/admin123). Then current Excel is seeded. Column mapping in app_config.json is kept. You will need to sign in again.",
+      body: "Users, chat, settings, attachments and work orders are deleted. Default logins are recreated (admin/admin123) and must change password on first sign-in. Then current Excel is seeded. Column mapping in app_config.json is kept. You will need to sign in again.",
       confirmLabel: "Wipe database",
       danger: true,
     });
@@ -556,6 +556,11 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
           Autobackup
         </label>
       </div>
+      {!cfg.backup_auto_enabled && (
+        <div className="mx-5 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+          Nightly autobackup is off. Turn it on and Save configuration so a paired Excel + database copy is taken on schedule.
+        </div>
+      )}
 
       <div className="p-5 space-y-4">
         <div>
@@ -601,7 +606,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
               value={cfg.backup_ratio ?? 14}
               onChange={(e) => setCfg({ ...cfg, backup_ratio: Number(e.target.value) })}
             />
-            <p className="text-[11px] text-slate-500 mt-1">0 keeps every auto/manual copy. Write-safety copies are not pruned.</p>
+            <p className="text-[11px] text-slate-500 mt-1">0 keeps every auto/manual copy. Per-save copies keep the last {cfg.backup_write_keep ?? 8}.</p>
           </div>
         </div>
 

@@ -94,7 +94,7 @@ def test_seed_and_reset_confirm(workbook):
     assert ping.json()["source"] == "database"
     refresh = client.post("/api/sync/refresh", headers=headers)
     assert refresh.status_code == 200
-    assert refresh.json()["hard"] is True
+    assert refresh.json()["hard"] is False
     assert refresh.json()["source"] == "database"
     # Upload uses the same tmp workbook; must not 500.
     content = dest.read_bytes()

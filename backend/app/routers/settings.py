@@ -330,6 +330,7 @@ async def upload_excel_and_seed(file: UploadFile = File(...), user=Depends(requi
 @router.post("/folders")
 def create_folder(body: FolderCreate, user=Depends(require_permission("settings"))):
     try:
+        require_app_folder(body.path)
         path = ensure_folder(body.path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { firstPath, useAuth } from "./context/AuthContext.jsx";
 import Layout from "./components/Layout.jsx";
 import Login from "./pages/Login.jsx";
@@ -32,6 +32,7 @@ function Fallback() {
 
 function Guard({ children }) {
   const { user, loading } = useAuth();
+  const loc = useLocation();
   if (loading) {
     return (
       <div className="min-h-screen grid place-items-center bg-slate-50 dark:bg-ink-900">
@@ -40,6 +41,9 @@ function Guard({ children }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
+  if (user.must_change_password && loc.pathname !== "/account") {
+    return <Navigate to="/account" replace />;
+  }
   return children;
 }
 
@@ -80,7 +84,7 @@ export default function App() {
   const { user, loading } = useAuth();
   return (
     <Routes>
-      <Route path="/login" element={!loading && user ? <Navigate to={firstPath(user)} replace /> : <Login />} />
+      <Route path="/login" element={!loading && user ? <Navigate to={user.must_change_password ? "/account" : firstPath(user)} replace /> : <Login />} />
       <Route
         path="/"
         element={

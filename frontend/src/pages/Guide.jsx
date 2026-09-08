@@ -136,7 +136,7 @@ export default function Guide() {
             <span className="font-mono">backups/</span> after stopping the app.
           </li>
           <li>
-            Locked out: <span className="font-mono">python3 scripts/reset_admin.py</span> then admin / admin123
+            Locked out: <span className="font-mono">python3 scripts/reset_admin.py</span> then sign in and change the password immediately
           </li>
           <li>
             Full command list: <span className="font-mono">docs/RECOVERY.md</span> or{" "}

@@ -94,11 +94,14 @@ def change_password(body: PasswordChange, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="New password must be different")
     database.update_user(user["id"], password=body.new_password)
     database.add_audit(user["username"], "password_change", details="User changed password")
-    return {"ok": True}
+    fresh = database.get_user_by_id(user["id"]) or user
+    token = create_token(fresh)
+    return {"ok": True, "access_token": token, "token_type": "bearer", "user": public_user(fresh)}
 
 
 @router.post("/logout")
 def logout(user=Depends(get_current_user)):
+    database.revoke_token(str(user.get("_jti") or ""), user.get("username") or "", int(user.get("_token_exp") or 0))
     database.add_audit(user["username"], "logout", details="User signed out")
     return {"ok": True}
 
@@ -162,4 +165,5 @@ def public_user(user: dict) -> dict:
         "guest_pages": GUEST_PAGES,
         "roles": sorted(VALID_ROLES),
         "editable_fields": editable_fields(user),
+        "must_change_password": bool(user.get("must_change_password")),
     }

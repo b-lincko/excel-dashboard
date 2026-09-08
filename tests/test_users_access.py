@@ -38,12 +38,13 @@ def test_user_crud_access_profile_and_last_admin():
     assert created.status_code == 200, created.text
     item = created.json()["item"]
     uid = item["id"]
-    assert "backup" in item["permissions"]
+    assert "backup" not in item["permissions"]
     assert "create" in item["permissions"]
 
     catalog = client.get("/api/users/access-catalog", headers=headers)
     assert catalog.status_code == 200
-    assert "backup" in catalog.json()["actions"]
+    assert "backup" not in catalog.json()["actions"]
+    assert "backup" in catalog.json()["admin_only"]
 
     got = client.get(f"/api/users/{uid}", headers=headers)
     assert got.status_code == 200
@@ -61,7 +62,7 @@ def test_user_crud_access_profile_and_last_admin():
     assert signed.status_code == 200
     sheaders = {"Authorization": f"Bearer {signed.json()['access_token']}"}
     backups = client.get("/api/settings/backups", headers=sheaders)
-    assert backups.status_code == 200, backups.text
+    assert backups.status_code == 403
 
     profile = client.put("/api/auth/profile", headers=sheaders, json={"full_name": "Sam B", "email": "sam.b@local"})
     assert profile.status_code == 200, profile.text

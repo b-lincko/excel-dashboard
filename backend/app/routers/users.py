@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from .. import database
 from ..config import load_config
-from ..security import ALL_PERMS, GUEST_PAGES, VALID_ROLES, require_permission
+from ..security import ADMIN_ONLY_PERMS, ALL_PERMS, GUEST_PAGES, GRANTABLE_PERMS, VALID_ROLES, require_permission
 from .auth import public_user
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -21,16 +21,17 @@ ROLE_ORDER = ["admin", "manager", "user", "readonly", "guest"]
 def _permissions_json(role: str, extra: Optional[list[str]]) -> str:
     if role == "admin":
         return "[]"
-    allowed = set(ALL_PERMS)
+    allowed = set(GRANTABLE_PERMS)
     values: list[str] = []
     seen: set[str] = set()
     for item in extra or []:
         key = str(item or "").strip()
-        if key in allowed and key not in seen:
-            if role == "guest" and key not in GUEST_PAGES and key != "view":
-                continue
-            seen.add(key)
-            values.append(key)
+        if key in ADMIN_ONLY_PERMS or key not in allowed or key in seen:
+            continue
+        if role == "guest" and key not in GUEST_PAGES and key != "view":
+            continue
+        seen.add(key)
+        values.append(key)
     return json.dumps(values)
 
 
@@ -87,7 +88,8 @@ def access_catalog(user=Depends(require_permission("users"))):
     cfg = load_config()
     return {
         "roles": [r for r in ROLE_ORDER if r in VALID_ROLES],
-        "actions": [p for p in ALL_PERMS if p not in GUEST_PAGES],
+        "actions": [p for p in ALL_PERMS if p not in GUEST_PAGES and p not in ADMIN_ONLY_PERMS],
+        "admin_only": sorted(ADMIN_ONLY_PERMS),
         "pages": list(GUEST_PAGES),
         "role_defaults": cfg.permissions,
     }

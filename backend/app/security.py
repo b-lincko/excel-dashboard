@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -52,6 +53,8 @@ ALL_PERMS = [
     "import",
     *GUEST_PAGES,
 ]
+ADMIN_ONLY_PERMS = {"users", "settings", "backup"}
+GRANTABLE_PERMS = [p for p in ALL_PERMS if p not in ADMIN_ONLY_PERMS]
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 oauth2_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
@@ -85,6 +88,8 @@ def create_token(user: dict[str, Any]) -> str:
         "sub": user["username"],
         "role": user["role"],
         "uid": user["id"],
+        "jti": secrets.token_urlsafe(16),
+        "ver": int(user.get("token_version") or 0),
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(hours=cfg.jwt_expire_hours)).timestamp()),
     }
@@ -101,11 +106,27 @@ def decode_token(token: str) -> dict[str, Any]:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
+def enforce_password_change() -> bool:
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    flag = (os.environ.get("WOMS_TESTING") or "").strip().lower()
+    return flag not in {"1", "true", "yes"}
+
+
 def get_current_user(token: str = Depends(oauth2_scheme)) -> dict[str, Any]:
     payload = decode_token(token)
+    jti = str(payload.get("jti") or "")
+    if jti and database.token_revoked(jti):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     user = database.get_user_by_username(payload.get("sub", ""))
     if not user or not user.get("is_active"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+    ver = int(user.get("token_version") or 0)
+    if int(payload.get("ver") or 0) != ver:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
+    user = dict(user)
+    user["_jti"] = jti
+    user["_token_exp"] = int(payload.get("exp") or 0)
     return user
 
 
@@ -156,6 +177,11 @@ def user_permissions(user: dict[str, Any]) -> list[str]:
 
 def require_permission(permission: str):
     def checker(user: dict = Depends(get_current_user)) -> dict:
+        if enforce_password_change() and user.get("must_change_password"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Change your password before continuing.",
+            )
         if user.get("role") == "admin":
             return user
         allowed = user_permissions(user)

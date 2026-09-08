@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (user / access management: create, edit, delete, extra grants, profile + password).
+Last updated: 2026-09-08 (audit fixes: header search, admin-only seed upload, JWT revoke, extra-grant limits, write-backup prune).
 
 ---
 
@@ -87,7 +87,7 @@ UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
 - Live path: `data/woms.db`. Schema in `backend/app/database.py` (`SCHEMA` + `init_db` migrations). Connections use WAL + `busy_timeout=15000` so several people can save at once.
 - Admin **Reset database**: wipe users, chat, settings, attachments, work orders; recreate schema + default logins via `init_db`; then seed from current/uploaded Excel. Confirm body must be exactly `DELETE`.
 - **Do not delete `app_config.json`** on reset (column mapping lives there).
-- Default logins after reset / empty DB:
+- Default logins after reset / empty DB (UI and API block other work until that user sets a new password; pytest skips the block via `PYTEST_CURRENT_TEST`):
 
   | Username | Password    | Role    |
   | -------- | ----------- | ------- |
@@ -110,7 +110,7 @@ UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
 - Login lockout: 8 failed attempts / 10 minutes per username+IP (`429`).
 - Unhandled API errors return `Internal server error` unless `WOMS_DEBUG=1`.
 - Attachment download/delete must resolve inside `data/attachments/`.
-- New user passwords min 8 characters. Change default logins before go-live (`docs/PRODUCTION.md`).
+- New user passwords min 8 characters. Default logins must change password (`must_change_password`) before other API calls. Logout revokes the JWT `jti`. Extra grants cannot include `users`, `settings`, or `backup`.
 - Operator training slides: `docs/training/index.html`.
 
 ### Python
@@ -223,7 +223,9 @@ Every `create_backup` writes **Excel + SQLite**:
 - If Excel-only: replace `file.xlsx` only. **Do not silently seed/overwrite SQLite.** Operator must Seed from Excel if they want those rows.
 - Settings UI: DB column, different confirm copy, `data-tour="backup"`.
 - Health: backup row count (Excel and/or `wo_cache` in the `.db`) vs live DB count. Fail if backup has &lt; 50% of live rows.
-- Prune (`backup_ratio`, default keep last 14 auto/manual): deletes paired `.db` with the `.xlsx`. Write-safety copies are not pruned.
+- Prune (`backup_ratio`, default keep last 14 auto/manual): deletes paired `.db` with the `.xlsx`. Write-safety copies (`update`/`create`/`delete`/`bulk`/…) keep the last `backup_write_keep` (default 8).
+- Autobackup default is **on**. Settings shows a warning if it is turned off.
+- Folder picker (`GET/POST /api/settings/folders`) only lists/creates under the app root, `data/`, and the configured backup folder. Typed backup_dir may still be any writable non-system path.
 - **Download** (`GET /api/settings/backups/download?path=`): zip of `.xlsx`+`.db` when paired, otherwise the single file.
 - **Upload & restore**: `POST /api/settings/backups/upload` accepts `.xlsx` / `.xlsm` / `.db` / zip of both. Saves into the backup folder (does not replace live data by itself). UI then prompts Restore. Restore of a pair rolls SQLite + Excel; Excel-only does not seed the database.
 - Operator commands: `docs/RECOVERY.md`, `scripts/recover.sh`, `scripts/reset_admin.py`. Docker down does **not** delete host `data/` or `backups/` (bind mounts).
@@ -251,9 +253,12 @@ Default role grants (`config.permissions` / frontend `ROLE_PERMS`):
 User management (`/users`, permission `users`):
 
 - Create / edit name-email-role-active / reset password / delete. Username 3–40 `[A-Za-z0-9._-]`. Cannot delete yourself. Cannot demote, disable, or delete the last active admin.
-- Non-admin extra_permissions **union** with the role (grant `backup`, `create`, …). Guest extras are pages only.
-- `GET /api/users/access-catalog` lists actions, pages, role defaults. `GET /api/users/{id}` is one user.
-- Account: `PUT /api/auth/profile` (name, email) and `POST /api/auth/password` (current + new, min 8).
+- Non-admin extra_permissions **union** with the role (grant `create`, `audit`, pages, …). **Cannot** extra-grant `users`, `settings`, or `backup` — those stay admin-only.
+- `GET /api/users/access-catalog` lists grantable actions, `admin_only`, pages, role defaults. `GET /api/users/{id}` is one user.
+- Account: `PUT /api/auth/profile` (name, email) and `POST /api/auth/password` (current + new, min 8). Password change returns a new `access_token` and bumps `token_version` so other sessions die. Logout revokes the current `jti`.
+- Header search uses `GET /api/work-orders/suggest` (same as Ctrl/⌘+K). `POST /api/sync/upload` requires `settings` (admin seed). Header Upload control was removed; seed from Settings.
+- `POST /api/sync/refresh` reloads SQLite (`hard: false`). It does **not** reseed from Excel.
+- Frontend refetches `/api/auth/me` every 30s and on window focus so extra grants appear without a full re-login.
 
 Status-change remarks (default): `*->ON HOLD`, `*->CLOSED`.
 
@@ -301,7 +306,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | `/api/audit` | field-level audit log |
 | `/api/users` | list, access-catalog, CRUD, extra grants |
 | `/api/settings` | config, mapping scan, backups, database seed/reset/upload |
-| `/api/sync` | ping, refresh (`hard: true` seeds) |
+| `/api/sync` | ping, refresh (`hard: false` reloads DB), upload (settings / seed) |
 
 HTTP: 400 validation, 403 permission, 409 conflict, 422 business rules, 423 Excel locked, 503 Excel unavailable.
 
@@ -325,6 +330,7 @@ cd frontend && npm run build
 | `tests/test_reports.py` | Daily/weekly window, one-page PDF, one-sheet XLSX, JSON API |
 | `tests/test_production_hardening.py` | Login lockout, jwt_secret stripped from Settings, password min 8 |
 | `tests/test_users_access.py` | User CRUD, extra grants, profile, password, last-admin guard |
+| `tests/test_audit_fixes.py` | Logout revoke, password invalidates token, upload needs settings, folder jail, write-backup prune |
 
 Pitfalls (do not repeat):
 
@@ -416,6 +422,7 @@ Must remain true:
 - [x] Typeahead search + command palette + shortcuts; list search matches line items; live presence on an open MR
 - [x] Production hardening (login lockout, no jwt_secret in API, attachment path check, password min 8) + operator training slides
 - [x] User management: create / modify / delete, access grants, Account profile + password
+- [x] Audit fixes: header suggest search, admin-only workbook seed, default-password gate, JWT logout revoke, extra-grant limits, write-backup prune, autobackup on by default
 
 When you complete or change a requirement, tick/retarget it here.
 
@@ -436,3 +443,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-08** Tour backup step no longer says “snapshots, not every save”. Every `create_backup` reason pairs `.xlsx`+`.db`.
 - **2026-09-08** Production audit: lockout, hide jwt_secret, attachment path, generic 500s, password min 8. Training deck `docs/training/index.html`. Go-live still requires password change, HTTPS off-LAN, autobackup on, off-box copies.
 - **2026-09-08** Users page is full CRUD + access matrix. Extra permissions union with role. Last admin cannot be removed. Account can edit name/email and password.
+- **2026-09-08** Audit follow-up: header search uses `/suggest`; `/api/sync/upload` is settings-only; default passwords must be changed (`must_change_password`, skipped under pytest); logout revokes JWT `jti`; extras cannot grant users/settings/backup; write-safety backups prune to 8; autobackup defaults on; refresh `hard: false`.
