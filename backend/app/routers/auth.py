@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -106,6 +106,23 @@ def logout(user=Depends(get_current_user)):
 @router.get("/me")
 def me(user=Depends(get_current_user)):
     return public_user(user)
+
+
+class ProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+
+
+@router.put("/profile")
+def update_profile(body: ProfileUpdate, user=Depends(get_current_user)):
+    payload = body.model_dump(exclude_unset=True)
+    if "full_name" in payload:
+        payload["full_name"] = " ".join(str(payload.get("full_name") or "").split())
+    if "email" in payload:
+        payload["email"] = str(payload.get("email") or "").strip()
+    updated = database.update_user(user["id"], **payload)
+    database.add_audit(user["username"], "profile_update", details="Updated name or email")
+    return public_user(updated or user)
 
 
 class LayoutBody(BaseModel):

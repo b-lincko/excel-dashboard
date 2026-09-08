@@ -130,12 +130,13 @@ export function AuthProvider({ children }) {
     if (!user) return false;
     if (user.role === "admin") return true;
     if (user.role === "guest") return !page || can(page);
+    if (page && perms.includes(page)) return true;
     if (["analytics", "reports", "audit", "users", "settings", "performance"].includes(page)) return can(page === "performance" ? "analytics" : page);
     return can("view");
   };
 
   const value = useMemo(
-    () => ({ user, loading, login, logout, can, canPage, firstPath, GUEST_PAGES }),
+    () => ({ user, loading, login, logout, refresh: loadMe, can, canPage, firstPath, GUEST_PAGES }),
     [user, loading]
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

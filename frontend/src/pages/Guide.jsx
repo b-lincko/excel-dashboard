@@ -99,7 +99,9 @@ export default function Guide() {
           <Item k="Suppliers / PO" v="RFQ → PO → ETA board and on-time rate." />
           <Item k="Materials" v="Who supplied an item before, plus aliases." />
           {can("settings") && <Item k="Settings" v="Seed, upload Excel, reset DB. Every backup pairs SQLite + Excel." />}
-          {can("users") && <Item k="Users" v="Roles live in the app, not in Excel." />}
+          {can("users") && (
+            <Item k="Users" v="Create, edit, disable or delete logins. Grant extra actions. Guests get selected pages. People change their own password on Account." />
+          )}
         </dl>
       </div>
 

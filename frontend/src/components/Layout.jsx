@@ -28,6 +28,7 @@ import {
   Users,
   MessageSquare,
   FolderKanban,
+  Keyboard,
   UserCheck,
   ClipboardCheck,
   FileWarning,

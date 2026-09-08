@@ -6,28 +6,47 @@ import { useTour } from "../context/TourContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 
 export default function Account() {
-  const { user } = useAuth();
+  const { user, refresh } = useAuth();
   const { toast } = useUi();
   const { start } = useTour();
   const nav = useNavigate();
+  const [fullName, setFullName] = useState(user?.full_name || "");
+  const [email, setEmail] = useState(user?.email || "");
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pwBusy, setPwBusy] = useState(false);
   const [error, setError] = useState("");
+  const [pwError, setPwError] = useState("");
 
-  async function save(e) {
+  async function saveProfile(e) {
     e.preventDefault();
     setError("");
+    setBusy(true);
+    try {
+      await api.put("/api/auth/profile", { full_name: fullName, email });
+      await refresh?.();
+      toast("Profile updated.", "success");
+    } catch (err) {
+      setError(err.message || "Could not update profile");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function savePassword(e) {
+    e.preventDefault();
+    setPwError("");
     if (next.length < 8) {
-      setError("New password must be at least 8 characters.");
+      setPwError("New password must be at least 8 characters.");
       return;
     }
     if (next !== again) {
-      setError("New passwords do not match.");
+      setPwError("New passwords do not match.");
       return;
     }
-    setBusy(true);
+    setPwBusy(true);
     try {
       await api.post("/api/auth/password", { current_password: current, new_password: next });
       setCurrent("");
@@ -35,9 +54,9 @@ export default function Account() {
       setAgain("");
       toast("Password updated.", "success");
     } catch (err) {
-      setError(err.message || "Could not update password");
+      setPwError(err.message || "Could not update password");
     } finally {
-      setBusy(false);
+      setPwBusy(false);
     }
   }
 
@@ -45,7 +64,7 @@ export default function Account() {
     <div className="space-y-5 max-w-xl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Account</h1>
-        <p className="text-sm text-slate-500">Your profile and sign-in credentials. Work-order history lives in the database.</p>
+        <p className="text-sm text-slate-500">Your profile, password, and what this login can do.</p>
       </div>
       <div className="card p-5 flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -68,16 +87,29 @@ export default function Account() {
           </button>
         </div>
       </div>
-      <div className="card p-5 space-y-2 text-sm">
-        <Row label="Name" value={user?.full_name || "—"} />
+
+      <form onSubmit={saveProfile} className="card p-5 space-y-3">
+        <div className="font-semibold">Profile</div>
+        {error && <div className="text-sm text-rose-600">{error}</div>}
         <Row label="Username" value={user?.username} />
         <Row label="Role" value={user?.role} />
-        <Row label="Email" value={user?.email || "—"} />
         <Row label="Last sign-in" value={user?.last_login || "—"} />
-      </div>
-      <form onSubmit={save} className="card p-5 space-y-3">
+        <div>
+          <label className="lbl">Full name</label>
+          <input value={fullName} onChange={(e) => setFullName(e.target.value)} />
+        </div>
+        <div>
+          <label className="lbl">Email</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </div>
+        <button className="btn-primary" disabled={busy}>
+          {busy ? "Saving…" : "Save profile"}
+        </button>
+      </form>
+
+      <form onSubmit={savePassword} className="card p-5 space-y-3">
         <div className="font-semibold">Change password</div>
-        {error && <div className="text-sm text-rose-600">{error}</div>}
+        {pwError && <div className="text-sm text-rose-600">{pwError}</div>}
         <div>
           <label className="lbl">Current password</label>
           <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
@@ -90,17 +122,24 @@ export default function Account() {
           <label className="lbl">Confirm new password</label>
           <input type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} required />
         </div>
-        <button className="btn-primary" disabled={busy}>
-          {busy ? "Saving…" : "Update password"}
+        <button className="btn-primary" disabled={pwBusy}>
+          {pwBusy ? "Saving…" : "Update password"}
         </button>
       </form>
+
+      <div className="card p-5 space-y-2 text-sm">
+        <div className="font-semibold">Your access</div>
+        <p className="text-slate-500">
+          {(user?.permissions || []).join(", ") || "view"}
+        </p>
+      </div>
     </div>
   );
 }
 
 function Row({ label, value }) {
   return (
-    <div className="flex justify-between gap-4">
+    <div className="flex justify-between gap-4 text-sm">
       <span className="text-slate-500">{label}</span>
       <span className="font-medium capitalize text-right">{value}</span>
     </div>

@@ -137,15 +137,20 @@ def parse_extra_permissions(user: Optional[dict[str, Any]]) -> list[str]:
 def user_permissions(user: dict[str, Any]) -> list[str]:
     role = str(user.get("role") or "user")
     cfg = load_config()
+    extra = parse_extra_permissions(user)
     if role == "admin":
         return list(ALL_PERMS)
     if role == "guest":
-        extra = parse_extra_permissions(user)
         pages = [p for p in extra if p in GUEST_PAGES]
         return ["view", *pages]
     allowed = list(cfg.permissions.get(role) or ["view"])
     if "view" not in allowed:
         allowed = ["view", *allowed]
+    seen = set(allowed)
+    for perm in extra:
+        if perm not in seen:
+            allowed.append(perm)
+            seen.add(perm)
     return allowed
 
 

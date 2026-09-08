@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (production hardening + operator training slides).
+Last updated: 2026-09-08 (user / access management: create, edit, delete, extra grants, profile + password).
 
 ---
 
@@ -248,6 +248,13 @@ Default role grants (`config.permissions` / frontend `ROLE_PERMS`):
 
 `field_edit_roles` (default): `supplier` and `po_number` → admin, manager. Admin always can. Unlisted fields: anyone with `edit`.
 
+User management (`/users`, permission `users`):
+
+- Create / edit name-email-role-active / reset password / delete. Username 3–40 `[A-Za-z0-9._-]`. Cannot delete yourself. Cannot demote, disable, or delete the last active admin.
+- Non-admin extra_permissions **union** with the role (grant `backup`, `create`, …). Guest extras are pages only.
+- `GET /api/users/access-catalog` lists actions, pages, role defaults. `GET /api/users/{id}` is one user.
+- Account: `PUT /api/auth/profile` (name, email) and `POST /api/auth/password` (current + new, min 8).
+
 Status-change remarks (default): `*->ON HOLD`, `*->CLOSED`.
 
 PLACED requires `po_number` by default (`status_required_fields`).
@@ -283,7 +290,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | Prefix | Purpose |
 | ------ | ------- |
 | `/api/health` | Liveness + record count |
-| `/api/auth` | login, me, logout |
+| `/api/auth` | login, me, logout, password, profile, layout |
 | `/api/work-orders` | list, suggest, CRUD, bulk, claim, watch, presence, chat, timeline, seen, PDF sheet |
 | `/api/dashboard` | KPIs / charts from live records |
 | `/api/ops` | queue, digest, alerts, handover, health scan |
@@ -292,7 +299,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | `/api/files` | attachments |
 | `/api/reports` | Period briefings + Excel/CSV/PDF. `GET /{kind}` kinds: `daily`, `weekly`, `monthly`, `yearly`, `open`, `overdue`, `closed`, `delay`, `department`, `technician`. `fmt=pdf\|xlsx\|csv\|json`. Daily/weekly take `as_of` or `date` (ISO day). JSON for daily/weekly is `period_payload`. PDF for those kinds is inline, one page. |
 | `/api/audit` | field-level audit log |
-| `/api/users` | user admin |
+| `/api/users` | list, access-catalog, CRUD, extra grants |
 | `/api/settings` | config, mapping scan, backups, database seed/reset/upload |
 | `/api/sync` | ping, refresh (`hard: true` seeds) |
 
@@ -317,6 +324,7 @@ cd frontend && npm run build
 | `tests/test_delay_sites.py` | Extra sites / delay rules |
 | `tests/test_reports.py` | Daily/weekly window, one-page PDF, one-sheet XLSX, JSON API |
 | `tests/test_production_hardening.py` | Login lockout, jwt_secret stripped from Settings, password min 8 |
+| `tests/test_users_access.py` | User CRUD, extra grants, profile, password, last-admin guard |
 
 Pitfalls (do not repeat):
 
@@ -407,6 +415,7 @@ Must remain true:
 - [x] One MR supplier form (dropdown only); unique supplier names; @mentions; search suggestions; backups always pair Excel + DB
 - [x] Typeahead search + command palette + shortcuts; list search matches line items; live presence on an open MR
 - [x] Production hardening (login lockout, no jwt_secret in API, attachment path check, password min 8) + operator training slides
+- [x] User management: create / modify / delete, access grants, Account profile + password
 
 When you complete or change a requirement, tick/retarget it here.
 
@@ -426,3 +435,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-08 (a18f4e3)** Typeahead search, Ctrl/⌘+K, list j/k/Enter/x, presence, WAL. Tour step `keys`. `GET /suggest` must stay before `/{wo_id}`.
 - **2026-09-08** Tour backup step no longer says “snapshots, not every save”. Every `create_backup` reason pairs `.xlsx`+`.db`.
 - **2026-09-08** Production audit: lockout, hide jwt_secret, attachment path, generic 500s, password min 8. Training deck `docs/training/index.html`. Go-live still requires password change, HTTPS off-LAN, autobackup on, off-box copies.
+- **2026-09-08** Users page is full CRUD + access matrix. Extra permissions union with role. Last admin cannot be removed. Account can edit name/email and password.
