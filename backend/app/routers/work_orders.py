@@ -315,7 +315,7 @@ def options(user=Depends(require_permission("view"))):
     offsets.update({str(k).lower(): int(v) for k, v in (cfg.due_offsets or {}).items()})
     return {
         "options": opts,
-        "sites": [{"id": "", "label": "All sites"}, *[{"id": s, "label": s} for s in sites]],
+        "sites": site_items,
         "lists": lists,
         "mapping": cfg.mapping.model_dump(),
         "headers": excel_service.headers(),

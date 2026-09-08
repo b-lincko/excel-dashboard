@@ -327,7 +327,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
           </ChartCard>
         );
       case "table_sites":
-        return <GroupTable title="Site performance" rows={data?.departments} onRow={(r) => go({ department: r.name })} columns={["Site", "Total", "Open", "Closed", "Overdue", "%"]} />;
+        return <GroupTable title="Site performance" rows={data?.departments} onRow={(r) => go({ department: r.id || r.name })} columns={["Site", "Total", "Open", "Closed", "Overdue", "%"]} />;
       case "table_people":
         return <GroupTable title="Technician workload" rows={data?.employees} onRow={(r) => go({ assigned_to: r.name })} columns={["Assigned to", "Total", "Open", "Closed", "Overdue", "%"]} />;
       case "table_priority":
@@ -402,7 +402,7 @@ export default function WidgetBoard({ data, recent, go, layout, editing, onChang
                     <tr key={r.record_id || r.work_order_id} onClick={() => nav(`/work-orders/${encodeURIComponent(r.record_id || r.work_order_id)}`)}>
                       <td className="font-mono text-xs font-semibold">{r.work_order_id}</td>
                       <td className="max-w-xs truncate">{r.description}</td>
-                      <td>{r.department}</td>
+                      <td>{r.site_display || r.camp_site_label || r.department}</td>
                       <td>{r.assigned_to}</td>
                       <td>
                         <StatusBadge value={r.priority} />

@@ -137,6 +137,28 @@ def test_resolve_data_sheet_rejects_missing_office_tab():
         assert "Accommodations" in str(exc)
 
 
+def test_mindmap_sites_include_camps():
+    from app.stats import mindmap
+
+    recs = [
+        {"department": "SH5-SH1", "location": "S3-B201-x", "status": "OPEN"},
+        {"department": "SH5-SH1", "location": "L1-BCT-x", "status": "CLOSED"},
+        {"department": "F5", "location": "F5-x", "status": "OPEN"},
+    ]
+    mm = mindmap(recs)
+    sites = next(b for b in mm["branches"] if b["id"] == "sites")
+    labels = [c["label"] for c in sites["children"]]
+    ids = [c["filter"]["department"] for c in sites["children"]]
+    assert "Site - 3" in labels
+    assert "L1" in labels
+    assert "F5" in labels
+    assert "SH5" in labels
+    assert "SH1" in labels
+    assert "SH5-S3" in ids
+    sh5 = next(c for c in sites["children"] if c["label"] == "SH5")
+    assert any(ch["label"] == "Site - 3" for ch in (sh5.get("children") or []))
+
+
 def test_search_q_matches_camp_site_label():
     cfg = AppConfig()
     rec = {"department": "SH5-SH1", "location": "S3-B201-x", "status": "OPEN", "work_order_id": "481000"}

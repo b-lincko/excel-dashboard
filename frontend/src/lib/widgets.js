@@ -199,12 +199,12 @@ export function buildMindmap(data, branchIds) {
         value: rows.reduce((s, r) => s + (r.total || 0), 0),
         filter: {},
         children: rows.map((r) => ({
-          id: `${id}:${r.name}`,
+          id: `${id}:${r.id || r.name}`,
           label: r.name,
           value: r.total,
           open: r.open,
           closed: r.closed,
-          filter: { [spec.filterKey]: r.name },
+          filter: { [spec.filterKey]: r.id || r.name },
         })),
       };
     })

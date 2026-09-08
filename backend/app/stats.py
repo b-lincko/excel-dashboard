@@ -24,6 +24,7 @@ from .domain import (
     matches_filters,
     reason_for_open,
     site_choices,
+    site_filter_match,
     today,
 )
 from .excel.service import excel_service
@@ -475,17 +476,92 @@ def trend(records: list[dict[str, Any]], months: int = 12) -> list[dict[str, Any
 
 
 def _mm_children_from_rows(rows: list[dict[str, Any]], filter_key: str, limit: int = 12) -> list[dict[str, Any]]:
-    return [
-        {
-            "id": f"{filter_key}:{r['name']}",
+    out: list[dict[str, Any]] = []
+    for r in rows[:limit]:
+        fid = r.get("id") or r["name"]
+        out.append(
+            {
+                "id": f"{filter_key}:{fid}",
+                "label": r["name"],
+                "value": r["total"],
+                "open": r["open"],
+                "closed": r["closed"],
+                "filter": {filter_key: fid},
+            }
+        )
+    return out
+
+
+def group_by_sites(records: list[dict[str, Any]], cfg=None) -> list[dict[str, Any]]:
+    """One row per worksheet / SH5-SH1 camp, same identities as SiteSwitcher chips."""
+    cfg = cfg or load_config()
+    rows: list[dict[str, Any]] = []
+    for item in filter_site_items(cfg):
+        sid = str(item.get("id") or "").strip()
+        if not sid:
+            continue
+        matched = [r for r in records if site_filter_match(r, [sid], cfg)]
+        if not matched:
+            continue
+        closed = [r for r in matched if is_closed(r, cfg)]
+        open_ = [r for r in matched if is_open(r, cfg)]
+        overdue = [r for r in matched if is_overdue(r, cfg)]
+        rows.append(
+            {
+                "id": sid,
+                "name": item.get("label") or sid,
+                "kind": item.get("kind") or "sheet",
+                "group": item.get("group") or "",
+                "total": len(matched),
+                "open": len(open_),
+                "closed": len(closed),
+                "overdue": len(overdue),
+                "completion_rate": round((len(closed) / len(matched) * 100) if matched else 0, 1),
+            }
+        )
+    return rows
+
+
+def _mm_site_nodes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    for r in rows:
+        fid = r.get("id") or r["name"]
+        node: dict[str, Any] = {
+            "id": f"department:{fid}",
             "label": r["name"],
             "value": r["total"],
-            "open": r["open"],
-            "closed": r["closed"],
-            "filter": {filter_key: r["name"]},
+            "open": r.get("open"),
+            "closed": r.get("closed"),
+            "filter": {"department": fid},
         }
-        for r in rows[:limit]
-    ]
+        if r.get("kind") == "group":
+            node["children"] = [
+                {
+                    "id": f"department:{x.get('id') or x['name']}",
+                    "label": x["name"],
+                    "value": x["total"],
+                    "open": x.get("open"),
+                    "closed": x.get("closed"),
+                    "filter": {"department": x.get("id") or x["name"]},
+                }
+                for x in rows
+                if x.get("kind") == "camp" and x.get("group") == fid
+            ]
+        elif r.get("kind") == "sheet" and fid == "SH5-SH1":
+            node["children"] = [
+                {
+                    "id": f"department:{x.get('id') or x['name']}",
+                    "label": x["name"],
+                    "value": x["total"],
+                    "open": x.get("open"),
+                    "closed": x.get("closed"),
+                    "filter": {"department": x.get("id") or x["name"]},
+                }
+                for x in rows
+                if x.get("kind") == "group"
+            ]
+        nodes.append(node)
+    return nodes
 
 
 def mindmap(
@@ -497,6 +573,9 @@ def mindmap(
     k = k or kpis(records)
     groups = groups or {}
     blockade_rows = blockade_rows if blockade_rows is not None else blockades(records)
+    site_rows = groups.get("department") or []
+    if not site_rows or not any(r.get("kind") in {"camp", "group"} for r in site_rows):
+        site_rows = group_by_sites(records)
     return {
         "root": {
             "id": "all",
@@ -508,9 +587,9 @@ def mindmap(
             {
                 "id": "sites",
                 "label": "Sites",
-                "value": len(groups.get("department") or []),
+                "value": k["total"],
                 "filter": {},
-                "children": _mm_children_from_rows(groups.get("department") or [], "department"),
+                "children": _mm_site_nodes(site_rows),
             },
             {
                 "id": "status",
@@ -595,7 +674,7 @@ def dashboard_payload(filters: dict[str, Any]) -> dict[str, Any]:
     records = filtered(all_records, filters)
     cfg = load_config()
     t = today()
-    departments = group_by(records, "department")
+    departments = group_by_sites(records, cfg)
     employees = group_by(records, "assigned_to")
     priorities = group_by(records, "priority")
     work_types = group_by(records, "work_type")
