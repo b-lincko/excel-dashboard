@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (typeahead search, command palette, shortcuts, presence, WAL; backup tour copy).
+Last updated: 2026-09-08 (production hardening + operator training slides).
 
 ---
 
@@ -106,7 +106,12 @@ UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
 
 - Keep `X-Frame-Options: SAMEORIGIN` (sandbox live preview). Do not switch to `DENY`.
 - Bind servers to `0.0.0.0`. Vite already `allowedHosts: true` and proxies `/api` to the backend. Browser code must use relative `/api` URLs, never `localhost`.
-- Change `jwt_secret` in production (`WOMS_JWT_SECRET` or `data/.jwt_secret`).
+- Change `jwt_secret` in production (`WOMS_JWT_SECRET` or `data/.jwt_secret`). Settings GET/PUT never return `jwt_secret`.
+- Login lockout: 8 failed attempts / 10 minutes per username+IP (`429`).
+- Unhandled API errors return `Internal server error` unless `WOMS_DEBUG=1`.
+- Attachment download/delete must resolve inside `data/attachments/`.
+- New user passwords min 8 characters. Change default logins before go-live (`docs/PRODUCTION.md`).
+- Operator training slides: `docs/training/index.html`.
 
 ### Python
 
@@ -176,6 +181,8 @@ file.xlsx                    Live workbook at repo root — do not clobber in te
 tests/                       pytest
 docs/EXCEL_ANALYSIS.md       Workbook inspection
 docs/RECOVERY.md             Data loss / Docker / restore / admin commands
+docs/PRODUCTION.md           Go-live checklist
+docs/training/index.html     Operator training slides
 scripts/recover.sh           Host file check + command cheat sheet
 scripts/reset_admin.py       Reset or create admin login
 SKILLS.md                    This file
@@ -309,6 +316,7 @@ cd frontend && npm run build
 | `tests/test_materials_catalog.py` | Lines, aliases, unique supplier dropdown, paired create-backup, line search, suggest, presence |
 | `tests/test_delay_sites.py` | Extra sites / delay rules |
 | `tests/test_reports.py` | Daily/weekly window, one-page PDF, one-sheet XLSX, JSON API |
+| `tests/test_production_hardening.py` | Login lockout, jwt_secret stripped from Settings, password min 8 |
 
 Pitfalls (do not repeat):
 
@@ -398,6 +406,7 @@ Must remain true:
 - [x] Daily / weekly reports from a chosen date (that day or that ISO week only; one-page PDF)
 - [x] One MR supplier form (dropdown only); unique supplier names; @mentions; search suggestions; backups always pair Excel + DB
 - [x] Typeahead search + command palette + shortcuts; list search matches line items; live presence on an open MR
+- [x] Production hardening (login lockout, no jwt_secret in API, attachment path check, password min 8) + operator training slides
 
 When you complete or change a requirement, tick/retarget it here.
 
@@ -416,3 +425,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09** Backup UI: Download (zip pair), Upload & restore (.xlsx/.db/zip). Recovery commands in `docs/RECOVERY.md`.
 - **2026-09-08 (a18f4e3)** Typeahead search, Ctrl/⌘+K, list j/k/Enter/x, presence, WAL. Tour step `keys`. `GET /suggest` must stay before `/{wo_id}`.
 - **2026-09-08** Tour backup step no longer says “snapshots, not every save”. Every `create_backup` reason pairs `.xlsx`+`.db`.
+- **2026-09-08** Production audit: lockout, hide jwt_secret, attachment path, generic 500s, password min 8. Training deck `docs/training/index.html`. Go-live still requires password change, HTTPS off-LAN, autobackup on, off-box copies.

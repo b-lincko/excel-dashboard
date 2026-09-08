@@ -21,13 +21,17 @@ class SettingsUpdate(BaseModel):
     values: dict[str, Any]
 
 
+def _public_settings(cfg: AppConfig) -> dict[str, Any]:
+    data = cfg.model_dump()
+    data.pop("jwt_secret", None)
+    data["jwt_secret_set"] = bool(cfg.jwt_secret)
+    return data
+
+
 @router.get("")
 def get_settings(user=Depends(require_permission("settings"))):
     cfg = load_config()
-    data = cfg.model_dump()
-    if user["role"] != "admin":
-        data.pop("jwt_secret", None)
-    return {"settings": data, "sync": excel_service.status(), "backup": schedule_status(cfg)}
+    return {"settings": _public_settings(cfg), "sync": excel_service.status(), "backup": schedule_status(cfg)}
 
 
 @router.put("")
@@ -48,7 +52,7 @@ def update_settings(body: SettingsUpdate, user=Depends(require_permission("setti
             raise HTTPException(status_code=400, detail=str(exc))
     save_config(new_cfg)
     excel_service.invalidate()
-    return {"settings": new_cfg.model_dump(), "saved": True, "backup": schedule_status(new_cfg)}
+    return {"settings": _public_settings(new_cfg), "saved": True, "backup": schedule_status(new_cfg)}
 
 
 @router.get("/mapping-scan")

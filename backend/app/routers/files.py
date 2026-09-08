@@ -163,8 +163,13 @@ def download_file(attachment_id: int, user=Depends(require_permission("view"))):
     item = database.get_attachment(attachment_id)
     if not item:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    path = ATTACHMENTS_DIR / item["stored_name"]
-    if not path.is_file():
+    root = ATTACHMENTS_DIR.resolve()
+    path = (ATTACHMENTS_DIR / str(item["stored_name"])).resolve()
+    try:
+        inside = path.is_relative_to(root)
+    except AttributeError:
+        inside = str(path).startswith(str(root))
+    if not inside or not path.is_file():
         raise HTTPException(status_code=404, detail="File is missing on disk")
     return FileResponse(path, filename=item["filename"], media_type=item.get("mime") or "application/octet-stream")
 
@@ -174,10 +179,17 @@ def remove_file(attachment_id: int, user=Depends(require_permission("edit"))):
     item = database.get_attachment(attachment_id)
     if not item:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    path = ATTACHMENTS_DIR / item["stored_name"]
+    root = ATTACHMENTS_DIR.resolve()
+    path = (ATTACHMENTS_DIR / str(item["stored_name"])).resolve()
+    try:
+        inside = path.is_relative_to(root)
+    except AttributeError:
+        inside = str(path).startswith(str(root))
+    if not inside:
+        path = None
     database.delete_attachment(attachment_id)
     try:
-        if path.is_file():
+        if path is not None and path.is_file():
             path.unlink()
     except OSError:
         pass

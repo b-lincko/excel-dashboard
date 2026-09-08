@@ -22,7 +22,7 @@ def _permissions_json(role: str, extra: Optional[list[str]]) -> Optional[str]:
 
 class UserCreate(BaseModel):
     username: str
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=8)
     full_name: str = ""
     email: str = ""
     role: str = "user"
@@ -34,7 +34,7 @@ class UserUpdate(BaseModel):
     email: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
-    password: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=8)
     extra_permissions: Optional[list[str]] = None
 
 

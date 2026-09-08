@@ -22,6 +22,8 @@ React dashboard  ⇄  FastAPI  ⇄  SQLite (history)
 
 **Data loss / Docker down:** [`docs/RECOVERY.md`](docs/RECOVERY.md) — find the database, restore snapshots, reset admin. Quick check: `./scripts/recover.sh`.
 
+**Train operators:** open [`docs/training/index.html`](docs/training/index.html) (arrows / space to present). Go-live list: [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
+
 ## Quick start
 
 ### One command

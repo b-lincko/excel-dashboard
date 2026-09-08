@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Linkco MR — Operator training</title>
+  <style>
+    :root {
+      --bg: #071018;
+      --card: #0e1a24;
+      --ink: #e8f4f8;
+      --muted: #93b0bd;
+      --line: #1e3a48;
+      --cyan: #22d3ee;
+      --teal: #0e7490;
+      --gold: #fbbf24;
+      --rose: #fb7185;
+      --ok: #34d399;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: "Segoe UI", system-ui, sans-serif; }
+    .deck { height: 100%; display: flex; flex-direction: column; }
+    .slides { flex: 1; position: relative; overflow: hidden; }
+    .slide {
+      position: absolute; inset: 0; padding: 56px 72px 88px;
+      display: none; flex-direction: column; justify-content: center;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(34,211,238,.16), transparent 36%),
+        radial-gradient(circle at 90% 100%, rgba(14,116,144,.22), transparent 40%),
+        var(--bg);
+    }
+    .slide.on { display: flex; }
+    .kicker { color: var(--cyan); letter-spacing: .16em; text-transform: uppercase; font-size: 13px; font-weight: 700; margin: 0 0 10px; }
+    h1 { font-size: 52px; line-height: 1.1; margin: 0 0 16px; letter-spacing: -0.03em; }
+    h2 { font-size: 38px; line-height: 1.15; margin: 0 0 18px; letter-spacing: -0.02em; }
+    p, li { font-size: 20px; line-height: 1.45; color: var(--muted); }
+    .lead { font-size: 24px; max-width: 920px; }
+    ul { margin: 8px 0 0; padding-left: 1.2em; }
+    li { margin: 8px 0; }
+    strong { color: var(--ink); }
+    .row { display: grid; gap: 18px; }
+    .row.two { grid-template-columns: 1.1fr 1fr; }
+    .row.three { grid-template-columns: repeat(3, 1fr); }
+    .row.four { grid-template-columns: repeat(4, 1fr); }
+    .card {
+      background: rgba(14,26,36,.86);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px 20px;
+    }
+    .card h3 { margin: 0 0 8px; font-size: 18px; color: var(--ink); }
+    .card p, .card li { font-size: 16px; margin: 0; }
+    .tag { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #12313c; color: var(--cyan); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .ok { color: var(--ok); }
+    .warn { color: var(--gold); }
+    .bad { color: var(--rose); }
+    .arch { display: grid; gap: 10px; justify-items: center; }
+    .node {
+      min-width: 180px; text-align: center; padding: 12px 16px; border-radius: 14px;
+      border: 1px solid var(--line); background: #102230; font-weight: 700;
+    }
+    .node small { display: block; font-weight: 500; color: var(--muted); font-size: 13px; margin-top: 4px; }
+    .node.live { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(34,211,238,.25); }
+    .node.excel { border-color: #365314; }
+    .arrow { color: var(--cyan); font-size: 22px; }
+    .flow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .step {
+      background: #102230; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; min-width: 120px;
+    }
+    .step b { display: block; color: var(--cyan); font-size: 12px; letter-spacing: .08em; }
+    .step span { font-size: 15px; color: var(--ink); }
+    .chev { color: var(--cyan); font-size: 22px; }
+    kbd { font-family: ui-monospace, Consolas, monospace; background: #12313c; color: var(--ink); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 2px 7px; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 17px; }
+    th { color: var(--cyan); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+    .bar {
+      position: absolute; left: 0; right: 0; bottom: 0; height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 28px; background: linear-gradient(transparent, rgba(7,16,24,.95));
+      font-size: 13px; color: var(--muted);
+    }
+    .bar button {
+      background: #12313c; color: var(--ink); border: 1px solid var(--line);
+      border-radius: 10px; padding: 8px 12px; cursor: pointer;
+    }
+    .progress { position: absolute; left: 0; right: 0; bottom: 64px; height: 3px; background: #12313c; }
+    .progress > i { display: block; height: 100%; background: var(--cyan); width: 0; }
+    .dots { display: flex; gap: 6px; }
+    .dots i { width: 7px; height: 7px; border-radius: 99px; background: #234; }
+    .dots i.on { background: var(--cyan); }
+    @media print {
+      .bar, .progress { display: none !important; }
+      .slide { position: relative; display: flex !important; page-break-after: always; height: 100vh; }
+    }
+  </style>
+</head>
+<body>
+<div class="deck">
+  <div class="slides" id="slides">
+
+    <section class="slide on">
+      <p class="kicker">Linkco · Al Rawabet Commercial Services</p>
+      <h1>Linkco MR</h1>
+      <p class="lead">Operator training. Material requests for IM work orders — how the desk works, how you work it, and how we keep the history safe.</p>
+      <p style="margin-top:28px"><span class="tag">Live history in the database</span> &nbsp; <span class="tag">Excel is the backup replica</span></p>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Agenda</p>
+      <h2>What we will cover</h2>
+      <div class="row two">
+        <div class="card">
+          <h3>How it is built</h3>
+          <ul>
+            <li>Architecture</li>
+            <li>Database vs Excel</li>
+            <li>What happens when you Save</li>
+            <li>Roles</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>How you work</h3>
+          <ul>
+            <li>Daily path, step by step</li>
+            <li>Several people, several suppliers</li>
+            <li>Search, keys, reports</li>
+            <li>Backup, restore, what never to do</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">What this is</p>
+      <h2>One desk for material requests</h2>
+      <div class="row three">
+        <div class="card"><h3>Not a mock</h3><p>KPIs, lists and reports are counted from live records. Nothing is sample data.</p></div>
+        <div class="card"><h3>Not a new Excel file</h3><p>The original workbook stays. Formulas, report sheets and headers are not redesigned.</p></div>
+        <div class="card"><h3>Several people</h3><p>You can all work at once. You see who is on an MR. Conflicts are shown, never silently overwritten.</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Audit · 8 Sep 2026</p>
+      <h2>Is it production-ready?</h2>
+      <div class="row two">
+        <div class="card">
+          <h3 class="ok">Ready for the team</h3>
+          <ul>
+            <li>DB-first saves, Excel replica, conflict 409</li>
+            <li>Paired backups on every save</li>
+            <li>Roles, audit, JWT, login lockout</li>
+            <li>Tour + Guide + recovery commands</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3 class="warn">You must still do this</h3>
+          <ul>
+            <li>Change default passwords</li>
+            <li>HTTPS if it leaves the office LAN</li>
+            <li>Turn the backup schedule on</li>
+            <li>Copy <strong>backups/</strong> off the machine</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Architecture</p>
+      <h2>How the pieces sit</h2>
+      <div class="arch">
+        <div class="node">People in the browser<small>React dashboard · search, queue, MR form</small></div>
+        <div class="arrow">↓ HTTPS / same host</div>
+        <div class="node live">FastAPI<small>Auth · rules · reports · /api</small></div>
+        <div class="arrow">↓</div>
+        <div class="row three" style="width:100%; max-width:980px">
+          <div class="node live">SQLite<small>data/woms.db · live history</small></div>
+          <div class="node excel">file.xlsx<small>Replica after each save</small></div>
+          <div class="node">backups/<small>.xlsx + .db pair every time</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Source of truth</p>
+      <h2>The database is the log</h2>
+      <table>
+        <tr><th>Action</th><th>What happens</th></tr>
+        <tr><td>List, KPIs, search</td><td>Read SQLite. Not Excel.</td></tr>
+        <tr><td>Save / create / delete</td><td>Write SQLite first, then copy the row into Excel.</td></tr>
+        <tr><td>Excel locked or missing</td><td>Your save stays. You get a warning to retry the replica.</td></tr>
+        <tr><td>Seed / Upload-then-seed</td><td>Admin only. Copies Excel into the database when asked.</td></tr>
+        <tr><td>Ordinary Refresh</td><td>Reloads the database. Does not overwrite it from Excel.</td></tr>
+      </table>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Save path</p>
+      <h2>One save, in order</h2>
+      <div class="flow">
+        <div class="step"><b>1</b><span>You click Save<br>or Ctrl/⌘+S</span></div><div class="chev">→</div>
+        <div class="step"><b>2</b><span>SQLite commits<br>the MR</span></div><div class="chev">→</div>
+        <div class="step"><b>3</b><span>Paired backup<br>.xlsx + .db</span></div><div class="chev">→</div>
+        <div class="step"><b>4</b><span>Excel lock, temp<br>file, validate</span></div><div class="chev">→</div>
+        <div class="step"><b>5</b><span>Replace file.xlsx<br>if Excel is free</span></div>
+      </div>
+      <p style="margin-top:28px">If step 4 or 5 fails, <strong>step 2 is kept</strong>. Never roll the database back because Excel was open.</p>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">People</p>
+      <h2>Who can do what</h2>
+      <table>
+        <tr><th>Role</th><th>Day to day</th></tr>
+        <tr><td><strong>user</strong></td><td>View, edit MRs, reports. Typical plant / buyer login.</td></tr>
+        <tr><td><strong>manager</strong></td><td>Also create MRs, analytics, audit. Supplier and PO fields.</td></tr>
+        <tr><td><strong>admin</strong></td><td>Users, Settings, seed, reset, backups.</td></tr>
+        <tr><td><strong>readonly / guest</strong></td><td>Look, don’t save. Guest pages are granted one by one.</td></tr>
+      </table>
+      <p>First-run defaults exist only so the box boots. <strong class="warn">Change them before real work.</strong></p>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Daily path</p>
+      <h2>Four steps, every morning</h2>
+      <div class="flow">
+        <div class="step"><b>1</b><span>Action queue</span></div><div class="chev">→</div>
+        <div class="step"><b>2</b><span>Open the MR</span></div><div class="chev">→</div>
+        <div class="step"><b>3</b><span>Claim or follow</span></div><div class="chev">→</div>
+        <div class="step"><b>4</b><span>Update · Save</span></div>
+      </div>
+      <p style="margin-top:28px">Work overdue, UNDER NTP, on hold, due soon, then missed ETAs. Don’t start from a 2,000-row dump unless you are hunting.</p>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Step 1</p>
+      <h2>Action queue</h2>
+      <div class="row two">
+        <div class="card"><h3>Open Queue</h3><p>Grouped by urgency. Claim puts your name on Assign to. Follow notifies you when someone saves or chats.</p></div>
+        <div class="card"><h3>Then the list</h3><p>Work orders is every MR. Filters start collapsed. Click a KPI on Dashboard to jump into the matching set.</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Step 2–3</p>
+      <h2>Open, claim, see colleagues</h2>
+      <ul>
+        <li>Click a row — or <kbd>j</kbd> / <kbd>k</kbd> then <kbd>Enter</kbd>.</li>
+        <li>Status, due date, supplier and PO sit in the summary strip.</li>
+        <li>If someone else has the same MR open, their name shows at the top.</li>
+        <li>If they saved first, you get a <strong>conflict</strong> — reload their values or overwrite with yours. Never two rows for the same identity.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Step 4 · items</p>
+      <h2>One form: supplier × item × date</h2>
+      <div class="row two">
+        <div class="card">
+          <h3>On the MR</h3>
+          <ul>
+            <li>Type the supplier — the list completes unique names.</li>
+            <li>Type the item they can provide.</li>
+            <li>Need date on the line.</li>
+            <li><kbd>Alt</kbd>+<kbd>Enter</kbd> adds another vendor row.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Not on the MR</h3>
+          <ul>
+            <li>There is no “Add supplier” here.</li>
+            <li>New vendors live on <strong>Materials</strong>.</li>
+            <li>Duplicates like AAGE vs AAGE W.L.L. are folded to one name.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Together</p>
+      <h2>Several people, several orders</h2>
+      <div class="row three">
+        <div class="card"><h3>@mentions</h3><p>Type <strong>@</strong> in remarks or chat. Usernames appear. They get notified.</p></div>
+        <div class="card"><h3>Bulk</h3><p><kbd>x</kbd> ticks a row. Assign, status or the same remark on many MRs at once (cap 80).</p></div>
+        <div class="card"><h3>PLACED</h3><p>Needs a PO number. ON HOLD and CLOSED ask for a remark. Rules are configurable.</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Find</p>
+      <h2>Search completes names</h2>
+      <ul>
+        <li>Header search: WO number, supplier, item, person.</li>
+        <li>Arrow keys pick a suggestion. <kbd>/</kbd> focuses search from any page.</li>
+        <li><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>K</kbd> command palette — jump to a page, WO, supplier or person.</li>
+        <li>The list search also matches item lines, not only the header description.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Keys</p>
+      <h2>Work without the mouse</h2>
+      <table>
+        <tr><th>Key</th><th>Action</th></tr>
+        <tr><td><kbd>g</kbd> then <kbd>q</kbd> / <kbd>w</kbd> / <kbd>d</kbd></td><td>Queue, Work orders, Dashboard</td></tr>
+        <tr><td><kbd>n</kbd></td><td>New material request</td></tr>
+        <tr><td><kbd>j</kbd> / <kbd>k</kbd> · <kbd>Enter</kbd> · <kbd>x</kbd></td><td>Move, open, tick</td></tr>
+        <tr><td><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd></td><td>Save</td></tr>
+        <tr><td><kbd>?</kbd></td><td>This guide, in the app</td></tr>
+      </table>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Reports</p>
+      <h2>Daily and weekly briefings</h2>
+      <div class="row two">
+        <div class="card"><h3>On screen</h3><p>Pick a calendar date. Daily = that day only. Weekly = ISO Monday–Sunday of that date. PDF is one A4 page.</p></div>
+        <div class="card"><h3>More</h3><p>Open / overdue / closed / delay / department / technician download as Excel, CSV or PDF.</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Backup</p>
+      <h2>Excel and the database together</h2>
+      <ul>
+        <li>Every backup copies <strong>SQLite + Excel</strong> — each save, Backup now, and the night schedule.</li>
+        <li>Files live in <strong>backups/YYYY-MM-DD/</strong> as a matching <code>.xlsx</code> and <code>.db</code>.</li>
+        <li>Download is a zip of that pair. Upload accepts .xlsx, .db, or a zip — then confirm Restore.</li>
+        <li>Write-safety copies are not pruned. Auto/manual keep the last 14 by default.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Restore</p>
+      <h2>If something looks wrong</h2>
+      <div class="row two">
+        <div class="card">
+          <h3>Paired snapshot</h3>
+          <p>Restore rolls <strong>database and Excel</strong>. A pre-restore snapshot is taken first.</p>
+        </div>
+        <div class="card">
+          <h3>Excel-only leftover</h3>
+          <p>Replaces <code>file.xlsx</code> only. Does <strong>not</strong> overwrite live history. Seed from Excel if you really want those rows.</p>
+        </div>
+      </div>
+      <p style="margin-top:22px">Docker down does not delete host <code>data/</code> or <code>backups/</code>. Commands: <code>docs/RECOVERY.md</code> · <code>./scripts/recover.sh</code></p>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Admin</p>
+      <h2>Settings you should rarely touch</h2>
+      <table>
+        <tr><th>Action</th><th>Meaning</th></tr>
+        <tr><td>Seed from Excel</td><td>Copy workbook rows into SQLite. Users stay.</td></tr>
+        <tr><td>Upload Excel then seed</td><td>Replace the replica, then seed.</td></tr>
+        <tr><td>Reset database · type DELETE</td><td>Wipes users, chat, settings, MRs. Recreates admin/manager/user. Keeps column mapping.</td></tr>
+        <tr><td>Users page</td><td>Named accounts. Never share admin123 on the live box.</td></tr>
+      </table>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Do not</p>
+      <h2 class="bad">Never do this</h2>
+      <ul>
+        <li>Do not keep Excel open for write on <code>file.xlsx</code> while people save.</li>
+        <li>Do not delete <code>data/app_config.json</code> (column mapping).</li>
+        <li>Do not replace <code>data/woms.db</code> while the API is running.</li>
+        <li>Do not treat an Excel-only restore as a full rollback.</li>
+        <li>Do not invent a second unofficial notes file — <code>SKILLS.md</code> is the living spec.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Go-live</p>
+      <h2>Before the team depends on it</h2>
+      <ol>
+        <li>Change default passwords. Create named users.</li>
+        <li>Turn the backup schedule on. Copy <code>backups/</code> off-box.</li>
+        <li>HTTPS if it is not only on the office LAN.</li>
+        <li>Walk Guide → Start tour once per person.</li>
+        <li>Practice one Backup now + Download on a test copy.</li>
+      </ol>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">Practice</p>
+      <h2>Try this now</h2>
+      <div class="row two">
+        <div class="card">
+          <h3>Operators</h3>
+          <p>Sign in → Queue → open one MR → add a supplier×item row → Save. Type @ in remarks. Press ? for the guide.</p>
+        </div>
+        <div class="card">
+          <h3>Admins</h3>
+          <p>Users → create a named account. Settings → Backup now → Download the zip. Confirm a .xlsx and .db pair on disk.</p>
+        </div>
+      </div>
+      <p style="margin-top:28px">Questions. Then work the queue.</p>
+    </section>
+
+  </div>
+  <div class="progress"><i id="prog"></i></div>
+  <div class="bar">
+    <div>Linkco MR training · arrows / space · F fullscreen · P print</div>
+    <div class="dots" id="dots"></div>
+    <div>
+      <button type="button" id="prev">Prev</button>
+      <span id="num"></span>
+      <button type="button" id="next">Next</button>
+    </div>
+  </div>
+</div>
+<script>
+  const slides = [...document.querySelectorAll(".slide")];
+  const dots = document.getElementById("dots");
+  const num = document.getElementById("num");
+  const prog = document.getElementById("prog");
+  let i = 0;
+  slides.forEach((_, n) => {
+    const d = document.createElement("i");
+    d.addEventListener("click", () => go(n));
+    dots.appendChild(d);
+  });
+  function go(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle("on", k === i));
+    [...dots.children].forEach((d, k) => d.classList.toggle("on", k === i));
+    num.textContent = (i + 1) + " / " + slides.length;
+    prog.style.width = ((i + 1) / slides.length * 100) + "%";
+  }
+  document.getElementById("prev").onclick = () => go(i - 1);
+  document.getElementById("next").onclick = () => go(i + 1);
+  document.addEventListener("keydown", (e) => {
+    if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); go(i + 1); }
+    if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(e.key)) { e.preventDefault(); go(i - 1); }
+    if (e.key === "Home") go(0);
+    if (e.key === "End") go(slides.length - 1);
+    if (e.key === "f" || e.key === "F") document.documentElement.requestFullscreen?.();
+  });
+  let touchX = null;
+  document.addEventListener("touchstart", (e) => { touchX = e.changedTouches[0].screenX; });
+  document.addEventListener("touchend", (e) => {
+    if (touchX == null) return;
+    const dx = e.changedTouches[0].screenX - touchX;
+    if (dx < -40) go(i + 1);
+    if (dx > 40) go(i - 1);
+    touchX = null;
+  });
+  go(0);
+</script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -108,7 +109,9 @@ def health():
 @app.exception_handler(Exception)
 async def unhandled(request: Request, exc: Exception):
     if request.url.path.startswith("/api/"):
-        return JSONResponse(status_code=500, content={"detail": str(exc)})
+        debug = os.environ.get("WOMS_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+        detail = str(exc) if debug else "Internal server error"
+        return JSONResponse(status_code=500, content={"detail": detail})
     raise exc
 
 

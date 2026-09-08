@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .. import database
@@ -21,6 +22,33 @@ from ..security import (
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+_LOGIN_FAILS: dict[str, list[float]] = {}
+_LOGIN_WINDOW_SEC = 600
+_LOGIN_MAX_FAILS = 8
+
+
+def _login_key(username: str, request: Request) -> str:
+    host = request.client.host if request.client else "?"
+    return f"{host}|{(username or '').strip().lower()}"
+
+
+def _login_locked(key: str) -> bool:
+    now = time.time()
+    stamps = [t for t in _LOGIN_FAILS.get(key, []) if now - t < _LOGIN_WINDOW_SEC]
+    if stamps:
+        _LOGIN_FAILS[key] = stamps
+    else:
+        _LOGIN_FAILS.pop(key, None)
+    return len(stamps) >= _LOGIN_MAX_FAILS
+
+
+def _record_login_fail(key: str) -> None:
+    _LOGIN_FAILS.setdefault(key, []).append(time.time())
+
+
+def _clear_login_fails(key: str) -> None:
+    _LOGIN_FAILS.pop(key, None)
+
 
 class LoginRequest(BaseModel):
     username: str
@@ -28,12 +56,20 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login")
-def login(body: LoginRequest):
+def login(body: LoginRequest, request: Request):
+    key = _login_key(body.username, request)
+    if _login_locked(key):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed sign-ins. Try again in a few minutes.",
+        )
     user = database.get_user_by_username(body.username.strip())
     if not user or not verify_password(body.password, user["password_hash"]):
+        _record_login_fail(key)
         raise HTTPException(status_code=401, detail="Invalid username or password")
     if not user.get("is_active"):
         raise HTTPException(status_code=403, detail="Account is disabled")
+    _clear_login_fails(key)
     token = create_token(user)
     database.touch_login(user["id"])
     user = database.get_user_by_id(user["id"]) or user
