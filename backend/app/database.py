@@ -4,7 +4,7 @@ import json
 import shutil
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
@@ -205,6 +205,14 @@ CREATE TABLE IF NOT EXISTS supplier_aliases (
     created_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_supplier_aliases_canon ON supplier_aliases(canonical);
+CREATE TABLE IF NOT EXISTS wo_presence (
+    record_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    full_name TEXT,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (record_id, username)
+);
+CREATE INDEX IF NOT EXISTS idx_presence_seen ON wo_presence(seen_at);
 """
 
 DEFAULT_USERS = [
@@ -241,6 +249,12 @@ def connect() -> Iterator[sqlite3.Connection]:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=15, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=15000")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.Error:
+        pass
     try:
         yield conn
         conn.commit()
@@ -1581,6 +1595,200 @@ def rename_supplier_refs(old_name: str, new_name: str) -> None:
             "UPDATE supplier_aliases SET canonical = ? WHERE canonical = ? COLLATE NOCASE",
             (new, old),
         )
+
+
+PRESENCE_TTL_SEC = 45
+
+
+def _like_pattern(q: str) -> str:
+    text = " ".join(str(q or "").split())
+    if not text:
+        return ""
+    return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def record_ids_matching_q(q: str) -> set[str]:
+    """Match WO id, payload text, or any supplier/item line. Used by list search."""
+    pattern = _like_pattern(q)
+    if not pattern:
+        return set()
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT record_id FROM wo_cache
+             WHERE work_order_id LIKE ? ESCAPE '\\' COLLATE NOCASE
+                OR record_id LIKE ? ESCAPE '\\' COLLATE NOCASE
+                OR payload LIKE ? ESCAPE '\\' COLLATE NOCASE
+            UNION
+            SELECT record_id FROM mr_lines
+             WHERE supplier LIKE ? ESCAPE '\\' COLLATE NOCASE
+                OR material LIKE ? ESCAPE '\\' COLLATE NOCASE
+                OR notes LIKE ? ESCAPE '\\' COLLATE NOCASE
+            """,
+            (pattern,) * 6,
+        ).fetchall()
+    return {str(r["record_id"]) for r in rows if r["record_id"]}
+
+
+def suggest_workspace(q: str, limit: int = 8) -> dict[str, list[dict[str, Any]]]:
+    """Fast typeahead groups: orders, suppliers, materials, people."""
+    pattern = _like_pattern(q)
+    limit_n = max(1, min(int(limit or 8), 20))
+    empty: dict[str, list[dict[str, Any]]] = {"orders": [], "suppliers": [], "materials": [], "people": []}
+    if not pattern:
+        return empty
+    with connect() as conn:
+        order_rows = conn.execute(
+            """
+            SELECT record_id, work_order_id, payload FROM wo_cache
+             WHERE work_order_id LIKE ? ESCAPE '\\' COLLATE NOCASE
+                OR record_id LIKE ? ESCAPE '\\' COLLATE NOCASE
+                OR payload LIKE ? ESCAPE '\\' COLLATE NOCASE
+             LIMIT ?
+            """,
+            (pattern, pattern, pattern, limit_n),
+        ).fetchall()
+        supplier_rows = conn.execute(
+            """
+            SELECT name FROM (
+                SELECT name FROM suppliers WHERE name LIKE ? ESCAPE '\\' COLLATE NOCASE
+                UNION
+                SELECT supplier AS name FROM mr_lines
+                 WHERE supplier LIKE ? ESCAPE '\\' COLLATE NOCASE AND supplier != ''
+            ) ORDER BY name COLLATE NOCASE LIMIT ?
+            """,
+            (pattern, pattern, limit_n),
+        ).fetchall()
+        material_rows = conn.execute(
+            """
+            SELECT material, supplier FROM mr_lines
+             WHERE material LIKE ? ESCAPE '\\' COLLATE NOCASE AND material != ''
+             LIMIT ?
+            """,
+            (pattern, limit_n),
+        ).fetchall()
+        if len(material_rows) < limit_n:
+            extra = conn.execute(
+                """
+                SELECT material, supplier_name AS supplier FROM supplier_items
+                 WHERE material LIKE ? ESCAPE '\\' COLLATE NOCASE
+                 LIMIT ?
+                """,
+                (pattern, limit_n),
+            ).fetchall()
+            seen = {(str(r["material"] or "").lower(), str(r["supplier"] or "").lower()) for r in material_rows}
+            for row in extra:
+                key = (str(row["material"] or "").lower(), str(row["supplier"] or "").lower())
+                if key in seen:
+                    continue
+                seen.add(key)
+                material_rows.append(row)
+                if len(material_rows) >= limit_n:
+                    break
+        people_rows = conn.execute(
+            """
+            SELECT username, full_name, role FROM users
+             WHERE is_active = 1
+               AND (username LIKE ? ESCAPE '\\' COLLATE NOCASE
+                    OR IFNULL(full_name, '') LIKE ? ESCAPE '\\' COLLATE NOCASE)
+             ORDER BY username COLLATE NOCASE LIMIT ?
+            """,
+            (pattern, pattern, limit_n),
+        ).fetchall()
+    orders: list[dict[str, Any]] = []
+    for row in order_rows:
+        rec = _payload_to_record(row["payload"]) or {}
+        orders.append(
+            {
+                "kind": "order",
+                "record_id": row["record_id"],
+                "work_order_id": row["work_order_id"] or rec.get("work_order_id") or "",
+                "label": rec.get("work_order_id") or row["work_order_id"] or row["record_id"],
+                "hint": " · ".join(
+                    p
+                    for p in (
+                        rec.get("department"),
+                        rec.get("status"),
+                        rec.get("assigned_to"),
+                        rec.get("supplier"),
+                    )
+                    if p
+                ),
+                "description": str(rec.get("description") or "")[:160],
+            }
+        )
+    suppliers = [
+        {"kind": "supplier", "label": r["name"], "hint": "Supplier"}
+        for r in supplier_rows
+        if r["name"]
+    ]
+    materials = []
+    seen_mat: set[str] = set()
+    for row in material_rows:
+        mat = str(row["material"] or "").strip()
+        if not mat or mat.lower() in seen_mat:
+            continue
+        seen_mat.add(mat.lower())
+        materials.append(
+            {
+                "kind": "material",
+                "label": mat,
+                "hint": str(row["supplier"] or "").strip() or "Item",
+                "supplier": str(row["supplier"] or "").strip(),
+            }
+        )
+    people = [
+        {
+            "kind": "person",
+            "label": r["username"],
+            "hint": r["full_name"] or r["role"] or "",
+            "username": r["username"],
+            "full_name": r["full_name"] or "",
+        }
+        for r in people_rows
+    ]
+    return {"orders": orders, "suppliers": suppliers, "materials": materials, "people": people}
+
+
+def touch_presence(record_id: str, username: str, full_name: str = "") -> dict[str, Any]:
+    rid = str(record_id or "").strip()
+    user = str(username or "").strip()
+    if not rid or not user:
+        raise ValueError("record_id and username are required")
+    ts = now_iso()
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO wo_presence (record_id, username, full_name, seen_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(record_id, username) DO UPDATE SET
+                 full_name = excluded.full_name,
+                 seen_at = excluded.seen_at""",
+            (rid, user, full_name or user, ts),
+        )
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=PRESENCE_TTL_SEC * 4)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("DELETE FROM wo_presence WHERE seen_at < ?", (cutoff,))
+    return {"record_id": rid, "username": user, "seen_at": ts}
+
+
+def list_presence(record_id: str, exclude: str = "") -> list[dict[str, Any]]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        return []
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=PRESENCE_TTL_SEC)).strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as conn:
+        rows = conn.execute(
+            """SELECT username, full_name, seen_at FROM wo_presence
+               WHERE record_id = ? AND seen_at >= ?
+               ORDER BY username COLLATE NOCASE""",
+            (rid, cutoff),
+        ).fetchall()
+    skip = str(exclude or "").strip().lower()
+    out = []
+    for row in rows:
+        if skip and str(row["username"] or "").lower() == skip:
+            continue
+        out.append({"username": row["username"], "full_name": row["full_name"] or "", "seen_at": row["seen_at"]})
+    return out
 
 
 # Ensure schema exists for scripts/tests that never hit FastAPI startup.

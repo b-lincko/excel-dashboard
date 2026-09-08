@@ -39,6 +39,7 @@ import { useUi } from "../context/UiContext.jsx";
 import { api } from "../lib/api.js";
 import { clearDashCache } from "../lib/widgets.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
+import CommandPalette from "./CommandPalette.jsx";
 import { useTour } from "../context/TourContext.jsx";
 
 const NAV = [
@@ -107,6 +108,8 @@ export default function Layout() {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState([]);
   const [hitsOpen, setHitsOpen] = useState(false);
+  const [hitIdx, setHitIdx] = useState(0);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -131,21 +134,57 @@ export default function Layout() {
   }, [loc.pathname]);
 
   useEffect(() => {
+    let chord = "";
+    let chordTimer;
     function onKey(e) {
       const tag = (e.target?.tagName || "").toLowerCase();
       const typing = tag === "input" || tag === "textarea" || tag === "select" || e.target?.isContentEditable;
-      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        searchRef.current?.focus();
-      }
-      if (e.key === "?" && !typing) {
-        e.preventDefault();
-        if (!tourActive) nav("/guide");
+        setPaletteOpen((v) => !v);
+        return;
       }
       if (e.key === "Escape") {
         setMenu(false);
         setAccountOpen(false);
         setInboxOpen(false);
+        setHitsOpen(false);
+        setPaletteOpen(false);
+        return;
+      }
+      if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        searchRef.current?.focus();
+        return;
+      }
+      if (e.key === "?" && !typing) {
+        e.preventDefault();
+        if (!tourActive) nav("/guide");
+        return;
+      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key.toLowerCase() === "n" && can("create")) {
+        e.preventDefault();
+        nav("/work-orders/new");
+        return;
+      }
+      if (e.key.toLowerCase() === "g") {
+        chord = "g";
+        window.clearTimeout(chordTimer);
+        chordTimer = window.setTimeout(() => {
+          chord = "";
+        }, 900);
+        return;
+      }
+      if (chord === "g") {
+        chord = "";
+        window.clearTimeout(chordTimer);
+        const map = { q: "/queue", w: "/work-orders", d: "/", c: "/chat", g: "/guide" };
+        const to = map[e.key.toLowerCase()];
+        if (to) {
+          e.preventDefault();
+          nav(to);
+        }
       }
     }
     function onClick(e) {
@@ -155,10 +194,11 @@ export default function Layout() {
     window.addEventListener("keydown", onKey);
     window.addEventListener("mousedown", onClick);
     return () => {
+      window.clearTimeout(chordTimer);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", onClick);
     };
-  }, [nav, tourActive]);
+  }, [nav, tourActive, can]);
 
   function loadInbox() {
     api
@@ -370,29 +410,44 @@ export default function Layout() {
                 }}
                 onFocus={() => hits.length && setHitsOpen(true)}
                 onBlur={() => setTimeout(() => setHitsOpen(false), 150)}
-                placeholder="Search MRs, technicians, PO, remarks…  /"
+                onKeyDown={(e) => {
+                  if (!hitsOpen || !hits.length) return;
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setHitIdx((n) => (n + 1) % hits.length);
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setHitIdx((n) => (n - 1 + hits.length) % hits.length);
+                  } else if (e.key === "Enter" && hits[hitIdx]) {
+                    e.preventDefault();
+                    setHitsOpen(false);
+                    nav(hits[hitIdx].to);
+                  }
+                }}
+                placeholder="Search WO, supplier, item, person…  /"
                 className="pl-9"
                 aria-label="Search work orders"
                 autoComplete="off"
               />
               {hitsOpen && hits.length > 0 && (
                 <div className="absolute left-0 right-0 top-full z-30 mt-1 card p-1 max-h-80 overflow-auto">
-                  {hits.map((r) => (
+                  {hits.map((r, i) => (
                     <button
-                      key={r.record_id || r.work_order_id}
+                      key={r.key}
                       type="button"
-                      className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 dark:hover:bg-white/5"
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm ${i === hitIdx ? "bg-slate-100 dark:bg-white/10" : "hover:bg-slate-50 dark:hover:bg-white/5"}`}
                       onMouseDown={(e) => {
                         e.preventDefault();
                         setHitsOpen(false);
-                        nav(`/work-orders/${encodeURIComponent(r.record_id || r.work_order_id)}`);
+                        nav(r.to);
                       }}
                     >
-                      <div className="font-medium truncate">{r.work_order_id || r.record_id}</div>
-                      <div className="text-[11px] text-slate-500 truncate">
-                        {[r.department, r.assigned_to, r.status, r.supplier].filter(Boolean).join(" · ")}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium truncate">{r.label}</div>
+                        <span className="text-[10px] uppercase tracking-wider text-slate-400">{r.kind}</span>
                       </div>
-                      {r.description ? <div className="text-xs text-slate-500 truncate">{r.description}</div> : null}
+                      {r.hint ? <div className="text-[11px] text-slate-500 truncate">{r.hint}</div> : null}
+                      {r.extra ? <div className="text-xs text-slate-500 truncate">{r.extra}</div> : null}
                     </button>
                   ))}
                   <button
@@ -525,6 +580,15 @@ export default function Layout() {
                 </div>
               )}
             </div>
+            <button
+              className="btn-ghost !px-2"
+              data-tour="command"
+              onClick={() => setPaletteOpen(true)}
+              title="Command palette (Ctrl/⌘+K)"
+              aria-label="Open command palette"
+            >
+              <Keyboard size={16} />
+            </button>
             <button className="btn-ghost !px-2" onClick={() => nav("/guide")} title="Guide (?)" aria-label="Open guide">
               <CircleHelp size={16} />
             </button>
@@ -572,6 +636,7 @@ export default function Layout() {
           </ErrorBoundary>
         </main>
       </div>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }

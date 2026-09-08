@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 import MentionBox from "../components/MentionBox.jsx";
+import TypeAhead from "../components/TypeAhead.jsx";
 
 const EXTRA_KEYS = ["delay_kind", "delay_source", "delay_justification"];
 const DELAY_OPEN = new Set(["open"]);
@@ -119,6 +120,7 @@ export default function WorkOrderDetail() {
   const [timeline, setTimeline] = useState([]);
   const [remarkRules, setRemarkRules] = useState(["*->ON HOLD", "*->CLOSED"]);
   const [tab, setTab] = useState("details");
+  const [others, setOthers] = useState([]);
   const attachRef = useRef(null);
 
   const dirty = useMemo(() => {
@@ -188,6 +190,22 @@ export default function WorkOrderDetail() {
       setOriginal(initial);
     }
     setTab("details");
+  }, [id, isNew]);
+
+  useEffect(() => {
+    if (isNew || !id) {
+      setOthers([]);
+      return undefined;
+    }
+    function beat() {
+      api
+        .post(`/api/work-orders/${encodeURIComponent(id)}/presence`)
+        .then((d) => setOthers(d.others || []))
+        .catch(() => {});
+    }
+    beat();
+    const timer = window.setInterval(beat, 15000);
+    return () => window.clearInterval(timer);
   }, [id, isNew]);
 
   useEffect(() => {
@@ -422,7 +440,16 @@ export default function WorkOrderDetail() {
               </option>
             ))}
           </select>
-        ) : ["status", "priority", "assigned_to", "work_type", "issue"].includes(type) ? (
+        ) : type === "assigned_to" ? (
+          <TypeAhead
+            value={form[key] || ""}
+            disabled={fieldLocked(key)}
+            options={options.assigned_to || []}
+            allowCustom
+            placeholder="Type a technician name"
+            onChange={(v) => setField(key, v)}
+          />
+        ) : ["status", "priority", "work_type", "issue"].includes(type) ? (
           <select value={form[key] || ""} disabled={fieldLocked(key)} onChange={(e) => setField(key, e.target.value)}>
             <option value="">—</option>
             {form[key] && !(options[type] || []).includes(form[key]) && <option value={form[key]}>{form[key]}</option>}
@@ -478,6 +505,11 @@ export default function WorkOrderDetail() {
             {dirty && <span className="text-xs text-amber-700 dark:text-amber-300">Unsaved</span>}
           </div>
           {nextHint && <p className="text-sm text-slate-500 mt-2">{nextHint}</p>}
+          {others.length > 0 && (
+            <p className="text-xs text-sky-700 dark:text-sky-300 mt-2" data-tour="presence">
+              Also here: {others.map((p) => p.full_name || p.username).join(", ")}
+            </p>
+          )}
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
           {isNew && canSave && (
@@ -895,7 +927,7 @@ function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
       <div>
         <div className="font-semibold">Items & suppliers</div>
         <p className="text-xs text-slate-500">
-          One row per material: pick the supplier, the item they can provide, and the date. Add new vendors on Materials.
+          Type to complete supplier and item names. Alt+Enter adds a row. Add new vendors on Materials.
           Excel still keeps one supplier cell (item 1) and one material summary.
         </p>
       </div>
@@ -912,34 +944,25 @@ function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
           <div className="grid md:grid-cols-12 gap-2">
             <div className="md:col-span-4">
               <label className="lbl">Supplier</label>
-              <select
+              <TypeAhead
                 value={line.supplier || ""}
                 disabled={locked}
-                onChange={(e) => setLine(index, { supplier: e.target.value })}
-              >
-                <option value="">—</option>
-                {line.supplier && !suppliers.includes(line.supplier) && <option value={line.supplier}>{line.supplier}</option>}
-                {suppliers.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+                options={line.supplier && !suppliers.includes(line.supplier) ? [line.supplier, ...suppliers] : suppliers}
+                allowCustom={false}
+                placeholder="Type to complete a supplier"
+                onChange={(v) => setLine(index, { supplier: v })}
+              />
             </div>
             <div className="md:col-span-4">
               <label className="lbl">Item they can provide</label>
-              <input
-                list={`wo-item-list-${index}`}
+              <TypeAhead
                 value={line.material || ""}
                 disabled={readOnly}
-                onChange={(e) => setLine(index, { material: e.target.value })}
+                options={itemMap[line.supplier] || []}
+                allowCustom
                 placeholder={`Item ${index + 1}`}
+                onChange={(v) => setLine(index, { material: v })}
               />
-              <datalist id={`wo-item-list-${index}`}>
-                {(itemMap[line.supplier] || []).map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
             </div>
             <div className="md:col-span-2">
               <label className="lbl">Date</label>

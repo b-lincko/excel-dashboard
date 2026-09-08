@@ -19,7 +19,7 @@ export const TOUR_STEPS = [
     path: "/",
     target: "search",
     title: "Find a request from anywhere",
-    body: "Type a WO number, material, technician, PO or remark. Press / to focus search, then Enter.",
+    body: "Type a WO number, supplier, item or person — names complete as you type. Arrow keys pick a suggestion. / focuses search. Ctrl/⌘+K opens the command palette.",
   },
   {
     id: "live",
@@ -41,7 +41,7 @@ export const TOUR_STEPS = [
     target: "wo-list",
     page: "work_orders",
     title: "The working list",
-    body: "Click a row to open it. Tick boxes to assign, change status, or append the same remark to several MRs at once.",
+    body: "Click a row to open it. j/k move, Enter opens, x ticks a row. Tick boxes to assign, change status, or append the same remark to several MRs at once. The Items column shows how many materials and vendors sit on that MR.",
   },
   {
     id: "filters",
@@ -66,7 +66,7 @@ export const TOUR_STEPS = [
     target: "wo-tabs",
     need: "create",
     title: "Details, items, activity",
-    body: "On Details, add Item 1 with its supplier, then Item 2 with another supplier if needed. The Items tab is the same list. Activity (on saved records) is chat, files and the timeline. Don’t save this blank request unless you mean to create one.",
+    body: "Type the supplier name to complete it, then the item they can provide. Alt+Enter adds another row for a second vendor. Activity (on saved records) is chat, files and who else is looking. Don’t save this blank request unless you mean to create one.",
   },
   {
     id: "save",
@@ -74,7 +74,7 @@ export const TOUR_STEPS = [
     target: "wo-save",
     need: "create",
     title: "Save sits here",
-    body: "Ctrl/⌘+S also saves. The database is written first. If Excel is locked, the record is still kept and you can retry the backup.",
+    body: "Ctrl/⌘+S also saves. The database is written first. If Excel is locked, the record is still kept and you can retry the backup. If someone else has this MR open you will see their name at the top.",
   },
   {
     id: "queue",
@@ -91,7 +91,14 @@ export const TOUR_STEPS = [
     page: "settings",
     need: "backup",
     title: "Snapshots, not every save",
-    body: "Backup now and autobackup copy SQLite plus Excel. Restore rolls both back when a .db pair exists. Excel-only copies do not change live history.",
+    body: "Backup now copies SQLite plus Excel. Restore rolls both back when a .db pair exists. Excel-only leftover files do not change live history.",
+  },
+  {
+    id: "keys",
+    path: "/guide",
+    target: "shortcuts",
+    title: "Work without the mouse",
+    body: "g then q is the queue, g then w the list, n a new MR, / search, Ctrl/⌘+K commands, ? this guide. Several people can edit at once — you get a conflict if someone saved first, and Follow notifies you of their changes.",
   },
   {
     id: "done",

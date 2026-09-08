@@ -199,3 +199,51 @@ def test_catalog_lines_suggest_delivery_aliases(workbook):
     assert dest.read_bytes()  # workbook still present; no silent rewrite of live names
 
     _ = dest, svc
+
+
+def test_line_search_suggest_and_presence(workbook):
+    _, svc = workbook
+    svc.get_all(force=True)
+    client, headers = _login()
+    created = client.post(
+        "/api/work-orders",
+        headers=headers,
+        json={
+            "data": {
+                "department": "SH5-SH1",
+                "status": "OPEN",
+                "priority": "MEDIUM",
+                "work_order_id": "PYTEST-SEARCH-LINES",
+                "description": "Keep this description unchanged",
+                "lines": [
+                    {"supplier": "Vendor Alpha", "material": "AHU belt", "qty": "2"},
+                    {"supplier": "Vendor Beta", "material": "UNIQUE-LINE-SEARCH-XYZ", "qty": "1"},
+                ],
+            }
+        },
+    )
+    assert created.status_code == 200, created.text
+    item = created.json()["item"]
+    rid = item["record_id"]
+    found = client.get("/api/work-orders?q=UNIQUE-LINE-SEARCH-XYZ", headers=headers)
+    assert found.status_code == 200, found.text
+    items = found.json()["items"]
+    ids = [r["record_id"] for r in items]
+    assert rid in ids
+    hit = next(r for r in items if r["record_id"] == rid)
+    assert hit.get("line_count", 0) >= 2
+    suggest = client.get("/api/work-orders/suggest?q=UNIQUE-LINE-SEARCH", headers=headers)
+    assert suggest.status_code == 200, suggest.text
+    materials = [m["label"] for m in suggest.json()["groups"]["materials"]]
+    assert any("UNIQUE-LINE-SEARCH-XYZ" in m for m in materials)
+    beat = client.post(f"/api/work-orders/{rid}/presence", headers=headers)
+    assert beat.status_code == 200, beat.text
+    assert beat.json()["record_id"] == rid
+    manager = client.post("/api/auth/login", json={"username": "manager", "password": "manager123"}).json()["access_token"]
+    other = client.post(
+        f"/api/work-orders/{rid}/presence",
+        headers={"Authorization": f"Bearer {manager}"},
+    )
+    assert other.status_code == 200, other.text
+    names = [p["username"] for p in other.json()["others"]]
+    assert "admin" in names

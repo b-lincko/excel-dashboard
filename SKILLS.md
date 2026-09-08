@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-07 (one MR supplier form, unique dropdown names, @mentions, search suggestions, paired backups).
+Last updated: 2026-09-08 (typeahead search, command palette, shortcuts, presence, WAL).
 
 ---
 
@@ -84,7 +84,7 @@ UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
 
 ### Database / admin
 
-- Live path: `data/woms.db`. Schema in `backend/app/database.py` (`SCHEMA` + `init_db` migrations).
+- Live path: `data/woms.db`. Schema in `backend/app/database.py` (`SCHEMA` + `init_db` migrations). Connections use WAL + `busy_timeout=15000` so several people can save at once.
 - Admin **Reset database**: wipe users, chat, settings, attachments, work orders; recreate schema + default logins via `init_db`; then seed from current/uploaded Excel. Confirm body must be exactly `DELETE`.
 - **Do not delete `app_config.json`** on reset (column mapping lives there).
 - Default logins after reset / empty DB:
@@ -252,10 +252,10 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - React + Vite + Tailwind. Dev: `0.0.0.0:5173`, proxy `/api` → `127.0.0.1:8000`.
 - Production: `npm run build` → FastAPI serves `frontend/dist` when present.
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
-- Header: Search, Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
+- Header: Search (completes WO / supplier / item / person), command palette (`Ctrl/⌘+K`), Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
 - Work-order list columns persist in `localStorage["woms.columns"]`.
 - Reports (`/reports`): Daily and Weekly are on-screen briefings. Choose a calendar date (prev/next, Today / This week). Daily = that day only; weekly = ISO Monday–Sunday of that date. JSON at `GET /api/reports/{daily|weekly}?fmt=json&as_of=`. PDF is one A4 portrait page; XLSX is one sheet with `fitToHeight=1`. Other report kinds stay download-only under the More tab.
-- Work order editor: **one** Items & suppliers form (dropdown supplier, item they can provide, date, qty). No “Add supplier” on the MR page — add vendors on Materials. Supplier dropdown is unique (`unique_supplier_names`; drop numbered “1. A 2. B” cells; collapse W.L.L vs WLL). Type `@` in remarks/chat to pick a username. Header search shows live suggestions (quotes are encoded).
+- Work order editor: **one** Items & suppliers form. Type to complete supplier and item names (`TypeAhead`). Alt+Enter adds a row. No “Add supplier” on the MR page — add vendors on Materials. Supplier list is unique (`unique_supplier_names`). Type `@` in remarks/chat. Header search hits `GET /api/work-orders/suggest`. List search also matches `mr_lines`. Presence heartbeat shows who else has the MR open.
 - Filters start collapsed; chips remove filters.
 - After Settings StrReplace, **assert `function DatabasePanel` still exists** if you insert `<DatabasePanel />` (vite can build while runtime ReferenceError).
 
@@ -266,7 +266,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - First-run auto-start (~800ms) re-checks `tourSeen` so Skip does not restart.
 - `measureTarget` must pick a **visible** `[data-tour]` (desktop vs mobile sidebar).
 - Overlay click does **not** skip. Esc skips.
-- Current `data-tour` ids: `nav-work`, `search`, `live`, `dashboard`, `wo-list`, `filters`, `wo-new`, `wo-tabs`, `wo-save`, `queue`, `backup`.
+- Current `data-tour` ids: `nav-work`, `search`, `live`, `dashboard`, `wo-list`, `filters`, `wo-new`, `wo-tabs`, `wo-save`, `queue`, `backup`, `command`, `shortcuts`, `presence`.
 - Admin backup step: `need: "backup"`, `page: "settings"`, target `backup`.
 
 ---
@@ -277,7 +277,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | ------ | ------- |
 | `/api/health` | Liveness + record count |
 | `/api/auth` | login, me, logout |
-| `/api/work-orders` | list, CRUD, bulk, claim, watch, chat, timeline, seen, PDF sheet |
+| `/api/work-orders` | list, suggest, CRUD, bulk, claim, watch, presence, chat, timeline, seen, PDF sheet |
 | `/api/dashboard` | KPIs / charts from live records |
 | `/api/ops` | queue, digest, alerts, handover, health scan |
 | `/api/catalog` | suppliers, materials, aliases, MR lines |
@@ -306,7 +306,7 @@ cd frontend && npm run build
 | `tests/test_excel_and_api.py` | Read/write Excel, backup schedule/prune |
 | `tests/test_ops_pack.py` | Queue, digest, timeline, mapping, backup health |
 | `tests/test_collab_*.py` | Chat, watches, row restore |
-| `tests/test_materials_catalog.py` | Lines, aliases, unique supplier dropdown, paired create-backup |
+| `tests/test_materials_catalog.py` | Lines, aliases, unique supplier dropdown, paired create-backup, line search, suggest, presence |
 | `tests/test_delay_sites.py` | Extra sites / delay rules |
 | `tests/test_reports.py` | Daily/weekly window, one-page PDF, one-sheet XLSX, JSON API |
 
@@ -397,6 +397,7 @@ Must remain true:
 - [x] Multiple materials × suppliers per MR (`mr_lines`; item 1 / supplier 1)
 - [x] Daily / weekly reports from a chosen date (that day or that ISO week only; one-page PDF)
 - [x] One MR supplier form (dropdown only); unique supplier names; @mentions; search suggestions; backups always pair Excel + DB
+- [x] Typeahead search + command palette + shortcuts; list search matches line items; live presence on an open MR
 
 When you complete or change a requirement, tick/retarget it here.
 

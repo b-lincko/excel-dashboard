@@ -21,6 +21,7 @@ const ALL_COLS = [
   ["status", "Status"],
   ["issue", "Delivery"],
   ["supplier", "Supplier"],
+  ["line_count", "Items"],
   ["po_number", "PO No"],
   ["due_date", "Due"],
   ["scheduled_date", "PO / RFQ Date"],
@@ -102,6 +103,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkRemark, setBulkRemark] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [cursor, setCursor] = useState(-1);
   const hadRows = useRef(false);
 
   useEffect(() => {
@@ -157,6 +159,35 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
     if (tick) load(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick]);
+
+  useEffect(() => {
+    setCursor(-1);
+  }, [rows]);
+
+  useEffect(() => {
+    function onKey(e) {
+      const tag = (e.target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || e.target?.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        setCursor((n) => Math.min(rows.length - 1, (n < 0 ? 0 : n + 1)));
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setCursor((n) => Math.max(0, n < 0 ? 0 : n - 1));
+      } else if (e.key === "Enter" && cursor >= 0 && rows[cursor]) {
+        e.preventDefault();
+        const r = rows[cursor];
+        nav(`/work-orders/${encodeURIComponent(r.record_id || r.work_order_id)}`);
+      } else if (e.key === "x" && can("edit") && cursor >= 0 && rows[cursor]?.record_id) {
+        e.preventDefault();
+        const id = rows[cursor].record_id;
+        toggleRow(id, !selected.has(id));
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rows, cursor, selected, can, nav]);
 
   function toggleSort(key) {
     if (sort === key) setOrder(order === "asc" ? "desc" : "asc");
@@ -430,7 +461,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
           <div className="text-sm font-medium pb-2">{selected.size} selected</div>
           <div>
             <label className="lbl">Assign to</label>
-            <select className="w-auto min-w-[140px]" value={bulkAssign} onChange={(e) => setBulkAssign(e.target.value)}>
+            <select className="w-auto min-w-[140px]" value={bulkAssign} onChange={(e) => setBulkAssign(e.target.value)} aria-label="Bulk assign">
               <option value="">— keep —</option>
               {(options.assigned_to || []).map((o) => (
                 <option key={o} value={o}>
@@ -490,9 +521,10 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {rows.map((r, i) => (
                 <tr
                   key={r.record_id || `${r._sheet}:${r._row}` || r.work_order_id}
+                  className={cursor === i ? "bg-sky-50/80 dark:bg-sky-500/10" : ""}
                   onClick={() => nav(`/work-orders/${encodeURIComponent(r.record_id || r.work_order_id)}`)}
                 >
                   {can("edit") && (

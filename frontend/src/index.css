@@ -129,6 +129,10 @@ body {
   .skel {
     @apply animate-pulse rounded-lg bg-slate-200/80 dark:bg-white/10;
   }
+
+  kbd {
+    @apply inline-flex items-center rounded border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-1.5 py-0.5 font-mono text-[11px] font-semibold;
+  }
 }
 
 .widget-edit {

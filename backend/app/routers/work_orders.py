@@ -165,7 +165,18 @@ def list_work_orders(
         _raise_excel(exc)
     filters = parse_query_filters(locals())
     cfg = load_config()
-    matched = [r for r in records if matches_filters(r, filters, cfg)]
+    q_raw = str(filters.get("q") or "").strip()
+    q_ids = database.record_ids_matching_q(q_raw) if q_raw else None
+    matched = []
+    for rec in records:
+        if q_ids is not None:
+            if str(rec.get("record_id") or "") not in q_ids:
+                continue
+            if not matches_filters(rec, {**filters, "q": ""}, cfg):
+                continue
+        elif not matches_filters(rec, filters, cfg):
+            continue
+        matched.append(rec)
     if watched or flag == "watched":
         watched_ids = set(database.list_watched_ids(user["username"]))
         matched = [r for r in matched if str(r.get("record_id") or "") in watched_ids]
@@ -191,6 +202,13 @@ def list_work_orders(
     total = len(matched)
     start = (page - 1) * page_size
     page_rows = [annotate(r, cfg) for r in _with_extras_many(matched[start : start + page_size])]
+    lines_by = database.list_mr_lines_many([str(r.get("record_id") or "") for r in page_rows])
+    for rec in page_rows:
+        lines = lines_by.get(str(rec.get("record_id") or ""), [])
+        useful = [x for x in lines if x.get("supplier") or x.get("material")]
+        rec["line_count"] = len(useful)
+        rec["line_suppliers"] = list(dict.fromkeys(str(x.get("supplier") or "") for x in useful if x.get("supplier")))
+        rec["line_materials"] = list(dict.fromkeys(str(x.get("material") or "") for x in useful if x.get("material")))
     return {
         "items": page_rows,
         "total": total,
@@ -280,6 +298,16 @@ def options(user=Depends(require_permission("view"))):
         "field_edit_roles": getattr(cfg, "field_edit_roles", None) or {},
         "status_change_remarks": getattr(cfg, "status_change_remarks", None) or [],
     }
+
+
+@router.get("/suggest")
+def suggest_work_orders(
+    q: str = "",
+    limit: int = Query(8, ge=1, le=20),
+    user=Depends(require_permission("view")),
+):
+    groups = database.suggest_workspace(q, limit=limit)
+    return {"query": " ".join(str(q or "").split()), "groups": groups}
 
 
 @router.post("/bulk")
@@ -525,6 +553,26 @@ def follow_work_order(wo_id: str, user=Depends(require_permission("view"))):
         "record_id": rid,
         "work_order_id": rec.get("work_order_id"),
     }
+
+
+@router.post("/{wo_id}/presence")
+def heartbeat_presence(wo_id: str, user=Depends(require_permission("view"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    rid = str(rec.get("record_id") or "")
+    database.touch_presence(rid, user["username"], str(user.get("full_name") or user["username"]))
+    others = database.list_presence(rid, exclude=user["username"])
+    return {"record_id": rid, "others": others}
+
+
+@router.get("/{wo_id}/presence")
+def get_presence(wo_id: str, user=Depends(require_permission("view"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    rid = str(rec.get("record_id") or "")
+    return {"record_id": rid, "others": database.list_presence(rid, exclude=user["username"])}
 
 
 @router.delete("/{wo_id}/watch")

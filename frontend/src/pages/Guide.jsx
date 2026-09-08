@@ -7,15 +7,22 @@ const DAY = [
   ["1. Action queue", "Open Queue each morning. Work overdue, UNDER NTP, on hold, due soon, then missed ETAs."],
   ["2. Open the MR", "Click the row. Status, due date, supplier and PO sit in the summary strip."],
   ["3. Claim or follow", "Claim puts your name on Assign to. Follow notifies you when someone saves or chats."],
-  ["4. Update and save", "Use Details for the request. Add Item 1 = supplier 1, Item 2 = supplier 2 when one MR needs several materials. Ctrl/⌘+S saves."],
+  ["4. Update and save", "Type the supplier and item names — suggestions complete them. Alt+Enter adds another vendor row. Ctrl/⌘+S saves. If a colleague has the same MR open, their name shows at the top."],
 ];
 
 const KEYS = [
   ["/", "Focus search from any page"],
+  ["Ctrl/⌘ + K", "Command palette — jump to a page, WO, supplier or person"],
+  ["g then q / w / d / c", "Go to Queue, Work orders, Dashboard, Chat"],
+  ["n", "New material request"],
+  ["j / k", "Move down / up the work-order list"],
+  ["Enter", "Open the highlighted list row"],
+  ["x", "Tick the highlighted row for bulk edit"],
+  ["Alt + Enter", "Add another item×supplier row"],
   ["?", "Open this guide"],
   ["Ctrl/⌘ + S", "Save the open material request"],
   ["Enter / →", "Next tour step"],
-  ["Esc", "Skip the tour"],
+  ["Esc", "Skip the tour / close palettes"],
 ];
 
 export default function Guide() {
@@ -64,7 +71,7 @@ export default function Guide() {
             <Search size={16} /> Find a request
           </div>
           <p className="text-sm text-slate-500">
-            Header search looks at WO id, material, technician, PO and remarks. On the list, filters stay collapsed —
+            Header search completes WO ids, supplier names, items and people as you type. On the list, filters stay collapsed —
             open them when you need a site, status or period. Click a chip to remove it. Save a view if you reuse the same
             set.
           </p>
@@ -136,7 +143,7 @@ export default function Guide() {
         </ul>
       </div>
 
-      <div className="card p-5 space-y-3">
+      <div className="card p-5 space-y-3" data-tour="shortcuts">
         <div className="flex items-center gap-2 font-semibold">
           <Keyboard size={16} /> Shortcuts
         </div>
