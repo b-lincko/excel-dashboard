@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,6 +16,7 @@ from ..domain import (
     camp_site_catalog,
     canonical_priority,
     filter_site_items,
+    is_closed,
     is_overdue,
     matches_filters,
     reason_for_open,
@@ -123,6 +125,10 @@ class BulkUpdate(BaseModel):
     append_remarks: bool = True
     sync_token: Optional[str] = None
     force: bool = False
+
+
+class CloseBody(BaseModel):
+    remark: str = ""
 
 
 def _raise_excel(exc: Exception):
@@ -744,6 +750,49 @@ def claim_work_order(wo_id: str, force: bool = False, user=Depends(require_permi
         "seen": seen,
         "seen_by": database.list_queue_seen([rid]).get(rid, []),
         "sync_token": excel_service.sync_token(),
+    }
+
+
+@router.post("/{wo_id}/close")
+def close_work_order(wo_id: str, body: CloseBody, user=Depends(require_permission("edit"))):
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    cfg = load_config()
+    if is_closed(rec, cfg):
+        return {
+            "item": annotate(_with_extras(rec)),
+            "already": True,
+            "sync_token": excel_service.sync_token(),
+        }
+    closed = next((str(s).strip() for s in (cfg.closed_statuses or []) if str(s).strip()), "CLOSED")
+    remark = str(body.remark or "").strip()
+    err = status_change_remark_error(rec.get("status"), closed, remark, cfg)
+    if err:
+        raise HTTPException(status_code=422, detail=err)
+    blocked = forbidden_fields(user, {"status": closed, "remarks": remark or "x", "completion_date": "x"})
+    if blocked:
+        raise HTTPException(status_code=403, detail=f"Your role cannot edit: {', '.join(blocked)}.")
+    changes: dict[str, Any] = {"status": closed}
+    if remark:
+        prev = str(rec.get("remarks") or "").rstrip()
+        changes["remarks"] = f"{prev}\n{remark}".strip() if prev else remark
+    if not str(rec.get("completion_date") or "").strip():
+        changes["completion_date"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    try:
+        updated = excel_service.update_record(wo_id, changes, username=user["username"], force=True)
+    except (ExcelUnavailable, ExcelLocked, SyncConflict, KeyError, ValueError) as exc:
+        _raise_excel(exc)
+    notify.notify_watchers(
+        user["username"],
+        updated,
+        f"{user['username']} closed {updated.get('work_order_id') or wo_id}",
+    )
+    return {
+        "item": annotate(_with_extras(updated)),
+        "already": False,
+        "sync_token": excel_service.sync_token(),
+        "saved": True,
     }
 
 

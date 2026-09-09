@@ -5,7 +5,7 @@ export const TOUR_STEPS = [
     id: "welcome",
     path: "/",
     title: "Welcome to Linkco MR",
-    body: "This is the live material-request log. Search, claim, and close MRs here. Each save writes the database first, then copies a backup to Excel.",
+    body: "This is the live material-request log. Search, claim, and close MRs here. Saves write the database only. Excel is updated at midnight.",
   },
   {
     id: "nav",
@@ -74,7 +74,7 @@ export const TOUR_STEPS = [
     target: "wo-save",
     need: "create",
     title: "Save sits here",
-    body: "Ctrl/⌘+S also saves. The database is written first. If Excel is locked, the record is still kept and you can retry the backup. If someone else has this MR open you will see their name at the top.",
+    body: "Ctrl/⌘+S also saves — to the database only. Excel is a midnight replica. If someone else has this MR open you will see their name at the top.",
   },
   {
     id: "queue",
@@ -91,7 +91,7 @@ export const TOUR_STEPS = [
     page: "settings",
     need: "backup",
     title: "Excel and the database together",
-    body: "Every backup copies SQLite plus Excel — Backup now, the schedule, and each save. Download is a zip of both. Restore rolls both back when a .db pair exists. Excel-only leftover files do not change live history.",
+    body: "Midnight and Backup now dump the database into Excel, then snapshot both. Copies older than a month go to backups/archive; six-month-old archives are deleted. Download is a zip of the pair. Excel-only leftover files do not change live history.",
   },
   {
     id: "keys",

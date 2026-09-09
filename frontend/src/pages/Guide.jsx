@@ -7,7 +7,7 @@ const DAY = [
   ["1. Action queue", "Open Queue each morning. Work overdue, UNDER NTP, on hold, due soon, then missed ETAs."],
   ["2. Open the MR", "Click the row. Status, due date, supplier and PO sit in the summary strip."],
   ["3. Claim or follow", "Claim puts your name on Assign to. Follow notifies you when someone saves or chats."],
-  ["4. Update and save", "Type the supplier and item names — suggestions complete them. Alt+Enter adds another vendor row. Ctrl/⌘+S saves. If a colleague has the same MR open, their name shows at the top."],
+  ["4. Update and save", "Type the supplier and item names — suggestions complete them. Alt+Enter adds another vendor row. Ctrl/⌘+S saves. Close order sets CLOSED (remark required). If a colleague has the same MR open, their name shows at the top."],
 ];
 
 const KEYS = [
@@ -36,7 +36,7 @@ export default function Guide() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">How to use Linkco MR</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Live material requests live in the database. Excel is a backup written after each save.
+            Live material requests live in the database. Excel is a midnight replica (and Backup now).
           </p>
         </div>
         <button
@@ -100,7 +100,7 @@ export default function Guide() {
           <Item k="Suppliers / PO" v="RFQ → PO → ETA board and on-time rate." />
           <Item k="Materials" v="Who supplied an item before. Catalog tab adds and removes vendors. Aliases group spellings." />
           <Item k="Chat" v="Type @ to ping someone. Clear chat / Delete chat on the thread. A DM or MR chat is created only when you send the first message." />
-          {can("settings") && <Item k="Settings" v="Seed, upload Excel, reset DB. Every backup pairs SQLite + Excel." />}
+          {can("settings") && <Item k="Settings" v="Seed, upload Excel, reset DB. Midnight and Backup now dump SQLite into Excel and snapshot both." />}
           {can("users") && (
             <Item k="Users" v="Create, edit, disable or delete logins. Grant extra actions. Guests get selected pages. People change their own password on Account." />
           )}
@@ -111,9 +111,11 @@ export default function Guide() {
         <div className="card p-5 space-y-2">
           <div className="font-semibold">Backups</div>
           <p className="text-sm text-slate-500">
-            Each save, Backup now, and the schedule copy SQLite plus file.xlsx. Download takes a zip of that pair.
-            Upload & restore accepts .xlsx, .db, or a zip — confirm Restore to roll live data back. Excel-only copies
-            do not overwrite history unless you Seed from Excel afterwards.
+            Create, update and delete write SQLite only. At midnight (default 00:00) and Backup now, every row is
+            exported into file.xlsx and the database is snapshotted. Pairs older than 30 days move to backups/archive;
+            archives older than 6 months are deleted. Download takes a zip of that pair. Upload & restore accepts
+            .xlsx, .db, or a zip — confirm Restore to roll live data back. Excel-only copies do not overwrite history
+            unless you Seed from Excel afterwards.
           </p>
         </div>
       )}

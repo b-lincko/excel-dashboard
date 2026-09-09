@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-08 (Chat clear/delete; no auto-thread; catalog remove).
+Last updated: 2026-09-09 (SQLite-only live CRUD; midnight Excel dump + archive; Close order; 3D mind map).
 
 ---
 
@@ -42,25 +42,29 @@ Daily path: **Queue → open an MR → update → Save**.
 
 ## 3. Source of truth (non-negotiable)
 
-**SQLite (`data/woms.db`) is the live work-order history.**
+**SQLite (`data/woms.db`) is the only live work-order store.**
 
-**`file.xlsx` is a replica** written after a successful database save, plus a snapshot target for Backup now / autobackup.
+**`file.xlsx` is a midnight replica** of all database rows (plus Backup now). Daily create / update / delete do **not** write Excel.
 
 ```
-UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
+UI  →  FastAPI  →  SQLite (commit)
                      ↑
               boot seed if empty
+Midnight / Backup now → export DB → file.xlsx  +  snapshot SQLite
 ```
 
 | Action | Correct behavior |
 | ------ | ---------------- |
 | List / KPIs / search | Read `wo_cache` (and related SQLite tables). Not Excel. |
-| Save / create / delete / bulk | Write SQLite first. Then attempt Excel. |
-| Excel locked / missing / failed | Keep the DB row. Return `_excel_backup_ok: false` and the error. Never roll back the database because Excel failed. |
-| Refresh (`force=True` / hard refresh) | Seed from Excel **only when asked** (admin Seed, Upload-then-seed, boot if DB empty). Ordinary load does **not** overwrite SQLite from Excel. |
+| Save / create / delete / bulk | Write **SQLite only**. Skip `_excel_*`. |
+| New record id | `{site}:DB-{hex}` e.g. `F5:DB-a1b2c3d4e5f6`. Never rewritten on Excel append. |
+| Excel locked / missing | Daily saves still succeed. Export at midnight records a health error and still snapshots SQLite. |
+| Midnight / Backup now | `export_database_to_excel()` then `create_backup`. Match Excel by `record_id` then `_row`+sheet; append unmatched DB creates; persist `_row`/`_sheet`; do not mass-delete Excel rows. |
+| Archive | Move `.xlsx`/`.xlsm`/`.db` older than `backup_archive_days` (30) into `backups/archive/YYYY-MM/`. Delete archives older than `backup_archive_keep_days` (180). |
+| Refresh (`force=True` / hard refresh) | Seed from Excel **only when asked** (admin Seed, Upload-then-seed, boot if DB empty). Ordinary load does **not** overwrite SQLite from Excel. **Do not `get_all(force=True)` after a DB-only create** — that reseeds and drops the new row. |
 | `load(force=False)` | Serve DB cache. If empty, seed from Excel once. |
 | `load(force=True)` | Seed from Excel into SQLite. |
-| Import | Match existing rows by unique identity; do not insert duplicates. |
+| Import / reconcile / upload | Still write Excel (not daily create-order). |
 | Conflict | HTTP 409 + warning. Never silent overwrite. |
 
 **Do not revert this.** An older README that says “Excel is the single source of truth” is obsolete.
@@ -79,7 +83,7 @@ UI  →  FastAPI  →  SQLite (commit)  →  copy row into file.xlsx
 - Never insert/shift columns. Missing mapped headers may be **appended** at the end only (`_ensure_mapped_headers`).
 - Identity for a row: `record_id` = `{site_label}:{excel_row}` e.g. `SH5-SH1:13`. **IM Work Order # is not unique** (several MRs per IM WO). Sync by record_id; on import, match by record_id then WO#+site.
 - Site (`department`) comes from the worksheet label, not a department column. **Camp sites** (SH5 Site - 1/2/3/4A/5/7, SH1 L1/L2/L3/L4/L5/L7/LS1/LS2) are **not** extra Excel tabs and must not be stored as `department` (that would retarget `resolve_data_sheet`). Infer from `WO Asset Name` prefixes; persist `camp_site` in SQLite only. Filter `department=SH5-S1` / `Site - 1` / `SH5` matches the camp, not a new sheet.
-- Write path: **file lock → backup (Excel + SQLite pair) → temp xlsx → validate opens → `os.replace`**. If `os.replace` raises EBUSY/ETXTBSY (Docker bind-mounted `file.xlsx`), copy bytes into the existing inode (`_replace_excel_file`) so Upload Excel then seed still works.
+- Excel dump / import write path: **file lock → temp xlsx → validate opens → `os.replace`**. If `os.replace` raises EBUSY/ETXTBSY (Docker bind-mounted `file.xlsx`), copy bytes into the existing inode (`_replace_excel_file`) so Upload Excel then seed still works. Daily CRUD does not take this path.
 - File lock required. HTTP **423** if locked, **503** if missing, **409** on sync-token conflict.
 
 ### Database / admin
@@ -205,13 +209,14 @@ Boot (`main._boot`): `init_db()`. If `wo_cache` is empty and Excel exists → `s
 `ExcelService` (`backend/app/excel/service.py`):
 
 - `get_all()` / `load()` → SQLite `wo_cache`.
-- `update_record` / `update_records` / `create_record` / `delete_record` → SQLite first, then `_excel_*`.
-- `_excel_update_record` etc. copy Excel with reason `update` / `bulk` / `create` / `delete` / `import` / `upload` / `reconcile`, and **also snapshot SQLite** (`.xlsx` + `.db` pair).
-- On Excel failure the DB row stays; response includes `_excel_backup_ok` / `_excel_backup_error`.
+- `update_record` / `update_records` / `create_record` / `delete_record` → **SQLite only**. `_excel_*` stay for import / reconcile / export.
+- `create_record` assigns `{site_label}:DB-{hex}` and `_sheet` via `worksheet_labels`. Excel append at dump time does **not** change `record_id`.
+- `export_database_to_excel()` dumps all DB rows into `file.xlsx` (lock + temp + validate + atomic replace). Match by `record_id` then `_row`+sheet; append unmatched creates; skip formula / due-date columns; never mass-delete Excel rows on a match miss.
+- `archive_old_backups(days)` / `prune_archives(keep_days)`.
 - `seed_from_excel` reads the workbook and `replace_wo_cache`.
 - `replace_from_bytes` replaces live Excel then seeds. Uses `_replace_excel_file` so a bind-mounted `file.xlsx` (Errno 16 busy) still updates.
 
-`resolve_excel_path`: if the configured path is not a file, substitute existing `ROOT/file.xlsx`. **Tests must not use `save_config(excel_path=missing.xlsx)` to simulate a missing workbook** — that still resolves to `file.xlsx` and can overwrite the real file. Stub `_excel_update_record` or `available()` instead. Always restore `file.xlsx` if a test hits it.
+`resolve_excel_path`: if the configured path is not a file, substitute existing `ROOT/file.xlsx`. **Tests must not use `save_config(excel_path=missing.xlsx)` to simulate a missing workbook** — that still resolves to `file.xlsx` and can overwrite the real file. Stub `available()` instead. Always restore `file.xlsx` if a test hits it.
 
 ---
 
@@ -220,9 +225,11 @@ Boot (`main._boot`): `init_db()`. If `wo_cache` is empty and Excel exists → `s
 Every `create_backup` writes **Excel + SQLite**:
 
 - `{backup_dir}/{YYYY-MM-DD}/{stem}_{ts}_{reason}.xlsx` and matching `.db` via `database.snapshot_to`.
-- Reasons include write-safety (`update`, `create`, `delete`, `bulk`, `import`, `upload`, `reconcile`) and snapshots (`manual`, `auto`, `pre_restore`).
+- Midnight (`backup_time` default **00:00**) and Backup now: export DB → Excel first, then snapshot the pair. If Excel export fails, still snapshot SQLite and record the health error.
+- Reasons: snapshots (`manual`, `auto`, `pre_restore`) and remaining Excel writes (`import`, `upload`, `reconcile`). Daily CRUD no longer creates write-safety copies.
 - If Excel is missing, still snapshot SQLite (`woms_{ts}_{reason}.db`) and list that unpaired `.db`.
 - Autobackup no longer skips when Excel is unavailable.
+- Archive pairs older than 30 days under `backups/archive/YYYY-MM/`. Delete archives older than 180 days. That is the primary retention; `backup_ratio` is an optional extra cap.
 - Download zips the pair. Upload accepts `.xlsx` / `.db` / zip of both.
 
 ### Restore
@@ -270,6 +277,8 @@ User management (`/users`, permission `users`):
 
 Status-change remarks (default): `*->ON HOLD`, `*->CLOSED`.
 
+**Close order:** `POST /api/work-orders/{id}/close` with `{ remark }`. Sets the first `closed_statuses` value (CLOSED), requires a remark when `status_change_remarks` includes `*->CLOSED`, and fills `completion_date` if empty. Header button on the MR page.
+
 PLACED requires `po_number` by default (`status_required_fields`).
 
 ---
@@ -278,7 +287,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 
 - React + Vite + Tailwind. Dev: `0.0.0.0:5173`, proxy `/api` → `127.0.0.1:8000`.
 - UI look: light canvas, teal brand (`#0D9F8A`), white sidebar, compact KPI tiles with a left accent (UpKeep-style CMMS). Do not invent dashboard numbers to match a mock.
-- **Three.js** (`three`): Dashboard mind map is a 3D graph of **live** `/api/dashboard` counts (`MindMap3D.jsx`). Click a node still filters real records. Sign-in left panel has a decorative network (`LoginScene.jsx`) — no fake KPIs. Pause off-screen; skip auto-rotate / login scene when `prefers-reduced-motion`. List view remains as a fallback when WebGL is missing.
+- **Three.js** (`three`): Dashboard mind map is a 3D graph of **live** `/api/dashboard` counts (`MindMap3D.jsx`). WebGL rebuilds only when the graph **fingerprint** (id/value/label) changes — dashboard polling must not remount the scene. Sprite labels sit on nodes; canvas `min-h-[380px]`; auto-rotate pauses on hover. Click a node still filters real records. Sign-in left panel has a decorative network (`LoginScene.jsx`) — no fake KPIs. Pause off-screen; skip auto-rotate / login scene when `prefers-reduced-motion`. List view remains as a fallback when WebGL is missing.
 - Production: `npm run build` → FastAPI serves `frontend/dist` when present.
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
 - Header: Search (completes WO / supplier / item / person / camp site), command palette (`Ctrl/⌘+K`), Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
@@ -308,7 +317,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | ------ | ------- |
 | `/api/health` | Liveness + record count |
 | `/api/auth` | login, me, logout, password, profile, layout |
-| `/api/work-orders` | list, suggest, CRUD, bulk, claim, watch, presence, chat, timeline, seen, PDF sheet |
+| `/api/work-orders` | list, suggest, CRUD, bulk, claim, close, watch, presence, chat, timeline, seen, PDF sheet |
 | `/api/dashboard` | KPIs / charts from live records |
 | `/api/ops` | queue, digest, alerts, handover, health scan |
 | `/api/catalog` | suppliers, materials, aliases, MR lines |
@@ -334,7 +343,7 @@ cd frontend && npm run build
 | File | Covers |
 | ---- | ------ |
 | `tests/test_database_sot.py` | DB-first save, seed/reset confirm, snapshot pair + Excel-only restore, download zip + upload + restore |
-| `tests/test_excel_and_api.py` | Read/write Excel, backup schedule/prune |
+| `tests/test_excel_and_api.py` | Read Excel, DB-only create + export, backup schedule/archive/prune, close order |
 | `tests/test_ops_pack.py` | Queue, digest, timeline, mapping, backup health |
 | `tests/test_collab_*.py` | Chat, watches, row restore |
 | `tests/test_materials_catalog.py` | Lines, aliases, unique supplier dropdown, paired create-backup, line search, suggest, presence |
@@ -348,7 +357,7 @@ cd frontend && npm run build
 
 Pitfalls (do not repeat):
 
-- `save_config(excel_path=missing.xlsx)` does **not** make Excel unavailable (`resolve_excel_path` falls back to `file.xlsx`). Stub `_excel_update_record`.
+- `save_config(excel_path=missing.xlsx)` does **not** make Excel unavailable (`resolve_excel_path` falls back to `file.xlsx`). Stub `available()`. Do not `get_all(force=True)` after a DB-only create.
 - Do not leave `file.xlsx` modified. Workbook fixtures copy to `tmp_path` and restore config `excel_path` / `backup_dir`.
 - `text.replace("    def create_record(\n"` misses one-line defs.
 - Sequential StrReplace on a stale `database.py` snapshot fails; re-read the file.
@@ -389,7 +398,7 @@ Shipped milestones (do not regress):
 
 1. Configurable rules in `AppConfig`, not hard-coded status lists.
 2. Validate in `validation.py` / router.
-3. Write DB first, Excel second.
+3. Write SQLite only for daily CRUD. Excel dump is midnight / Backup now.
 4. Audit via `database.add_audit`. Notify watchers if it is a user-visible change.
 
 ### New Settings / admin action
@@ -406,7 +415,7 @@ Shipped milestones (do not regress):
 
 ### Backup behavior
 
-1. Every backup reason pairs `.xlsx` + `.db`.
+1. Midnight and Backup now export DB → Excel then pair `.xlsx` + `.db`. Archive after 30 days; prune archives after 180.
 2. Restore: pair → both; Excel-only leftover files → Excel only, no silent seed.
 3. Download zips the pair. Upload accepts `.xlsx` / `.db` / zip into the backup folder, then the UI prompts Restore.
 4. Operator recovery lives in `docs/RECOVERY.md` — do not bury commands only in chat.
@@ -465,3 +474,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-08** Dashboard mind map Sites branch (and Site performance table) group by camp / sheet chips (`SH5-S3`, `L1`, `F5`, …), not only the Excel worksheet. Click still filters `department`.
 - **2026-09-08** Excel upload/seed and backup apply run off the event loop (thread + job). UI shows upload bar, applying-backup bar, then an applied notification. `/api/auth/me` timeout must not log the user out.
 - **2026-09-08** Three.js mind map (live counts, click → Open list) plus a decorative login network. No invented statistics. Reduced-motion / no-WebGL falls back to the 2D tree.
+- **2026-09-09** User reversed per-save Excel. SQLite is the only live store. Midnight (default 00:00) exports all DB rows into `file.xlsx` and snapshots SQLite. Archive pairs after 30 days; delete archives after 180. Close order button. 3D mind map fingerprints the graph so dashboard polls do not remount WebGL; sprite labels + min-height.

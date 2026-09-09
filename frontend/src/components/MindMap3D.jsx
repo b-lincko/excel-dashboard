@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { disposeObject3D, prefersReducedMotion, webglAvailable } from "../lib/webgl.js";
@@ -68,7 +68,7 @@ function layoutGraph(root, branches) {
       links.push({ from: branch.id, to: child.id });
       const grands = (child.children || []).slice(0, 5);
       grands.forEach((g, gi) => {
-        const ga = ka + ((gi - (grands.length - 1) / 2) * 0.1);
+        const ga = ka + (gi - (grands.length - 1) / 2) * 0.1;
         nodes.push({
           id: g.id,
           label: g.label,
@@ -93,25 +93,81 @@ function nodeRadius(item) {
   return Math.min(0.72, base + Math.log1p(v) * 0.055);
 }
 
+function graphFingerprint(root, branches) {
+  const parts = [];
+  function walk(n) {
+    if (!n) return;
+    parts.push(`${n.id}:${n.value ?? 0}:${n.open ?? ""}:${n.label || ""}`);
+    (n.children || []).forEach(walk);
+  }
+  walk(root);
+  (branches || []).forEach(walk);
+  return parts.join("|");
+}
+
+function makeLabelSprite(text, dark) {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  const dpr = 2;
+  const fontSize = 13;
+  ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
+  const padX = 10;
+  const padY = 5;
+  const tw = Math.ceil(ctx.measureText(text).width);
+  const rw = tw + padX * 2;
+  const rh = fontSize + padY * 2;
+  canvas.width = rw * dpr;
+  canvas.height = rh * dpr;
+  const c = canvas.getContext("2d");
+  c.scale(dpr, dpr);
+  c.font = `600 ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
+  c.fillStyle = dark ? "rgba(15, 23, 42, 0.88)" : "rgba(255, 255, 255, 0.94)";
+  c.strokeStyle = dark ? "rgba(148, 163, 184, 0.35)" : "rgba(15, 23, 42, 0.1)";
+  c.lineWidth = 1;
+  c.beginPath();
+  if (c.roundRect) c.roundRect(0.5, 0.5, rw - 1, rh - 1, 8);
+  else c.rect(0.5, 0.5, rw - 1, rh - 1);
+  c.fill();
+  c.stroke();
+  c.fillStyle = dark ? "#f8fafc" : "#0f172a";
+  c.textAlign = "center";
+  c.textBaseline = "middle";
+  c.fillText(text, rw / 2, rh / 2 + 0.5);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  const worldW = Math.min(2.6, Math.max(0.85, rw / 108));
+  sprite.scale.set(worldW, worldW * (rh / rw), 1);
+  sprite.center.set(0.5, 0);
+  sprite.userData.texture = tex;
+  return sprite;
+}
+
 export default function MindMap3D({ root, branches, selectedId, onSelect }) {
   const hostRef = useRef(null);
   const onSelectRef = useRef(onSelect);
   const selectedRef = useRef(selectedId);
+  const graphRef = useRef({ root, branches });
   const [hover, setHover] = useState("");
   const [ready, setReady] = useState(false);
 
   onSelectRef.current = onSelect;
   selectedRef.current = selectedId;
+  graphRef.current = { root, branches };
+
+  const fingerprint = useMemo(() => graphFingerprint(root, branches), [root, branches]);
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host || !root || !webglAvailable()) return undefined;
+    const { root: graphRoot, branches: graphBranches } = graphRef.current;
+    if (!host || !graphRoot || !webglAvailable()) return undefined;
 
     const reduced = prefersReducedMotion();
     const dark = document.documentElement.classList.contains("dark");
-    const { nodes, links } = layoutGraph(root, branches);
+    const { nodes, links } = layoutGraph(graphRoot, graphBranches);
     const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
-    const rootId = root.id;
+    const rootId = graphRoot.id;
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog(dark ? 0x0b1220 : 0xf8fafc, 12, 22);
@@ -151,6 +207,7 @@ export default function MindMap3D({ root, branches, selectedId, onSelect }) {
 
     const sphere = new THREE.SphereGeometry(1, 28, 20);
     const meshes = [];
+    const sprites = [];
     nodes.forEach((item) => {
       const mat = new THREE.MeshStandardMaterial({
         color: item.color,
@@ -172,6 +229,11 @@ export default function MindMap3D({ root, branches, selectedId, onSelect }) {
         value: item.value,
         kind: item.kind,
       };
+      const caption = `${item.label} · ${item.value}`;
+      const sprite = makeLabelSprite(caption.length > 28 ? `${item.label.slice(0, 18)}… · ${item.value}` : caption, dark);
+      sprite.position.set(0, 1.15, 0);
+      mesh.add(sprite);
+      sprites.push(sprite);
       group.add(mesh);
       meshes.push(mesh);
     });
@@ -203,7 +265,7 @@ export default function MindMap3D({ root, branches, selectedId, onSelect }) {
 
     function size() {
       const w = host.clientWidth || 1;
-      const h = host.clientHeight || 1;
+      const h = Math.max(host.clientHeight || 1, 320);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h, false);
@@ -241,11 +303,18 @@ export default function MindMap3D({ root, branches, selectedId, onSelect }) {
     function onMove(event) {
       const hit = pickFromEvent(event);
       renderer.domElement.style.cursor = hit ? "pointer" : "grab";
+      controls.autoRotate = !reduced && !hit;
       if (!hit) {
         setHover("");
         return;
       }
       setHover(`${hit.userData.label} · ${hit.userData.value}`);
+    }
+
+    function onLeave() {
+      controls.autoRotate = !reduced;
+      setHover("");
+      renderer.domElement.style.cursor = "grab";
     }
 
     function onClick(event) {
@@ -254,6 +323,7 @@ export default function MindMap3D({ root, branches, selectedId, onSelect }) {
     }
 
     renderer.domElement.addEventListener("pointermove", onMove);
+    renderer.domElement.addEventListener("pointerleave", onLeave);
     renderer.domElement.addEventListener("click", onClick);
 
     const clock = new THREE.Clock();
@@ -278,20 +348,25 @@ export default function MindMap3D({ root, branches, selectedId, onSelect }) {
       io.disconnect();
       ro.disconnect();
       renderer.domElement.removeEventListener("pointermove", onMove);
+      renderer.domElement.removeEventListener("pointerleave", onLeave);
       renderer.domElement.removeEventListener("click", onClick);
       controls.dispose();
+      sprites.forEach((sprite) => {
+        sprite.userData.texture?.dispose();
+        sprite.material?.dispose();
+      });
       disposeObject3D(scene);
       sphere.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
     };
-  }, [root, branches]);
+  }, [fingerprint]);
 
   if (!root) return null;
 
   return (
-    <div className="relative h-[380px] bg-gradient-to-b from-slate-50 to-white dark:from-ink-900 dark:to-ink-800">
-      <div ref={hostRef} className="absolute inset-0" />
+    <div className="relative min-h-[380px] h-[min(52vh,520px)] bg-gradient-to-b from-slate-50 to-white dark:from-ink-900 dark:to-ink-800">
+      <div ref={hostRef} className="absolute inset-0 min-h-[380px]" />
       {!ready && (
         <div className="absolute inset-0 grid place-items-center text-xs text-slate-400">Preparing 3D map…</div>
       )}

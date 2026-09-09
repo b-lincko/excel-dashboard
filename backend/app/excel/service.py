@@ -191,6 +191,21 @@ class ExcelService:
     def site_label(self, sheet_name: str) -> str:
         return self.cfg().worksheet_labels.get(sheet_name) or sheet_name
 
+    def _sheet_for_site(self, site: str) -> str:
+        """Map a site/camp/label to a worksheet name without opening Excel."""
+        cfg = self.cfg()
+        site = excel_sheet_alias(str(site or "").strip()) or str(site or "").strip()
+        labels = cfg.worksheet_labels or {}
+        for sn, lab in labels.items():
+            if site in {sn, str(lab)}:
+                return sn
+        sheets = list(cfg.worksheets or [])
+        if site in sheets:
+            return site
+        if cfg.worksheet_name:
+            return cfg.worksheet_name
+        return next(iter(labels), sheets[0] if sheets else "sheet")
+
     def record_id(self, sheet_name: str, row_number: int) -> str:
         return f"{self.site_label(sheet_name)}:{row_number}"
 
@@ -392,6 +407,7 @@ class ExcelService:
     def _attach_backup(self, rec: dict[str, Any], error: Optional[BaseException] = None) -> dict[str, Any]:
         out = dict(rec or {})
         out.pop("_excel_backup_error", None)
+        out["_excel_deferred"] = True
         if error is None:
             out["_excel_backup_ok"] = True
         else:
@@ -1361,15 +1377,7 @@ class ExcelService:
             raise ValueError(f"Database save failed: {exc}") from exc
         self._audit_diff(username, str(saved.get("work_order_id") or wo_id), old, saved)
         self.invalidate()
-        try:
-            self._excel_update_record(wo_id, changes, username, sync_token, force)
-        except SyncConflict as exc:
-            return self._attach_backup(saved, exc)
-        except (ExcelUnavailable, ExcelLocked, PermissionError, Timeout, KeyError, OSError) as exc:
-            return self._attach_backup(saved, exc)
-        except Exception as exc:
-            return self._attach_backup(saved, exc)
-        return self._attach_backup(database.get_wo_record(str(saved.get("record_id") or wo_id)) or saved)
+        return self._attach_backup(saved)
 
     def update_records(
         self,
@@ -1410,77 +1418,64 @@ class ExcelService:
         if not items:
             raise ValueError("None of the selected work orders were found.")
         self.invalidate()
-        excel_error = None
-        try:
-            self._excel_update_records(ids, changes, username, append_remarks, sync_token, force)
-        except SyncConflict as exc:
-            excel_error = str(exc)
-        except (ExcelUnavailable, ExcelLocked, PermissionError, Timeout, KeyError, OSError, ValueError) as exc:
-            excel_error = str(exc)
-        except Exception as exc:
-            excel_error = str(exc)
-        out_items = [self._attach_backup(it, excel_error) for it in items]
+        out_items = [self._attach_backup(it) for it in items]
         return {
             "items": out_items,
             "updated": len(out_items),
             "missing": missing,
-            "excel_backup_ok": excel_error is None,
-            "excel_backup_error": excel_error,
+            "excel_backup_ok": True,
+            "excel_backup_error": None,
         }
 
     def create_record(self, data: dict[str, Any], username: str) -> dict[str, Any]:
-        try:
-            created = self._excel_create_record(data, username)
-            saved = database.upsert_wo_record(created)
-            database.add_audit(username, "create", work_order_id=str(saved.get("work_order_id") or ""), details="Created material request")
-            self.invalidate()
-            return self._attach_backup(saved)
-        except (ExcelUnavailable, ExcelLocked, PermissionError, Timeout, OSError, Exception) as exc:
-            if isinstance(exc, (KeyError, ValueError)) and "Database save failed" in str(exc):
-                raise
-            recs = database.load_wo_cache()
-            data = apply_site_on_record(data, self.cfg())
-            site = str(data.get("department") or data.get("_site") or data.get("_sheet") or "")
-            sheet_name = site or ((self.cfg().worksheets or ["sheet"])[0])
-            wo_id = str(data.get("work_order_id") or "").strip() or self._next_id(recs, sheet_name)
-            rec: dict[str, Any] = {k: "" for k in self.cfg().mapping.model_dump().keys()}
-            rec.update({k: v for k, v in data.items() if not str(k).startswith("_")})
-            rec["work_order_id"] = wo_id
-            rec["created_date"] = rec.get("created_date") or datetime.now().strftime("%Y-%m-%d %H:%M")
-            rec["status"] = rec.get("status") or "OPEN"
-            rec["department"] = rec.get("department") or site
-            rec["_site"] = rec.get("department")
-            rec["_sheet"] = sheet_name
-            rec["record_id"] = str(data.get("record_id") or f"DB:{wo_id}")
-            existing = {str(r.get("record_id")) for r in recs}
-            if rec["record_id"] in existing:
-                rec["record_id"] = f"DB:{wo_id}:{uuid.uuid4().hex[:8]}"
-            self._apply_due_date(rec)
-            saved = database.upsert_wo_record(rec)
-            database.add_audit(username, "create", work_order_id=wo_id, details="Created material request (database only)")
-            self.invalidate()
-            return self._attach_backup(saved, exc)
+        recs = database.load_wo_cache()
+        data = apply_site_on_record(dict(data or {}), self.cfg())
+        site = str(data.get("department") or data.get("_site") or data.get("_sheet") or "")
+        sheet_name = self._sheet_for_site(site)
+        site_label = self.site_label(sheet_name)
+        wo_id = str(data.get("work_order_id") or "").strip() or self._next_id(recs, sheet_name)
+        rec: dict[str, Any] = {k: "" for k in self.cfg().mapping.model_dump().keys()}
+        rec.update({k: v for k, v in data.items() if not str(k).startswith("_")})
+        rec["work_order_id"] = wo_id
+        rec["created_date"] = rec.get("created_date") or datetime.now().strftime("%Y-%m-%d %H:%M")
+        rec["status"] = rec.get("status") or "OPEN"
+        rec["department"] = rec.get("department") or site_label
+        rec["_site"] = rec.get("department") or site_label
+        rec["_sheet"] = sheet_name
+        token = uuid.uuid4().hex[:12]
+        rec["record_id"] = str(data.get("record_id") or f"{site_label}:DB-{token}")
+        existing = {str(r.get("record_id")) for r in recs}
+        if rec["record_id"] in existing:
+            rec["record_id"] = f"{site_label}:DB-{uuid.uuid4().hex[:12]}"
+        self._apply_due_date(rec)
+        saved = database.upsert_wo_record(rec)
+        database.add_audit(
+            username,
+            "create",
+            work_order_id=wo_id,
+            details="Created material request (database only)",
+        )
+        self.invalidate()
+        return self._attach_backup(saved)
 
     def delete_record(self, wo_id: str, username: str) -> dict[str, Any]:
         rec = database.get_wo_record(wo_id)
         if not rec:
             raise KeyError(f"Work order {wo_id} was not found")
         database.delete_wo_record(wo_id)
-        database.add_audit(username, "delete", work_order_id=str(rec.get("work_order_id") or wo_id), details="Deleted material request")
+        database.add_audit(
+            username,
+            "delete",
+            work_order_id=str(rec.get("work_order_id") or wo_id),
+            details="Deleted material request",
+        )
         self.invalidate()
-        excel_error = None
-        try:
-            self._excel_delete_record(wo_id, username)
-        except (ExcelUnavailable, ExcelLocked, PermissionError, Timeout, KeyError, OSError) as exc:
-            excel_error = str(exc)
-        except Exception as exc:
-            excel_error = str(exc)
         return {
             "deleted": True,
             "id": wo_id,
             "record_id": rec.get("record_id"),
-            "excel_backup_ok": excel_error is None,
-            "excel_backup_error": excel_error,
+            "excel_backup_ok": True,
+            "excel_backup_error": None,
         }
 
     def _excel_update_record(
@@ -2164,6 +2159,258 @@ class ExcelService:
                 lock.release()
             except Exception:
                 pass
+
+
+    @staticmethod
+    def _row_int(value: Any) -> Optional[int]:
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            return None
+        return n if n > 0 else None
+
+    def export_database_to_excel(self, username: str = "system") -> dict[str, Any]:
+        """Dump live SQLite rows into file.xlsx.
+
+        Matched Excel rows are updated in place. Unmatched database creates are
+        appended. Excel rows with no database match are left alone. record_id is
+        never rewritten after append; _row/_sheet are persisted so the next dump
+        can find the row.
+        """
+        if not self.available():
+            raise ExcelUnavailable("Excel file is currently unavailable.")
+        recs = database.load_wo_cache()
+        try:
+            lock = self._file_lock()
+            lock.acquire()
+        except Timeout as exc:
+            raise ExcelLocked(
+                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+            ) from exc
+        updated = 0
+        appended = 0
+        unmatched = 0
+        try:
+            wb = self._load_workbook()
+            try:
+                sheet_headers: dict[str, list[str]] = {}
+                excel_recs: list[dict[str, Any]] = []
+                for sheet_name in self.data_sheets(wb):
+                    hdrs, rows = self._read_sheet_records(wb[sheet_name], sheet_name)
+                    sheet_headers[sheet_name] = hdrs
+                    excel_recs.extend(rows)
+                by_rid = {str(r.get("record_id") or ""): r for r in excel_recs if r.get("record_id")}
+                by_row: dict[tuple[str, int], dict[str, Any]] = {}
+                for r in excel_recs:
+                    sheet = str(r.get("_sheet") or "")
+                    row_n = self._row_int(r.get("_row"))
+                    if sheet and row_n:
+                        by_row[(sheet, row_n)] = r
+                next_rows: dict[str, int] = {}
+                dirty: list[dict[str, Any]] = []
+                for rec in recs:
+                    rid = str(rec.get("record_id") or "")
+                    hit = by_rid.get(rid) if rid else None
+                    if not hit:
+                        sheet = str(rec.get("_sheet") or "")
+                        row_n = self._row_int(rec.get("_row"))
+                        if sheet and row_n:
+                            hit = by_row.get((sheet, row_n))
+                    if hit:
+                        sheet_name = str(hit.get("_sheet") or rec.get("_sheet") or "")
+                        row_number = self._row_int(hit.get("_row"))
+                        if not sheet_name or not row_number or sheet_name not in wb.sheetnames:
+                            unmatched += 1
+                            continue
+                        ws = wb[sheet_name]
+                        headers = self._ensure_mapped_headers(ws, sheet_headers.get(sheet_name) or [])
+                        sheet_headers[sheet_name] = headers
+                        self._write_record_to_sheet(ws, rec, headers, row_number)
+                        changed = False
+                        if rec.get("_sheet") != sheet_name:
+                            rec["_sheet"] = sheet_name
+                            changed = True
+                        if self._row_int(rec.get("_row")) != row_number:
+                            rec["_row"] = row_number
+                            changed = True
+                        if changed:
+                            dirty.append(rec)
+                        updated += 1
+                        continue
+                    site = str(rec.get("department") or rec.get("_site") or "")
+                    sheet_hint = str(rec.get("_sheet") or "")
+                    try:
+                        if sheet_hint and sheet_hint in sheet_headers:
+                            sheet_name = sheet_hint
+                        else:
+                            sheet_name = resolve_data_sheet(
+                                site or sheet_hint,
+                                list(sheet_headers.keys()) or self.data_sheets(wb),
+                                self.cfg().worksheet_labels,
+                            )
+                    except ValueError:
+                        unmatched += 1
+                        continue
+                    ws = wb[sheet_name]
+                    headers = self._ensure_mapped_headers(ws, sheet_headers.get(sheet_name) or [])
+                    sheet_headers[sheet_name] = headers
+                    if sheet_name not in next_rows:
+                        next_rows[sheet_name] = self._next_row(ws, headers)
+                    row_number = next_rows[sheet_name]
+                    next_rows[sheet_name] = row_number + 1
+                    template_row = max(self.cfg().data_start_row, row_number - 1)
+                    self._copy_row_formulas(ws, template_row, row_number, headers)
+                    self._write_record_to_sheet(ws, rec, headers, row_number)
+                    rec["_row"] = row_number
+                    rec["_sheet"] = sheet_name
+                    rec["_site"] = rec.get("_site") or self.site_label(sheet_name)
+                    dirty.append(rec)
+                    appended += 1
+                tmp = _temp_xlsx(self.excel_path().parent)
+                wb.save(tmp)
+            finally:
+                wb.close()
+            try:
+                self._atomic_replace(tmp)
+            except Exception:
+                if tmp.exists():
+                    tmp.unlink(missing_ok=True)
+                raise
+            for rec in dirty:
+                try:
+                    database.upsert_wo_record(rec)
+                except Exception:
+                    continue
+            self.invalidate()
+            stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            database.set_sync_meta("last_write", stamp)
+            database.set_sync_meta("last_write_user", username)
+            database.set_sync_meta("last_excel_export", stamp)
+            database.add_audit(
+                username,
+                "export",
+                details=f"Exported database to Excel (updated {updated}, appended {appended}, unmatched {unmatched})",
+            )
+            return {
+                "ok": True,
+                "updated": updated,
+                "appended": appended,
+                "unmatched": unmatched,
+                "count": len(recs),
+            }
+        except PermissionError as exc:
+            raise ExcelLocked(
+                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+            ) from exc
+        finally:
+            try:
+                lock.release()
+            except Exception:
+                pass
+
+    def archive_old_backups(self, days: int = 30) -> dict[str, int]:
+        """Move backup pairs older than ``days`` into backups/archive/YYYY-MM/."""
+        days_n = int(days or 0)
+        if days_n <= 0:
+            return {"moved": 0}
+        root = self.backup_dir()
+        if not root.exists():
+            return {"moved": 0}
+        cutoff = datetime.now() - timedelta(days=days_n)
+        candidates: list[Path] = []
+        for pattern in ("*.xlsx", "*.xlsm", "*.db"):
+            for p in root.rglob(pattern):
+                if not p.is_file() or p.name.endswith(".tmp"):
+                    continue
+                try:
+                    rel = p.relative_to(root)
+                except ValueError:
+                    continue
+                if "archive" in rel.parts:
+                    continue
+                try:
+                    if datetime.fromtimestamp(p.stat().st_mtime) > cutoff:
+                        continue
+                except OSError:
+                    continue
+                candidates.append(p)
+        seen: set[str] = set()
+        moved = 0
+        excel_first = [p for p in candidates if p.suffix.lower() in {".xlsx", ".xlsm"}]
+        db_only = [p for p in candidates if p.suffix.lower() == ".db"]
+        for p in excel_first + db_only:
+            if not p.exists():
+                continue
+            try:
+                key = str(p.resolve())
+            except OSError:
+                key = str(p)
+            if key in seen:
+                continue
+            pair: list[Path] = [p]
+            if p.suffix.lower() in {".xlsx", ".xlsm"}:
+                dbp = p.with_suffix(".db")
+                if dbp.is_file():
+                    pair.append(dbp)
+            elif p.suffix.lower() == ".db":
+                if p.with_suffix(".xlsx").is_file() or p.with_suffix(".xlsm").is_file():
+                    continue
+            try:
+                mt = datetime.fromtimestamp(p.stat().st_mtime)
+            except OSError:
+                continue
+            dest_dir = root / "archive" / mt.strftime("%Y-%m")
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            parents: set[Path] = set()
+            for src in pair:
+                try:
+                    seen.add(str(src.resolve()))
+                except OSError:
+                    seen.add(str(src))
+                dest = dest_dir / src.name
+                if dest.exists():
+                    dest = dest_dir / f"{src.stem}_{uuid.uuid4().hex[:6]}{src.suffix}"
+                try:
+                    shutil.move(str(src), str(dest))
+                    moved += 1
+                    parents.add(src.parent)
+                except OSError:
+                    continue
+            for parent in parents:
+                try:
+                    if parent != root and parent.is_dir() and not any(parent.iterdir()):
+                        parent.rmdir()
+                except OSError:
+                    continue
+        return {"moved": moved}
+
+    def prune_archives(self, keep_days: int = 180) -> dict[str, int]:
+        """Delete files under backups/archive/ older than ``keep_days``."""
+        keep_n = int(keep_days or 0)
+        if keep_n <= 0:
+            return {"removed": 0}
+        root = self.backup_dir() / "archive"
+        if not root.exists():
+            return {"removed": 0}
+        cutoff = datetime.now() - timedelta(days=keep_n)
+        removed = 0
+        for p in list(root.rglob("*")):
+            if not p.is_file():
+                continue
+            try:
+                if datetime.fromtimestamp(p.stat().st_mtime) > cutoff:
+                    continue
+                p.unlink()
+                removed += 1
+            except OSError:
+                continue
+        for d in sorted((p for p in root.rglob("*") if p.is_dir()), reverse=True):
+            try:
+                if not any(d.iterdir()):
+                    d.rmdir()
+            except OSError:
+                continue
+        return {"removed": removed}
 
 
 excel_service = ExcelService()

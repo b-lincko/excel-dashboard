@@ -271,10 +271,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
       if (bulkStatus) body.status = bulkStatus;
       if (bulkRemark.trim()) body.remarks = bulkRemark.trim();
       const d = await api.post("/api/work-orders/bulk", body);
-      toast(`Updated ${d.updated} record${d.updated === 1 ? "" : "s"}`, d.excel_backup_ok === false ? "error" : "success");
-      if (d.excel_backup_ok === false) {
-        toast(d.excel_backup_error || "Saved in the database. Excel backup failed.", "error");
-      }
+      toast(`Updated ${d.updated} record${d.updated === 1 ? "" : "s"}`, "success");
       setSelected(new Set());
       setBulkRemark("");
       load();

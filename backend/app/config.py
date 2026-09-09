@@ -134,11 +134,13 @@ class AppConfig(BaseModel):
     )
     backup_dir: str = str(BACKUP_DIR)
     backup_auto_enabled: bool = True
-    backup_time: str = "02:00"
+    backup_time: str = "00:00"
     backup_days: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6])
     backup_start_date: str = ""
     backup_ratio: int = 14
     backup_write_keep: int = 8
+    backup_archive_days: int = 30
+    backup_archive_keep_days: int = 180
     mapping: ColumnMapping = Field(default_factory=ColumnMapping)
     closed_statuses: list[str] = Field(default_factory=lambda: ["CLOSED"])
     open_statuses: list[str] = Field(

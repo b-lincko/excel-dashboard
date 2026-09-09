@@ -21,6 +21,9 @@ export function UiProvider({ children }) {
         body: opts.body || "",
         confirmLabel: opts.confirmLabel || "Confirm",
         danger: !!opts.danger,
+        input: !!opts.input,
+        inputPlaceholder: opts.inputPlaceholder || "",
+        inputValue: opts.inputValue || "",
         resolve,
       });
     });
@@ -60,6 +63,16 @@ export function UiProvider({ children }) {
           <div role="dialog" aria-modal="true" className="relative card p-6 w-full max-w-md">
             <div className="text-lg font-semibold">{dialog.title}</div>
             {dialog.body && <p className="text-sm text-slate-500 mt-2 whitespace-pre-wrap">{dialog.body}</p>}
+            {dialog.input && (
+              <textarea
+                className="mt-3 w-full"
+                rows={3}
+                autoFocus
+                placeholder={dialog.inputPlaceholder || "Remark"}
+                value={dialog.inputValue || ""}
+                onChange={(e) => setDialog((d) => d && { ...d, inputValue: e.target.value })}
+              />
+            )}
             <div className="flex justify-end gap-2 mt-5">
               <button
                 className="btn-outline"
@@ -72,9 +85,9 @@ export function UiProvider({ children }) {
               </button>
               <button
                 className={dialog.danger ? "btn-danger" : "btn-primary"}
-                autoFocus
+                autoFocus={!dialog.input}
                 onClick={() => {
-                  dialog.resolve(true);
+                  dialog.resolve(dialog.input ? dialog.inputValue ?? "" : true);
                   setDialog(null);
                 }}
               >

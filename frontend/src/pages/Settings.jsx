@@ -124,7 +124,7 @@ export default function Settings() {
           </div>
         </div>
         <div className="text-xs text-slate-500">
-          Database is the live history · Excel is a backup copy of each save · {sync?.record_count} records · last write {sync?.last_write || "—"}
+          Database is the live history · Excel is a midnight replica · {sync?.record_count} records · last write {sync?.last_write || "—"}
         </div>
       </div>
 
@@ -433,7 +433,7 @@ function DatabasePanel({ toast, ask, onReload }) {
     <div className="card p-5 space-y-3">
       <div className="font-semibold">Work-order database</div>
       <p className="text-xs text-slate-500">
-        SQLite is the live material-request history. Saving a work order writes the database first, then copies that row into file.xlsx as a backup. Backup now and autobackup snapshot the whole SQLite file plus Excel. A hard refresh does not pull Excel over the database.
+        SQLite is the live material-request history. Create, update and delete write the database only. At midnight (and Backup now) every row is exported into file.xlsx and SQLite is snapshotted. Copies older than a month move to backups/archive; archives older than six months are deleted. A hard refresh does not pull Excel over the database.
       </p>
       <div className="text-xs text-slate-500">
         {info ? (
@@ -594,7 +594,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
             <HardDrive size={16} /> Backup system
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Every backup copies the database and Excel. Download a zip of both, or upload an .xlsx, .db, or zip, then Restore.
+            Midnight and Backup now dump the database into Excel, then snapshot both. Download a zip of the pair, or upload an .xlsx, .db, or zip, then Restore.
           </p>
         </div>
         <label className="inline-flex items-center gap-2 text-sm font-medium">
@@ -610,7 +610,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
       </div>
       {!cfg.backup_auto_enabled && (
         <div className="mx-5 mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
-          Nightly autobackup is off. Turn it on and Save configuration so a paired Excel + database copy is taken on schedule.
+          Nightly autobackup is off. Turn it on and Save configuration so the database is dumped to Excel and both are snapshotted at the scheduled time.
         </div>
       )}
 
@@ -636,8 +636,8 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
             <input
               type="time"
               disabled={!canSettings}
-              value={(cfg.backup_time || "02:00").slice(0, 5)}
-              onChange={(e) => setCfg({ ...cfg, backup_time: e.target.value || "02:00" })}
+              value={(cfg.backup_time || "00:00").slice(0, 5)}
+              onChange={(e) => setCfg({ ...cfg, backup_time: e.target.value || "00:00" })}
             />
           </div>
           <div>
@@ -658,7 +658,27 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
               value={cfg.backup_ratio ?? 14}
               onChange={(e) => setCfg({ ...cfg, backup_ratio: Number(e.target.value) })}
             />
-            <p className="text-[11px] text-slate-500 mt-1">0 keeps every auto/manual copy. Per-save copies keep the last {cfg.backup_write_keep ?? 8}.</p>
+            <p className="text-[11px] text-slate-500 mt-1">Optional extra cap on recent auto/manual copies. Age archive is the main retention.</p>
+          </div>
+          <div>
+            <label className="lbl">Archive after (days)</label>
+            <input
+              type="number"
+              min={1}
+              disabled={!canSettings}
+              value={cfg.backup_archive_days ?? 30}
+              onChange={(e) => setCfg({ ...cfg, backup_archive_days: Number(e.target.value) })}
+            />
+          </div>
+          <div>
+            <label className="lbl">Delete archives after (days)</label>
+            <input
+              type="number"
+              min={1}
+              disabled={!canSettings}
+              value={cfg.backup_archive_keep_days ?? 180}
+              onChange={(e) => setCfg({ ...cfg, backup_archive_keep_days: Number(e.target.value) })}
+            />
           </div>
         </div>
 

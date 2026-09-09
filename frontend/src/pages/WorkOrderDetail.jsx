@@ -269,23 +269,8 @@ export default function WorkOrderDetail() {
     try {
       if (isNew) {
         const d = await api.post("/api/work-orders", { data: form });
-        if (d.excel_backup_ok === false) {
-          setSuccess("Saved in the database. Excel backup failed.");
-          toast("Saved in the database", "success");
-          const retry = await ask({
-            title: "Excel backup failed",
-            body: d.excel_backup_error || "The material request is in the database, but file.xlsx was not updated.",
-            confirmLabel: "Retry Excel backup",
-            danger: true,
-          });
-          if (retry) {
-            nav(`/work-orders/${encodeURIComponent(d.item.record_id || d.item.work_order_id)}`);
-            return;
-          }
-        } else {
-          setSuccess("Material request saved in the database and copied to Excel.");
-          toast("Saved", "success");
-        }
+        setSuccess("Material request saved in the database. Excel updates at midnight.");
+        toast("Saved", "success");
         nav(`/work-orders/${encodeURIComponent(d.item.record_id || d.item.work_order_id)}`);
       } else {
         const skip = new Set([
@@ -344,31 +329,16 @@ export default function WorkOrderDetail() {
         const extraOnly = keys.length > 0 && keys.every((k) => EXTRA_KEYS.includes(k));
         const appOnly = keys.length > 0 && keys.every((k) => EXTRA_KEYS.includes(k) || k === "camp_site");
         const linesOnly = keys.length > 0 && keys.every((k) => k === "lines" || EXTRA_KEYS.includes(k));
-        if (d.excel_backup_ok === false) {
-          setSuccess("Saved in the database. Excel backup failed.");
-          toast("Saved in the database", "success");
-          const retry = await ask({
-            title: "Excel backup failed",
-            body: d.excel_backup_error || "The change is in the database, but file.xlsx was not updated.",
-            confirmLabel: "Retry Excel backup",
-            danger: true,
-          });
-          if (retry) {
-            await save(true);
-            return;
-          }
-        } else {
-          setSuccess(
-            extraOnly
-              ? "Delay notes saved in the app database."
-              : appOnly
-                ? "Camp site saved in the app database."
-                : linesOnly
-                  ? "Supplier line items saved in the app database. Excel still has one supplier cell and one material cell."
-                  : "Saved in the database and copied to Excel."
-          );
-          toast(extraOnly ? "Delay notes saved" : appOnly ? "Camp site saved" : linesOnly ? "Line items saved" : "Saved", "success");
-        }
+        setSuccess(
+          extraOnly
+            ? "Delay notes saved in the app database."
+            : appOnly
+              ? "Camp site saved in the app database."
+              : linesOnly
+                ? "Supplier line items saved in the app database. Excel still has one supplier cell and one material cell."
+                : "Saved in the database. Excel updates at midnight."
+        );
+        toast(extraOnly ? "Delay notes saved" : appOnly ? "Camp site saved" : linesOnly ? "Line items saved" : "Saved", "success");
       }
     } catch (e) {
       if (e.status === 409) {
@@ -377,8 +347,6 @@ export default function WorkOrderDetail() {
       } else if (e.status === 422) {
         const d = e.detail;
         setError(Array.isArray(d) ? d.join(" ") : typeof d === "string" ? d : JSON.stringify(d));
-      } else if (e.status === 423) {
-        setError("Could not write the Excel backup (file in use). The database change is kept — retry the backup when the file is free.");
       } else {
         setError(e.message);
       }
@@ -403,7 +371,7 @@ export default function WorkOrderDetail() {
   async function remove() {
     const ok = await ask({
       title: `Delete ${form.work_order_id || id}?`,
-      body: "This removes the work order from the database, then tries to delete the Excel backup row.",
+      body: "This removes the work order from the database. Excel is updated at midnight.",
       confirmLabel: "Delete",
       danger: true,
     });
@@ -415,6 +383,50 @@ export default function WorkOrderDetail() {
       nav("/work-orders");
     } catch (e) {
       setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function closeOrder() {
+    setError("");
+    const needsRemark = (remarkRules || []).some((rule) => String(rule || "").toUpperCase().includes("CLOSED"));
+    let remark = "";
+    if (needsRemark) {
+      const typed = await ask({
+        title: "Close this material request?",
+        body: "Status becomes CLOSED. A remark is required.",
+        confirmLabel: "Close order",
+        input: true,
+        inputPlaceholder: "Why is this closed?",
+      });
+      if (typed === false) return;
+      remark = String(typed || "").trim();
+      if (!remark) {
+        setError("A remark is required to close.");
+        setTab("details");
+        return;
+      }
+    } else {
+      const ok = await ask({
+        title: "Close this material request?",
+        body: "Status becomes CLOSED.",
+        confirmLabel: "Close order",
+      });
+      if (!ok) return;
+    }
+    setBusy(true);
+    try {
+      const d = await api.post(`/api/work-orders/${encodeURIComponent(form.record_id || id)}/close`, { remark });
+      setForm(d.item);
+      setOriginal(d.item);
+      setMeta(d.item);
+      setSyncToken(d.sync_token || syncToken);
+      setSuccess(d.already ? "Already closed." : "Closed.");
+      toast(d.already ? "Already closed" : "Closed", "success");
+    } catch (e) {
+      const d = e.detail;
+      setError(Array.isArray(d) ? d.join(" ") : typeof d === "string" ? d : e.message);
     } finally {
       setBusy(false);
     }
@@ -628,6 +640,11 @@ export default function WorkOrderDetail() {
               }}
             >
               Claim
+            </button>
+          )}
+          {!isNew && can("edit") && !form.is_closed && (
+            <button className="btn-outline" disabled={busy} onClick={closeOrder}>
+              Close order
             </button>
           )}
           {!isNew && (

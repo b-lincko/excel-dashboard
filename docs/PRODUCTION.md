@@ -4,7 +4,7 @@ The app is a working operations desk, not a mock. Use this list before people de
 
 ## Ready in the product
 
-- Database is live MR history; Excel is a replica after each save.
+- Database is the only live MR history; Excel is a midnight replica plus Backup now.
 - Conflict warning (HTTP 409) instead of silent overwrite.
 - Excel write: lock → paired backup → temp → validate → atomic replace.
 - Excel failure keeps the database row.

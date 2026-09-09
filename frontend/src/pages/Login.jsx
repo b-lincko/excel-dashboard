@@ -57,7 +57,7 @@ export default function Login() {
             <span className="block text-white/90">Act on what is late, blocked, or due.</span>
           </h1>
           <p className="mt-5 text-white/75 text-sm leading-relaxed">
-            The database is the live history. Each save is copied to Excel as a backup. Claim, follow, and close MRs without hunting through the workbook.
+            The database is the live history. Excel is a midnight replica. Claim, follow, and close MRs without hunting through the workbook.
           </p>
         </div>
         <div className="relative z-10 text-xs text-white/50">Linkco MR · Work order management</div>

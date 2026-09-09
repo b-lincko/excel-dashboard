@@ -59,20 +59,13 @@ def test_load_without_force_keeps_database(workbook):
 
 
 def test_save_keeps_db_when_excel_missing(workbook):
-    from app.excel.service import ExcelUnavailable
-
     _, svc = workbook
     recs = svc.get_all(force=True)
     rid = recs[0]["record_id"]
-
-    def boom(*_a, **_k):
-        raise ExcelUnavailable("Excel file is currently unavailable.")
-
-    svc._excel_update_record = boom  # type: ignore[method-assign]
+    svc.available = lambda: False  # type: ignore[method-assign]
     updated = svc.update_record(rid, {"remarks": "db-first-no-excel"}, username="pytest")
     assert updated["remarks"] == "db-first-no-excel"
-    assert updated.get("_excel_backup_ok") is False
-    assert "unavailable" in str(updated.get("_excel_backup_error") or "").lower()
+    assert updated.get("_excel_backup_ok") is True
     stored = database.get_wo_record(rid)
     assert stored["remarks"] == "db-first-no-excel"
 

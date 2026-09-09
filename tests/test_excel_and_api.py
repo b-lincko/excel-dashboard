@@ -94,7 +94,7 @@ def test_update_writes_excel(workbook):
 
 
 def test_create_appends_row(workbook):
-    _, svc = workbook
+    path, svc = workbook
     before = len(svc.get_all(force=True))
     created = svc.create_record(
         {
@@ -107,13 +107,21 @@ def test_create_appends_row(workbook):
         username="pytest",
     )
     assert created["work_order_id"]
-    recs = svc.get_all(force=True)
+    assert str(created["record_id"]).startswith("F5:DB-")
+    recs = svc.get_all()
     assert len(recs) == before + 1
     assert sum(1 for r in recs if r["record_id"] == created["record_id"]) == 1
     created_d = parse_date(created["created_date"])
     due_d = parse_date(created["due_date"])
     assert created_d and due_d
     assert (due_d.date() - created_d.date()).days == 5
+    exported = svc.export_database_to_excel("pytest")
+    assert exported["ok"] is True
+    assert exported["appended"] >= 1
+    again = svc.get_by_id(created["record_id"])
+    assert again["record_id"] == created["record_id"]
+    assert again.get("_row")
+    assert again.get("_sheet")
 
 
 def test_validation_close_before_create():
@@ -407,6 +415,9 @@ def test_delay_fields_roundtrip_excel(workbook):
     assert updated["delay_justification"] == "Waiting on drawings"
     again = svc.get_by_id(rid)
     assert again["delay_kind"] == "placement"
+    exported = svc.export_database_to_excel("pytest")
+    assert exported["ok"] is True
+    again = svc.get_by_id(rid)
 
     wb = load_workbook(path)
     ws = wb[again["_sheet"]]
@@ -588,3 +599,62 @@ def test_backup_schedule_folder_and_ratio(workbook):
     assert listed.status_code == 200
     assert listed.json()["items"]
     assert any(i.get("reason") == "manual" for i in listed.json()["items"])
+
+
+def test_archive_and_prune_old_backups(workbook):
+    _, svc = workbook
+    root = Path(load_config().backup_dir)
+    day = root / "2025-01-01"
+    day.mkdir(parents=True, exist_ok=True)
+    x = day / "file_old_auto.xlsx"
+    d = day / "file_old_auto.db"
+    x.write_bytes(b"PK dummy")
+    d.write_bytes(b"sqlite")
+    old = time.time() - 40 * 86400
+    os.utime(x, (old, old))
+    os.utime(d, (old, old))
+    recent_dir = root / "2026-09-08"
+    recent_dir.mkdir(parents=True, exist_ok=True)
+    rx = recent_dir / "file_new_auto.xlsx"
+    rx.write_bytes(b"PK dummy")
+    result = svc.archive_old_backups(30)
+    assert result["moved"] >= 2
+    archived = list((root / "archive").rglob("*"))
+    assert any(p.name == "file_old_auto.xlsx" for p in archived)
+    assert any(p.name == "file_old_auto.db" for p in archived)
+    assert not x.exists()
+    assert rx.exists()
+    for p in (root / "archive").rglob("*"):
+        if p.is_file():
+            very_old = time.time() - 200 * 86400
+            os.utime(p, (very_old, very_old))
+    pruned = svc.prune_archives(180)
+    assert pruned["removed"] >= 1
+
+
+def test_close_order_requires_remark(workbook):
+    from app.main import app
+    from app import database
+    from app.excel.service import excel_service
+
+    _, svc = workbook
+    recs = svc.get_all(force=True)
+    target = next(r for r in recs if str(r.get("status") or "").strip().upper() not in {"", "CLOSED"})
+    rid = target["record_id"]
+    database.init_db()
+    excel_service.invalidate()
+    client = TestClient(app)
+    token = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    bad = client.post(f"/api/work-orders/{rid}/close", headers=headers, json={"remark": ""})
+    assert bad.status_code == 422
+    ok = client.post(f"/api/work-orders/{rid}/close", headers=headers, json={"remark": "Done on site"})
+    assert ok.status_code == 200, ok.text
+    item = ok.json()["item"]
+    assert str(item["status"]).upper() == "CLOSED"
+    assert item["is_closed"] is True
+    assert "Done on site" in str(item.get("remarks") or "")
+    assert item.get("completion_date")
+    again = client.post(f"/api/work-orders/{rid}/close", headers=headers, json={"remark": "again"})
+    assert again.status_code == 200
+    assert again.json()["already"] is True

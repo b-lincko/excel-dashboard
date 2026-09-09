@@ -214,8 +214,15 @@ def restore_backup_row(body: RestoreRequest, user=Depends(require_permission("ba
 
 @router.post("/backups")
 def create_backup(user=Depends(require_permission("backup"))):
+    export_err = None
+    try:
+        excel_service.export_database_to_excel(username=user["username"])
+    except Exception as exc:
+        export_err = str(exc)
     path = excel_service.create_backup(reason="manual")
     cfg = load_config()
+    archived = excel_service.archive_old_backups(int(getattr(cfg, "backup_archive_days", 30) or 30))
+    pruned_arch = excel_service.prune_archives(int(getattr(cfg, "backup_archive_keep_days", 180) or 180))
     pruned = excel_service.prune_backups(int(getattr(cfg, "backup_ratio", 14) or 0), reasons=("auto", "manual"))
     health = None
     if path:
@@ -223,9 +230,16 @@ def create_backup(user=Depends(require_permission("backup"))):
             health = excel_service.check_backup(str(path))
         except Exception as cop:
             health = {"ok": False, "error": str(cop), "path": str(path)}
+    if export_err:
+        health = dict(health or {"path": str(path) if path else None})
+        health["ok"] = False
+        health["excel_export_ok"] = False
+        health["error"] = export_err
     return {
         "path": str(path) if path else None,
         "pruned": pruned,
+        "archived": archived,
+        "pruned_archives": pruned_arch,
         "health": health,
         "items": excel_service.list_backups(),
         "schedule": schedule_status(cfg),

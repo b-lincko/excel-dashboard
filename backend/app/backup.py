@@ -18,13 +18,13 @@ WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 def parse_hhmm(value: str) -> tuple[int, int]:
-    text = (value or "02:00").strip()
+    text = (value or "00:00").strip()
     parts = text.replace(".", ":").split(":")
     try:
         hour = int(parts[0])
         minute = int(parts[1]) if len(parts) > 1 else 0
     except (TypeError, ValueError):
-        return 2, 0
+        return 0, 0
     return max(0, min(23, hour)), max(0, min(59, minute))
 
 
@@ -71,7 +71,7 @@ def is_due(now: datetime, cfg: AppConfig, last_iso: Optional[str]) -> bool:
         return False
     if now.weekday() not in scheduled_days(cfg):
         return False
-    hour, minute = parse_hhmm(getattr(cfg, "backup_time", "02:00"))
+    hour, minute = parse_hhmm(getattr(cfg, "backup_time", "00:00"))
     scheduled = datetime(now.year, now.month, now.day, hour, minute, 0)
     if now < scheduled:
         return False
@@ -84,7 +84,7 @@ def is_due(now: datetime, cfg: AppConfig, last_iso: Optional[str]) -> bool:
 def next_run(now: datetime, cfg: AppConfig) -> Optional[datetime]:
     if not getattr(cfg, "backup_auto_enabled", False):
         return None
-    hour, minute = parse_hhmm(getattr(cfg, "backup_time", "02:00"))
+    hour, minute = parse_hhmm(getattr(cfg, "backup_time", "00:00"))
     days = scheduled_days(cfg)
     start = _start_date(cfg)
     for offset in range(0, 15):
@@ -115,7 +115,7 @@ def schedule_status(cfg: Optional[AppConfig] = None, now: Optional[datetime] = N
     return {
         "enabled": bool(getattr(cfg, "backup_auto_enabled", False)),
         "folder": str(cfg.backup_dir),
-        "time": getattr(cfg, "backup_time", "02:00"),
+        "time": getattr(cfg, "backup_time", "00:00"),
         "days": sorted(scheduled_days(cfg)),
         "start_date": getattr(cfg, "backup_start_date", "") or "",
         "ratio": int(getattr(cfg, "backup_ratio", 14) or 0),
@@ -136,20 +136,43 @@ def run_due_backup(force: bool = False) -> Optional[Path]:
     with _run_lock:
         if not force and not is_due(datetime.now(), cfg, database.get_sync_meta("last_auto_backup")):
             return None
+        export_err = None
+        try:
+            excel_service.export_database_to_excel(username="system")
+        except Exception as exc:
+            export_err = str(exc)
         dest = excel_service.create_backup(reason="auto")
+        archive_days = int(getattr(cfg, "backup_archive_days", 30) or 30)
+        keep_days = int(getattr(cfg, "backup_archive_keep_days", 180) or 180)
+        archived = excel_service.archive_old_backups(archive_days)
+        pruned_arch = excel_service.prune_archives(keep_days)
         keep = int(getattr(cfg, "backup_ratio", 14) or 0)
-        pruned = excel_service.prune_backups(keep, reasons=("auto", "manual"))
+        pruned = excel_service.prune_backups(keep, reasons=("auto", "manual")) if keep else 0
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         database.set_sync_meta("last_auto_backup", stamp)
         health = None
         if dest:
             try:
                 health = excel_service.check_backup(str(dest))
-                database.set_sync_meta("last_auto_backup_health", json.dumps(health, default=str))
             except Exception as exc:
                 health = {"ok": False, "error": str(exc), "path": str(dest)}
-                database.set_sync_meta("last_auto_backup_health", json.dumps(health))
-        details = f"Automatic backup {dest or ''} (pruned {pruned})"
+        if health is None:
+            health = {"ok": export_err is None, "path": str(dest) if dest else None}
+        health = dict(health)
+        if export_err:
+            health["ok"] = False
+            health["excel_export_ok"] = False
+            health["error"] = export_err
+        else:
+            health["excel_export_ok"] = True
+        try:
+            database.set_sync_meta("last_auto_backup_health", json.dumps(health, default=str))
+        except Exception:
+            pass
+        details = (
+            f"Automatic backup {dest or ''} "
+            f"(archived {archived.get('moved', 0)}, pruned archives {pruned_arch.get('removed', 0)}, pruned {pruned})"
+        )
         if health and not health.get("ok"):
             details += f" HEALTH FAIL rows={health.get('backup_count')} live={health.get('live_count')} {health.get('error') or ''}"
         database.add_audit("system", "backup", details=details.strip())

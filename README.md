@@ -2,14 +2,14 @@
 
 A production-ready operations dashboard for **Linkco’s Material Request / IM Work Order log**.
 
-**SQLite (`data/woms.db`) is the live work-order history.** `file.xlsx` is a replica written after each save, and a snapshot target for Backup now / autobackup.
+**SQLite (`data/woms.db`) is the only live work-order history.** `file.xlsx` is a midnight replica of all records (plus Backup now).
 
 The application:
 
 1. Serves material requests from the database
 2. Displays KPIs, analytics and a searchable table counted from live records
 3. Lets authorized users edit records (database first)
-4. Copies each successful save into the **same Excel workbook** as a backup replica
+4. At midnight (and Backup now) dumps every database row into the **same Excel workbook** and snapshots SQLite
 5. Seeds the database from Excel on first boot (empty DB), or when an admin chooses Seed / Upload-then-seed
 6. Calculates statistics dynamically — no fake or stored KPI tables
 
@@ -128,9 +128,9 @@ Open the UI, then sign in:
 - **Overdue** list sorted by days overdue and priority
 - **Department, technician, priority** performance tables
 - **Work order table** — search, sort, filter, pagination, column visibility, CSV export, inline drill-down
-- **Edit** — Save writes SQLite first, then copies the row into Excel; if Excel is locked the record is still kept
+- **Edit** — Save writes SQLite only. Close order sets CLOSED (remark required). Excel is updated at midnight.
 - **Audit log** — user, time, work order, field, old/new value (SQLite)
-- **Backups** — per-save Excel copies under the admin-selected folder (`backups/YYYY-MM-DD/`); Backup now / autobackup also snapshot SQLite as a paired `.db`. Restore of a pair rolls both back; Excel-only copies do not overwrite live history
+- **Backups** — midnight and Backup now dump DB → Excel then snapshot the pair under `backups/YYYY-MM-DD/`. Pairs older than 30 days move to `backups/archive/YYYY-MM/`; archives older than 6 months are deleted. Restore of a pair rolls both back; Excel-only copies do not overwrite live history
 - **Conflict detection** — if Excel changed since you loaded the record, you get a warning instead of a silent overwrite
 - **Reports** — daily/weekly/monthly/yearly, open/overdue/closed/delay/department/technician as Excel, CSV or PDF
 - **Auth** — admin / manager / user with configurable permissions
@@ -142,11 +142,12 @@ Open the UI, then sign in:
 | ------ | --------- |
 | Ordinary load / Refresh | Reads SQLite. Does not overwrite the database from Excel. |
 | Hard refresh / Seed | Admin (or boot if DB empty) copies Excel rows into SQLite. |
-| Save | SQLite commit, then Excel: backup → temp file → validate → atomic replace |
-| File locked | Record stays in the database. HTTP 423 on the Excel replica. |
-| File missing | Record stays in the database. HTTP 503 on Excel-only operations. |
+| Save | SQLite only. Excel is not written. |
+| Midnight / Backup now | Export all DB rows into `file.xlsx` (lock → temp → validate → replace), then snapshot SQLite + Excel |
+| File locked | Daily saves still succeed. Excel dump records a health error and still snapshots SQLite. |
+| File missing | Daily saves still succeed. HTTP 503 on Excel-only operations (seed/upload/import). |
 | External Excel change during an Excel write | HTTP 409 conflict; user can reload or force overwrite |
-| Backup now / autobackup | Snapshot SQLite + Excel as a pair |
+| Backup now / autobackup | Export DB → Excel, then snapshot the pair. Archive after 30 days; prune archives after 180. |
 | Restore paired snapshot | Rolls back database and Excel (pre-restore snapshot first) |
 | Restore Excel-only copy | Replaces `file.xlsx` only. Does not silently seed the database. |
 
@@ -185,7 +186,7 @@ Coverage includes reading Excel, uniqueness, KPI calculations, updating a row, r
 
 ```
 backend/app/          FastAPI application
-backend/app/excel/    DB-first CRUD, Excel replica, lock, backup, mapping
+backend/app/excel/    SQLite-only CRUD, midnight Excel dump, lock, backup, mapping
 frontend/src/       React dashboard
 file.xlsx           Live workbook (replica)
 data/woms.db        Live history (gitignored)
