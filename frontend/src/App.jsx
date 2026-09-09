@@ -26,6 +26,8 @@ const Digest = lazy(() => import("./pages/Digest.jsx"));
 const Materials = lazy(() => import("./pages/Materials.jsx"));
 const Guide = lazy(() => import("./pages/Guide.jsx"));
 const PoApprovals = lazy(() => import("./pages/PoApprovals.jsx"));
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail.jsx"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword.jsx"));
 
 function Fallback() {
   return (
@@ -95,6 +97,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={!loading && user ? <Navigate to={user.must_change_password ? "/account" : firstPath(user)} replace /> : <Login />} />
+      <Route path="/verify-email" element={<Suspense fallback={<Fallback />}><VerifyEmail /></Suspense>} />
+      <Route path="/reset-password" element={<Suspense fallback={<Fallback />}><ResetPassword /></Suspense>} />
       <Route
         path="/"
         element={

@@ -130,6 +130,8 @@ export default function Settings() {
 
       {can("settings") && <DatabasePanel toast={toast} ask={ask} onReload={load} />}
 
+      {can("settings") && <EmailPanel cfg={cfg} setCfg={setCfg} toast={toast} />}
+
       {can("backup") && (
         <BackupPanel
           cfg={cfg}
@@ -484,6 +486,167 @@ function DatabasePanel({ toast, ask, onReload }) {
           onClose={() => setJobUi(null)}
         />
       )}
+    </div>
+  );
+}
+
+function EmailPanel({ cfg, setCfg, toast }) {
+  const [testTo, setTestTo] = useState("");
+  const [busy, setBusy] = useState(false);
+  const provider = cfg.email_provider || "off";
+
+  async function sendTest() {
+    setBusy(true);
+    try {
+      const d = await api.post("/api/settings/email/test", { to: testTo });
+      toast(`Test sent to ${d.to}`, "success");
+    } catch (e) {
+      toast(e.message || "Could not send test email", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card p-5 space-y-3">
+      <div>
+        <div className="font-semibold">Email</div>
+        <p className="text-xs text-slate-500">
+          SMTP or Resend sends verification links, password resets, and PO / assignment requests. The in-app inbox still
+          works if mail is off. Secrets are never returned after save.
+        </p>
+      </div>
+      <div className="grid md:grid-cols-2 gap-3">
+        <div>
+          <label className="lbl">Provider</label>
+          <select value={provider} onChange={(e) => setCfg({ ...cfg, email_provider: e.target.value })}>
+            <option value="off">Off</option>
+            <option value="smtp">SMTP</option>
+            <option value="resend">Resend API</option>
+          </select>
+        </div>
+        <div>
+          <label className="lbl">Public URL (for links in emails)</label>
+          <input
+            value={cfg.email_public_url || ""}
+            onChange={(e) => setCfg({ ...cfg, email_public_url: e.target.value })}
+            placeholder="https://mr.example.com"
+          />
+        </div>
+        <div>
+          <label className="lbl">From name</label>
+          <input value={cfg.email_from_name || ""} onChange={(e) => setCfg({ ...cfg, email_from_name: e.target.value })} />
+        </div>
+        <div>
+          <label className="lbl">From email</label>
+          <input
+            type="email"
+            value={cfg.email_from_address || ""}
+            onChange={(e) => setCfg({ ...cfg, email_from_address: e.target.value })}
+            placeholder="noreply@linkco.com.qa"
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-4 text-sm">
+        <label className="inline-flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="!w-auto"
+            checked={cfg.email_notify_po !== false}
+            onChange={(e) => setCfg({ ...cfg, email_notify_po: e.target.checked })}
+          />
+          PO signature requests
+        </label>
+        <label className="inline-flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="!w-auto"
+            checked={cfg.email_notify_assign !== false}
+            onChange={(e) => setCfg({ ...cfg, email_notify_assign: e.target.checked })}
+          />
+          Assign-to
+        </label>
+        <label className="inline-flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="!w-auto"
+            checked={cfg.email_notify_mention !== false}
+            onChange={(e) => setCfg({ ...cfg, email_notify_mention: e.target.checked })}
+          />
+          @mentions
+        </label>
+        <label className="inline-flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="!w-auto"
+            checked={!!cfg.email_notify_chat}
+            onChange={(e) => setCfg({ ...cfg, email_notify_chat: e.target.checked })}
+          />
+          Chat / follow
+        </label>
+      </div>
+      {provider === "smtp" && (
+        <div className="grid md:grid-cols-2 gap-3">
+          <div>
+            <label className="lbl">SMTP host</label>
+            <input value={cfg.smtp_host || ""} onChange={(e) => setCfg({ ...cfg, smtp_host: e.target.value })} placeholder="smtp.office365.com" />
+          </div>
+          <div>
+            <label className="lbl">Port</label>
+            <input
+              type="number"
+              value={cfg.smtp_port ?? 587}
+              onChange={(e) => setCfg({ ...cfg, smtp_port: Number(e.target.value) })}
+            />
+          </div>
+          <div>
+            <label className="lbl">Security</label>
+            <select value={cfg.smtp_security || "starttls"} onChange={(e) => setCfg({ ...cfg, smtp_security: e.target.value })}>
+              <option value="starttls">STARTTLS (587)</option>
+              <option value="ssl">SSL (465)</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+          <div>
+            <label className="lbl">Username</label>
+            <input value={cfg.smtp_username || ""} onChange={(e) => setCfg({ ...cfg, smtp_username: e.target.value })} />
+          </div>
+          <div className="md:col-span-2">
+            <label className="lbl">Password {cfg.smtp_password_set ? "· saved" : ""}</label>
+            <input
+              type="password"
+              value={cfg.smtp_password || ""}
+              onChange={(e) => setCfg({ ...cfg, smtp_password: e.target.value })}
+              placeholder={cfg.smtp_password_set ? "Leave blank to keep the saved password" : ""}
+              autoComplete="new-password"
+            />
+          </div>
+        </div>
+      )}
+      {provider === "resend" && (
+        <div>
+          <label className="lbl">Resend API key {cfg.resend_api_key_set ? "· saved" : ""}</label>
+          <input
+            type="password"
+            value={cfg.resend_api_key || ""}
+            onChange={(e) => setCfg({ ...cfg, resend_api_key: e.target.value })}
+            placeholder={cfg.resend_api_key_set ? "Leave blank to keep the saved key" : "re_…"}
+            autoComplete="new-password"
+          />
+        </div>
+      )}
+      {provider !== "off" && (
+        <div className="flex flex-wrap gap-2 items-end">
+          <div className="flex-1 min-w-[12rem]">
+            <label className="lbl">Send a test to</label>
+            <input type="email" value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="you@company.com" />
+          </div>
+          <button type="button" className="btn-outline" disabled={busy} onClick={sendTest}>
+            {busy ? "Sending…" : "Send test"}
+          </button>
+        </div>
+      )}
+      <p className="text-[11px] text-slate-500">Save configuration after changing provider or keys. Then send a test.</p>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
+import { api } from "../lib/api.js";
 import { firstPath, useAuth } from "../context/AuthContext.jsx";
 import LoginScene from "../components/LoginScene.jsx";
 import BrandLogo from "../components/BrandLogo.jsx";
@@ -13,6 +14,9 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [forgotId, setForgotId] = useState("");
+  const [forgotMsg, setForgotMsg] = useState("");
   const expired = useMemo(() => {
     const reason = sessionStorage.getItem("woms_auth_reason");
     if (reason === "expired") sessionStorage.removeItem("woms_auth_reason");
@@ -118,6 +122,47 @@ export default function Login() {
           <button className="btn-primary w-full" disabled={busy}>
             {busy ? "Signing in…" : "Sign in"}
           </button>
+          <button
+            type="button"
+            className="w-full text-sm text-brand-700 dark:text-cyan-300 mt-3"
+            onClick={() => {
+              setForgot((v) => !v);
+              setForgotMsg("");
+            }}
+          >
+            Forgot password?
+          </button>
+          {forgot && (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs text-slate-500">We’ll email a reset link if mail is on and this account has a real address.</p>
+              <input
+                value={forgotId}
+                onChange={(e) => setForgotId(e.target.value)}
+                placeholder="Username or email"
+                autoComplete="username"
+              />
+              {forgotMsg && <div className="text-xs text-slate-600 dark:text-slate-300">{forgotMsg}</div>}
+              <button
+                type="button"
+                className="btn-outline w-full"
+                disabled={busy || !forgotId.trim()}
+                onClick={async () => {
+                  setBusy(true);
+                  setForgotMsg("");
+                  try {
+                    const d = await api.post("/api/auth/forgot", { username: forgotId.trim() });
+                    setForgotMsg(d.message || "If that account can receive mail, we sent a link.");
+                  } catch (err) {
+                    setForgotMsg(err.message || "Could not send a reset email.");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Send reset link
+              </button>
+            </div>
+          )}
         </form>
       </div>
     </div>

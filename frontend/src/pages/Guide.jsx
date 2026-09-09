@@ -89,6 +89,15 @@ export default function Guide() {
       </div>
 
       <div className="card p-5 space-y-2">
+        <div className="font-semibold">Email (Settings)</div>
+        <p className="text-sm text-slate-500">
+          An administrator turns on SMTP or Resend and sets a From address plus the public URL used in links. Verification
+          and password-reset emails go to the address on the account. PO signature requests, Assign-to, and @mentions also
+          email verified addresses. Seed logins at @woms.local are skipped. The in-app inbox still works if mail is off.
+        </p>
+      </div>
+
+      <div className="card p-5 space-y-2">
         <div className="font-semibold">PO signatures (Daily → PO signatures, or g then p)</div>
         <p className="text-sm text-slate-500">
           Dedicated desk at /approvals. Inbox notifications open it. Lanes: New POs → With technician → Changes

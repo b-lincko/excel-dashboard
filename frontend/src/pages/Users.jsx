@@ -307,6 +307,7 @@ export default function Users() {
                       <div className="text-xs text-slate-500">
                         {u.username}
                         {u.email ? ` · ${u.email}` : ""}
+                        {u.email && u.email_verified ? " · verified" : u.email ? " · unverified" : ""}
                       </div>
                     </td>
                     <td className="capitalize">{ROLE_LABELS[u.role] || u.role}</td>

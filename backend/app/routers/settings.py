@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from .. import database
+from .. import database, mailer
 from ..backup import ensure_folder, list_folders, require_app_folder, run_due_backup, schedule_status
 from ..config import AppConfig, load_config, save_config
 from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
@@ -27,8 +27,38 @@ class SettingsUpdate(BaseModel):
 def _public_settings(cfg: AppConfig) -> dict[str, Any]:
     data = cfg.model_dump()
     data.pop("jwt_secret", None)
+    data.pop("smtp_password", None)
+    data.pop("resend_api_key", None)
     data["jwt_secret_set"] = bool(cfg.jwt_secret)
+    data["smtp_password_set"] = bool(str(cfg.smtp_password or "").strip())
+    data["resend_api_key_set"] = bool(str(cfg.resend_api_key or "").strip())
+    data["email_ready"] = mailer.is_configured(cfg)
     return data
+
+
+def _merge_settings(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(current)
+    for key, value in (incoming or {}).items():
+        if key in mailer.SECRET_FIELDS and not str(value or "").strip():
+            continue
+        if key.endswith("_set"):
+            continue
+        merged[key] = value
+    provider = str(merged.get("email_provider") or "off").strip().lower()
+    if provider not in {"off", "smtp", "resend", "none", "disabled"}:
+        raise HTTPException(status_code=422, detail="Email provider must be off, smtp, or resend.")
+    if provider in {"none", "disabled"}:
+        merged["email_provider"] = "off"
+        provider = "off"
+    else:
+        merged["email_provider"] = provider
+    if provider != "off" and not str(merged.get("email_from_address") or "").strip():
+        raise HTTPException(status_code=422, detail="From email is required when email is on.")
+    if provider == "smtp" and not str(merged.get("smtp_host") or "").strip():
+        raise HTTPException(status_code=422, detail="SMTP host is required.")
+    if provider == "resend" and not str(merged.get("resend_api_key") or "").strip():
+        raise HTTPException(status_code=422, detail="Resend API key is required.")
+    return merged
 
 
 @router.get("")
@@ -41,9 +71,11 @@ def get_settings(user=Depends(require_permission("settings"))):
 def update_settings(body: SettingsUpdate, user=Depends(require_permission("settings"))):
     cfg = load_config()
     current = cfg.model_dump()
-    current.update(body.values)
     try:
+        current = _merge_settings(current, body.values)
         new_cfg = AppConfig.model_validate(current)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     folder = str(new_cfg.backup_dir or "").strip()
@@ -56,6 +88,31 @@ def update_settings(body: SettingsUpdate, user=Depends(require_permission("setti
     save_config(new_cfg)
     excel_service.invalidate()
     return {"settings": _public_settings(new_cfg), "saved": True, "backup": schedule_status(new_cfg)}
+
+
+class EmailTestBody(BaseModel):
+    to: str = ""
+
+
+@router.post("/email/test")
+def send_test_email(body: EmailTestBody, user=Depends(require_permission("settings"))):
+    dest = str(body.to or user.get("email") or "").strip()
+    if not dest:
+        raise HTTPException(status_code=400, detail="Enter an address to send the test to.")
+    result = mailer.send_mail(
+        dest,
+        "Linkco MR test email",
+        "If you can read this, SMTP or Resend is working. Verification links and PO requests will use the same connection.",
+        url=mailer.link_for("/"),
+        cta="Open Linkco MR",
+        title="Test email",
+    )
+    if result.get("skipped"):
+        raise HTTPException(status_code=400, detail=result.get("reason") or "Email is not configured.")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "Could not send the test email.")
+    database.add_audit(user["username"], "email_test", details=f"Sent test email to {dest}")
+    return result
 
 
 @router.get("/mapping-scan")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import sqlite3
 import time
@@ -342,6 +343,22 @@ def init_db() -> None:
         if "token_version" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
             cols.add("token_version")
+        if "email_verified" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0")
+            cols.add("email_verified")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS email_tokens (
+                token TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                email TEXT,
+                payload TEXT,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT
+            )"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_email_tokens_user ON email_tokens(username, kind)")
         conn.execute(
             """CREATE TABLE IF NOT EXISTS revoked_tokens (
                 jti TEXT PRIMARY KEY,
@@ -466,6 +483,18 @@ def get_user_by_username(username: str) -> Optional[dict[str, Any]]:
         return row_to_dict(row)
 
 
+def get_user_by_email(email: str) -> Optional[dict[str, Any]]:
+    needle = str(email or "").strip()
+    if not needle:
+        return None
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE lower(email) = lower(?) COLLATE NOCASE",
+            (needle,),
+        ).fetchone()
+        return row_to_dict(row)
+
+
 def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
     with connect() as conn:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -476,7 +505,7 @@ def list_users() -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             """SELECT id, username, full_name, email, role, is_active, created_at, last_login, extra_permissions,
-                      must_change_password, token_version
+                      must_change_password, token_version, email_verified
                FROM users ORDER BY id"""
         ).fetchall()
         return [dict(r) for r in rows]
@@ -497,8 +526,8 @@ def create_user(
 ) -> dict[str, Any]:
     with connect() as conn:
         cur = conn.execute(
-            """INSERT INTO users (username, full_name, email, password_hash, role, is_active, created_at, extra_permissions, must_change_password, token_version)
-               VALUES (?, ?, ?, ?, ?, 1, ?, ?, 0, 0)""",
+            """INSERT INTO users (username, full_name, email, password_hash, role, is_active, created_at, extra_permissions, must_change_password, token_version, email_verified)
+               VALUES (?, ?, ?, ?, ?, 1, ?, ?, 0, 0, 0)""",
             (username, full_name, email, hash_password(password), role, now_iso(), extra_permissions),
         )
         uid = cur.lastrowid
@@ -508,7 +537,7 @@ def create_user(
 
 
 def update_user(user_id: int, **fields: Any) -> Optional[dict[str, Any]]:
-    allowed = {"full_name", "email", "role", "is_active", "password", "extra_permissions", "must_change_password"}
+    allowed = {"full_name", "email", "role", "is_active", "password", "extra_permissions", "must_change_password", "email_verified"}
     sets = []
     values: list[Any] = []
     for k, v in fields.items():
@@ -2217,6 +2246,53 @@ def upsert_po_approval(
         )
     item = get_po_approval(rid)
     assert item is not None
+    return item
+
+
+def create_email_token(username: str, kind: str, email: str = "", hours: int = 48, payload: Optional[dict[str, Any]] = None) -> str:
+    user = str(username or "").strip()
+    token_kind = str(kind or "").strip() or "verify"
+    if not user:
+        raise ValueError("username is required")
+    token = secrets.token_urlsafe(32)
+    created = now_iso()
+    expires = (datetime.now(timezone.utc) + timedelta(hours=max(1, int(hours or 48)))).strftime("%Y-%m-%d %H:%M:%S")
+    blob = json.dumps(payload or {}, default=str)
+    with connect() as conn:
+        conn.execute(
+            "UPDATE email_tokens SET used_at = ? WHERE username = ? AND kind = ? AND used_at IS NULL",
+            (created, user, token_kind),
+        )
+        conn.execute(
+            """INSERT INTO email_tokens (token, username, kind, email, payload, created_at, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (token, user, token_kind, email or "", blob, created, expires),
+        )
+    return token
+
+
+def get_email_token(token: str) -> Optional[dict[str, Any]]:
+    key = str(token or "").strip()
+    if not key:
+        return None
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM email_tokens WHERE token = ?", (key,)).fetchone()
+        return dict(row) if row else None
+
+
+def consume_email_token(token: str, kind: str = "") -> dict[str, Any]:
+    item = get_email_token(token)
+    if not item:
+        raise ValueError("This link is invalid or has expired.")
+    if kind and str(item.get("kind") or "") != kind:
+        raise ValueError("This link is invalid or has expired.")
+    if item.get("used_at"):
+        raise ValueError("This link was already used.")
+    expires = str(item.get("expires_at") or "")
+    if expires and expires < now_iso():
+        raise ValueError("This link has expired.")
+    with connect() as conn:
+        conn.execute("UPDATE email_tokens SET used_at = ? WHERE token = ?", (now_iso(), item["token"]))
     return item
 
 

@@ -108,7 +108,35 @@ export default function Account() {
         <div>
           <label className="lbl">Email</label>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          {user?.email && user?.email_enabled && (
+            <p className="text-[11px] text-slate-500 mt-1">
+              {user.email_verified
+                ? "Verified — PO and request emails can go here."
+                : "Not verified yet. Check your inbox, or resend the link."}
+            </p>
+          )}
         </div>
+        {user?.email && user?.email_enabled && !user.email_verified && (
+          <button
+            type="button"
+            className="btn-outline"
+            disabled={busy}
+            onClick={async () => {
+              setError("");
+              setBusy(true);
+              try {
+                await api.post("/api/auth/verify-email/resend");
+                toast("Verification email sent.", "success");
+              } catch (err) {
+                setError(err.message || "Could not send the email");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Resend verification
+          </button>
+        )}
         <button className="btn-primary" disabled={busy}>
           {busy ? "Saving…" : "Save profile"}
         </button>

@@ -7,7 +7,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .. import database
+from .. import database, mailer
 from ..security import (
     GUEST_PAGES,
     VALID_ROLES,
@@ -117,15 +117,22 @@ class ProfileUpdate(BaseModel):
 
 
 @router.put("/profile")
-def update_profile(body: ProfileUpdate, user=Depends(get_current_user)):
+def update_profile(body: ProfileUpdate, request: Request, user=Depends(get_current_user)):
     payload = body.model_dump(exclude_unset=True)
     if "full_name" in payload:
         payload["full_name"] = " ".join(str(payload.get("full_name") or "").split())
+    email_changed = False
     if "email" in payload:
         payload["email"] = str(payload.get("email") or "").strip()
+        email_changed = payload["email"].lower() != str(user.get("email") or "").strip().lower()
+        if email_changed:
+            payload["email_verified"] = 0
     updated = database.update_user(user["id"], **payload)
     database.add_audit(user["username"], "profile_update", details="Updated name or email")
-    return public_user(updated or user)
+    out = public_user(updated or user)
+    if email_changed and payload.get("email"):
+        out["email_send"] = mailer.send_verification(updated or user, request)
+    return out
 
 
 class LayoutBody(BaseModel):
@@ -149,6 +156,91 @@ def save_layout(body: LayoutBody, user=Depends(require_permission("view"))):
     return {"ok": True, "widgets": body.widgets}
 
 
+class ForgotBody(BaseModel):
+    username: str = ""
+    email: str = ""
+
+
+class TokenBody(BaseModel):
+    token: str
+
+
+class ResetBody(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
+
+
+_FORGOT: dict[str, list[float]] = {}
+
+
+def _forgot_locked(request: Request) -> bool:
+    host = request.client.host if request.client else "?"
+    now = time.time()
+    stamps = [t for t in _FORGOT.get(host, []) if now - t < 600]
+    _FORGOT[host] = stamps
+    return len(stamps) >= 8
+
+
+@router.post("/forgot")
+def forgot_password(body: ForgotBody, request: Request):
+    if _forgot_locked(request):
+        raise HTTPException(status_code=429, detail="Too many reset requests. Try again in a few minutes.")
+    host = request.client.host if request.client else "?"
+    _FORGOT.setdefault(host, []).append(time.time())
+    ident = str(body.username or body.email or "").strip()
+    user = database.get_user_by_username(ident) if ident else None
+    if not user and ident:
+        user = database.get_user_by_email(ident)
+    if user and user.get("is_active"):
+        mailer.send_reset(user, request)
+    return {"ok": True, "message": "If that account has a real email and mail is on, we sent a reset link."}
+
+
+@router.post("/reset-password")
+def reset_password(body: ResetBody):
+    try:
+        item = database.consume_email_token(body.token, "reset")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    user = database.get_user_by_username(str(item.get("username") or ""))
+    if not user or not user.get("is_active"):
+        raise HTTPException(status_code=400, detail="This link is invalid or has expired.")
+    database.update_user(user["id"], password=body.new_password)
+    database.add_audit(user["username"], "password_reset", details="Password reset from email link")
+    return {"ok": True}
+
+
+@router.post("/verify-email")
+def verify_email(body: TokenBody):
+    try:
+        item = database.consume_email_token(body.token, "verify")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    user = database.get_user_by_username(str(item.get("username") or ""))
+    if not user:
+        raise HTTPException(status_code=400, detail="This link is invalid or has expired.")
+    wanted = str(item.get("email") or user.get("email") or "").strip()
+    if wanted and str(user.get("email") or "").strip().lower() != wanted.lower():
+        raise HTTPException(status_code=400, detail="This email is no longer on the account. Request a new link.")
+    database.update_user(user["id"], email_verified=1)
+    database.add_audit(user["username"], "email_verify", details=f"Verified {wanted}")
+    return {"ok": True, "email": wanted}
+
+
+@router.post("/verify-email/resend")
+def resend_verification(request: Request, user=Depends(get_current_user)):
+    if not str(user.get("email") or "").strip():
+        raise HTTPException(status_code=400, detail="Add an email on your account first.")
+    if user.get("email_verified"):
+        return {"ok": True, "already": True}
+    result = mailer.send_verification(user, request)
+    if result.get("skipped"):
+        raise HTTPException(status_code=400, detail=result.get("reason") or "Email is not configured.")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "Could not send the email.")
+    return {"ok": True}
+
+
 def public_user(user: dict) -> dict:
     extra = parse_extra_permissions(user)
     return {
@@ -166,4 +258,6 @@ def public_user(user: dict) -> dict:
         "roles": sorted(VALID_ROLES),
         "editable_fields": editable_fields(user),
         "must_change_password": bool(user.get("must_change_password")),
+        "email_verified": bool(user.get("email_verified")),
+        "email_enabled": mailer.is_configured(),
     }

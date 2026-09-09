@@ -4,10 +4,10 @@ import json
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .. import database
+from .. import database, mailer
 from ..config import load_config
 from ..security import ADMIN_ONLY_PERMS, ALL_PERMS, GUEST_PAGES, GRANTABLE_PERMS, VALID_ROLES, require_permission
 from .auth import public_user
@@ -109,7 +109,7 @@ def get_user(user_id: int, user=Depends(require_permission("users"))):
 
 
 @router.post("")
-def create_user(body: UserCreate, user=Depends(require_permission("users"))):
+def create_user(body: UserCreate, request: Request, user=Depends(require_permission("users"))):
     username = _clean_username(body.username)
     if database.get_user_by_username(username):
         raise HTTPException(status_code=400, detail="Username already exists")
@@ -124,11 +124,12 @@ def create_user(body: UserCreate, user=Depends(require_permission("users"))):
         extra_permissions=_permissions_json(body.role, body.extra_permissions),
     )
     database.add_audit(user["username"], "user_create", details=f"Created user {username}")
-    return {"item": public_user(created)}
+    email_send = mailer.send_verification(created, request) if created.get("email") else None
+    return {"item": public_user(created), "email_send": email_send}
 
 
 @router.put("/{user_id}")
-def update_user(user_id: int, body: UserUpdate, user=Depends(require_permission("users"))):
+def update_user(user_id: int, body: UserUpdate, request: Request, user=Depends(require_permission("users"))):
     existing = database.get_user_by_id(user_id)
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
@@ -141,6 +142,8 @@ def update_user(user_id: int, body: UserUpdate, user=Depends(require_permission(
         payload["full_name"] = " ".join(str(payload.get("full_name") or "").split())
     if "email" in payload:
         payload["email"] = str(payload.get("email") or "").strip()
+        if payload["email"].lower() != str(existing.get("email") or "").strip().lower():
+            payload["email_verified"] = 0
     _guard_last_admin(existing, payload)
     role = payload.get("role") or existing["role"]
     if "extra_permissions" in payload:

@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (PO signatures desk at `/approvals`, role inboxes, PDF iframe, resubmit-before-sign).
+Last updated: 2026-09-09 (email: admin SMTP or Resend, verification + reset links, PO/request emails).
 
 ---
 
@@ -125,7 +125,7 @@ Midnight / Backup now → export DB → file.xlsx  +  snapshot SQLite
 
 - Keep `X-Frame-Options: SAMEORIGIN` (sandbox live preview). Do not switch to `DENY`.
 - Bind servers to `0.0.0.0`. Vite already `allowedHosts: true` and proxies `/api` to the backend. Browser code must use relative `/api` URLs, never `localhost`.
-- Change `jwt_secret` in production (`WOMS_JWT_SECRET` or `data/.jwt_secret`). Settings GET/PUT never return `jwt_secret`.
+- Change `jwt_secret` in production (`WOMS_JWT_SECRET` or `data/.jwt_secret`). Settings GET/PUT never return `jwt_secret`, `smtp_password`, or `resend_api_key`.
 - Login lockout: 8 failed attempts / 10 minutes per username+IP (`429`).
 - Unhandled API errors return `Internal server error` unless `WOMS_DEBUG=1`.
 - Attachment download/delete must resolve inside `data/attachments/`.
@@ -191,6 +191,12 @@ Dedicated page **`/approvals`** (Daily nav **PO signatures**, `g then p`, comman
 5. Dispatcher (or `accounts`) **Send to Accounts**.
 
 Inbox API: `GET /api/po-approvals?q=` → lanes `incoming | assigned | changes | to_sign | ready | accounts`. Per-WO actions stay on `GET/POST /api/work-orders/{id}/approval*`. States: `none | assigned | submitted | changes_requested | approved | sent_to_accounts`. Extra grants: `po_dispatch`, `po_approve`, `accounts`.
+
+**Email** (`backend/app/mailer.py`): admin Settings → Email. Provider `off` | `smtp` | `resend`. From name/address, public URL for links, SMTP host/port/user/password/STARTTLS|SSL, or Resend API key. Secrets are write-only (`smtp_password_set` / `resend_api_key_set`). Blank password on save keeps the stored value. `POST /api/settings/email/test` sends a test.
+
+- Verification: creating/changing a real email sends `/verify-email?token=`. Account can resend. `email_verified` on users. `@woms.local` seed addresses are never mailed.
+- Password reset: Login **Forgot password?** → `/api/auth/forgot` (always 200) → `/reset-password?token=`.
+- Requests: in-app inbox still writes. If mail is on, verified addresses also get PO / Accounts / Assign-to / @mention emails (chat/follow off unless ticked). Pytest captures `mailer.OUTBOX` and does not hit the network.
 
 **Logo:** `frontend/public/linkco-logo.png` + `favicon.png` (local mark; the public Linkco URL is unreachable). Sidebar, login, and favicon use it.
 
@@ -349,7 +355,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | Prefix | Purpose |
 | ------ | ------- |
 | `/api/health` | Liveness + record count |
-| `/api/auth` | login, me, logout, password, profile, layout |
+| `/api/auth` | login, me, logout, password, profile, layout, forgot, reset-password, verify-email, verify-email/resend |
 | `/api/po-approvals` | Role inbox for the PO signatures desk (`lanes`, `counts`, `default_lane`) |
 | `/api/work-orders` | list, suggest, CRUD, bulk, claim, close, watch, presence, chat, timeline, seen, PDF sheet, PO approval (`/{id}/approval` get/assign/submit/decide/send-accounts + `/approval/pdf`) |
 | `/api/dashboard` | KPIs / charts from live records |
@@ -360,7 +366,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | `/api/reports` | Period briefings + Excel/CSV/PDF. `GET /{kind}` kinds: `daily`, `weekly`, `monthly`, `yearly`, `open`, `overdue`, `closed`, `delay`, `department`, `technician`. `fmt=pdf\|xlsx\|csv\|json`. Daily/weekly take `as_of` or `date` (ISO day). JSON for daily/weekly is `period_payload`. PDF for those kinds is inline, one page. |
 | `/api/audit` | field-level audit log |
 | `/api/users` | list, access-catalog, CRUD, extra grants |
-| `/api/settings` | config, mapping scan, backups, database seed/reset/upload, `POST /jobs/excel-upload`, `POST /jobs/backup-apply`, `GET /jobs/{id}` |
+| `/api/settings` | config, mapping scan, backups, database seed/reset/upload, `POST /jobs/excel-upload`, `POST /jobs/backup-apply`, `GET /jobs/{id}`, `POST /email/test` |
 | `/api/sync` | ping, refresh (`hard: false` reloads DB), upload (settings / seed) |
 
 HTTP: 400 validation, 403 permission, 409 conflict, 422 business rules, 423 Excel locked, 503 Excel unavailable.
@@ -390,6 +396,7 @@ cd frontend && npm run build
 | `tests/test_priority_blockades.py` | Priority case-fold, blockades exclude OPEN/PLACED, flag=blockade |
 | `tests/test_business_flow.py` | Dummy multi-line MR, delete WO, mentions, chat clear/delete, supplier add/remove, backup pair |
 | `tests/test_po_approval.py` | Technician-only assign, empty-type due date, PLACED overdue via ETA, PO assign → submit → sign → lock → Accounts, inbox lanes, manager must wait for resubmit |
+| `tests/test_email.py` | Settings hide SMTP/Resend secrets and keep blank-password, verification + reset links, request email to verified addresses, skip `@woms.local` |
 
 Pitfalls (do not repeat):
 
@@ -492,6 +499,7 @@ Must remain true:
 - [x] Empty purchase type → operator picks due date (date only); skip 14-day default
 - [x] Close order captures unit / price / total / final in SQLite (not Excel)
 - [x] PO digital signature: dispatcher assigns tech → PDF to manager → sign or return → lock → Accounts
+- [x] Email: admin SMTP or Resend; verification + password-reset links; PO/assign/mention requests to verified addresses
 - [x] Overdue: OPEN/PENDING = due date; PLACED = ETA (`closed_date`); `is_delayed` unchanged
 
 When you complete or change a requirement, tick/retarget it here.
@@ -524,3 +532,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-09** Mind map is 2D SVG with animation (not WebGL orbit). Labels stay readable; motion pauses on hover / reduced-motion.
 - **2026-09-09** Backup must not fail: durable Excel copy with retry/fsync, SQLite snapshot retries, still snapshot `.db` if Excel copy fails. Excel upload reads the temp workbook (header-row scan, fuzzy sheet names) before replacing live files; refuse empty / &lt; 50% so `wo_cache` is not wiped.
 - **2026-09-09** PO signatures live on `/approvals` (not only the MR tab). `GET /api/po-approvals` is the role inbox. Manager `decide()` only from `submitted`.
+- **2026-09-09** Email is optional. Admin picks SMTP or Resend. Verification and reset go through email; PO/request pings also email verified addresses. Inbox stays in-app.

@@ -89,7 +89,7 @@ def notify(
 ) -> Optional[dict[str, Any]]:
     if not username:
         return None
-    return database.add_notification(
+    item = database.add_notification(
         username=username,
         kind=kind,
         body=body,
@@ -97,6 +97,20 @@ def notify(
         work_order_id=work_order_id or "",
         thread_id=thread_id,
     )
+    try:
+        from . import mailer
+
+        mailer.maybe_notify_email(
+            username,
+            kind,
+            body,
+            record_id=record_id or "",
+            work_order_id=work_order_id or "",
+            thread_id=thread_id,
+        )
+    except Exception:
+        pass
+    return item
 
 
 def fanout_mentions(
