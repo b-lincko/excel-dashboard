@@ -107,6 +107,16 @@ body {
     @apply ring-2 ring-brand-500 border-brand-500;
   }
 
+  .mm-link {
+    stroke-dasharray: 7 11;
+    animation: mm-flow 1.8s linear infinite;
+  }
+  .mm-halo {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: mm-halo 2.8s ease-in-out infinite;
+  }
+
   .tab-bar {
     @apply flex gap-1 p-1 rounded-xl bg-slate-100 dark:bg-white/5 w-fit;
   }
@@ -177,6 +187,33 @@ body {
 .dark .tour-card {
   background: #0f172a;
   border-color: rgba(255, 255, 255, 0.08);
+}
+
+@keyframes mm-flow {
+  to {
+    stroke-dashoffset: -36;
+  }
+}
+@keyframes mm-halo {
+  0%,
+  100% {
+    opacity: 0.14;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.32;
+    transform: scale(1.08);
+  }
+}
+.mm-paused .mm-link,
+.mm-paused .mm-halo {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mm-link,
+  .mm-halo {
+    animation: none;
+  }
 }
 
 .print-only {

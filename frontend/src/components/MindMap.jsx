@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, ChevronRight, GitBranch, ListFilter } from "lucide-react";
+import { ChevronRight, GitBranch, ListFilter, Sparkles } from "lucide-react";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, qs } from "../lib/api.js";
-import { prefersReducedMotion, webglAvailable } from "../lib/webgl.js";
 import StatusBadge from "./StatusBadge.jsx";
 import MindMap3D from "./MindMap3D.jsx";
 
@@ -48,7 +47,7 @@ export default function MindMap({ data, include }) {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [loadingItems, setLoadingItems] = useState(false);
-  const [view, setView] = useState(() => (webglAvailable() && !prefersReducedMotion() ? "3d" : "tree"));
+  const [view, setView] = useState("map");
 
   const root = data?.root;
   const branches = data?.branches || [];
@@ -117,24 +116,18 @@ export default function MindMap({ data, include }) {
           </p>
         </div>
         <div className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-white/5 p-1">
-          <button
-            type="button"
-            className={`tab-btn ${view === "3d" ? "is-on" : ""}`}
-            onClick={() => setView("3d")}
-            disabled={!webglAvailable()}
-            title={webglAvailable() ? "3D graph" : "WebGL is not available"}
-          >
-            <Box size={14} /> 3D
+          <button type="button" className={`tab-btn ${view === "map" ? "is-on" : ""}`} onClick={() => setView("map")}>
+            <Sparkles size={14} /> Map
           </button>
           <button type="button" className={`tab-btn ${view === "tree" ? "is-on" : ""}`} onClick={() => setView("tree")}>
             <GitBranch size={14} /> List
           </button>
         </div>
       </div>
-      {view === "3d" && webglAvailable() ? (
+      {view === "map" ? (
         <MindMap3D root={root} branches={branches} selectedId={selected?.id} onSelect={(node) => pick(node)} />
       ) : null}
-      <div className={`p-4 overflow-x-auto ${view === "3d" && webglAvailable() ? "hidden" : ""}`}>
+      <div className={`p-4 overflow-x-auto ${view === "map" ? "hidden" : ""}`}>
         <div className="flex items-start gap-6 min-w-[720px]">
           <div className="shrink-0 pt-6">
             <NodeCard

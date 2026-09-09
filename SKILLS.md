@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (Technician logins Abubacar/Arun/Nesar/Yousuf; assignment inbox ping).
+Last updated: 2026-09-09 (2D animated mind map).
 
 ---
 
@@ -194,7 +194,7 @@ backend/app/                 FastAPI app
 frontend/src/
   pages/                     Dashboard, WorkOrders, WorkOrderDetail, Queue, Settings, Guide, …
   components/Tour.jsx        First-run tour overlay
-  components/MindMap3D.jsx   Three.js live mind map
+  components/MindMap3D.jsx   2D animated live mind map
   components/LoginScene.jsx  Three.js sign-in network
   lib/tour.js                TOUR_STEPS v1
   lib/webgl.js               WebGL / reduced-motion helpers
@@ -298,7 +298,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 
 - React + Vite + Tailwind. Dev: `0.0.0.0:5173`, proxy `/api` → `127.0.0.1:8000`.
 - UI look: light canvas, teal brand (`#0D9F8A`), white sidebar, compact KPI tiles with a left accent (UpKeep-style CMMS). Do not invent dashboard numbers to match a mock.
-- **Three.js** (`three`): Dashboard mind map is a 3D graph of **live** `/api/dashboard` counts (`MindMap3D.jsx`). WebGL rebuilds only when the graph **fingerprint** (id/value/label) changes — dashboard polling must not remount the scene. Sprite labels sit on nodes; canvas `min-h-[380px]`; auto-rotate pauses on hover. Click a node still filters real records. Sign-in left panel has a decorative network (`LoginScene.jsx`) — no fake KPIs. Pause off-screen; skip auto-rotate / login scene when `prefers-reduced-motion`. List view remains as a fallback when WebGL is missing.
+- **Mind map** (`MindMap3D.jsx`): Dashboard graph is **2D SVG** of **live** `/api/dashboard` counts — radial layout, always-on labels, flowing links, gentle node drift, root pulse. Rebuilds only when the graph **fingerprint** (id/value/label) changes so dashboard polling does not remount. Pause drift on hover. Skip motion when `prefers-reduced-motion`. Click a node still filters real records. List view remains as a toggle. Sign-in left panel still uses Three.js (`LoginScene.jsx`) — no fake KPIs.
 - Production: `npm run build` → FastAPI serves `frontend/dist` when present.
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
 - Header: Search (completes WO / supplier / item / person / camp site), command palette (`Ctrl/⌘+K`), Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
@@ -487,3 +487,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-08** Three.js mind map (live counts, click → Open list) plus a decorative login network. No invented statistics. Reduced-motion / no-WebGL falls back to the 2D tree.
 - **2026-09-09** User reversed per-save Excel. SQLite is the only live store. Midnight (default 00:00) exports all DB rows into `file.xlsx` and snapshots SQLite. Archive pairs after 30 days; delete archives after 180. Close order button. 3D mind map fingerprints the graph so dashboard polls do not remount WebGL; sprite labels + min-height.
 - **2026-09-09** Seed technician logins Abubacar, Arun, Nesar, Yousuf (`TEAM_USERS`). Assign-to save/bulk/create pings that user in the inbox when the name matches username or full_name.
+- **2026-09-09** Mind map is 2D SVG with animation (not WebGL orbit). Labels stay readable; motion pauses on hover / reduced-motion.
