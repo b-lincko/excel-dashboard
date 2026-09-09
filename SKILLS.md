@@ -199,7 +199,7 @@ Inbox API: `GET /api/po-approvals?q=` → lanes `incoming | assigned | changes |
 - Password reset: Login **Forgot password?** → `/api/auth/forgot` (always 200) → `/reset-password?token=`.
 - Requests: in-app inbox still writes. If mail is on, verified addresses also get PO / follow-up (`ping`) / Accounts / Assign-to / @mention emails (chat/follow off unless ticked; PO toggle also covers follow-ups). Pytest captures `mailer.OUTBOX` and does not hit the network.
 
-**Logo:** `frontend/public/linkco-logo.png` (white **Link** + red **co** + red molecule on black) and `favicon.png` (red molecule on black). Sidebar, login, loading, and browser tab use these only — no other logo files.
+**Logo:** `frontend/public/linkco-logo.png` — **transparent background**: white **Link** + red **co** + red molecule, for dark surfaces (sidebar dark mode, login brand panel, dark loading screen). `linkco-logo-dark.png` is the light-surface variant (ink **Link** via slate-900 `#0F172A` + red **co**/molecule); `BrandLogo.jsx` picks the variant from the theme. `favicon.png` is the red molecule, transparent. All three were recovered from the original black-backed PNG by unpremultiply-from-black, so edges stay smooth. Sidebar, login, loading, and browser tab use these only — no other logo files, and no `bg-black` patches (the black square is gone).
 
 **Sites on create/edit:** camp sites plus F5 / Office / Accommodations — not SH5-only.
 
@@ -548,6 +548,7 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-09** Backup must not fail: durable Excel copy with retry/fsync, SQLite snapshot retries, still snapshot `.db` if Excel copy fails. Excel upload reads the temp workbook (header-row scan, fuzzy sheet names) before replacing live files; refuse empty / &lt; 50% so `wo_cache` is not wiped.
 - **2026-09-09** PO signatures live on `/approvals` (not only the MR tab). `GET /api/po-approvals` is the role inbox. Manager `decide()` only from `submitted`.
 - **2026-09-09** Email is optional. Admin picks SMTP or Resend. Verification and reset go through email; PO/request pings also email verified addresses. Inbox stays in-app.
+- **2026-09-09 (this session)** Logo made transparent: black background removed from `linkco-logo.png`/`favicon.png` (unpremultiply-from-black keeps antialiased edges), new light-surface variant `linkco-logo-dark.png` (ink Link), `BrandLogo.jsx` switches variants by theme, `bg-black` patches dropped.
 - **2026-09-09 (this session)** Resend testing mode: unverified-domain 403s no longer fail — mailer learns the owner inbox from the error, persists `resend_test_inbox`, and delivers from onboarding@resend.dev to the owner with [TEST -> recipient] labels; self-heals after domain verification.
 
 - **2026-09-09 (this session)** PO follow-up: `POST /{id}/approval/ping` pings the pending person per state with a `ping` history event, in-app inbox ping, and email riding `email_notify_po`; cooldown `po_ping_cooldown_minutes` (30) returns 429. Mail is preset to `resend` (key + verified-domain From to activate); `is_configured` now requires the provider secret; Settings PUT validates mail only when email values change so unfinished email setup never blocks backup/other saves.

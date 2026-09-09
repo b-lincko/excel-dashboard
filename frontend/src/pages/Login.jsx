@@ -51,7 +51,7 @@ export default function Login() {
         <LoginScene />
         <div className="relative z-10 login-anim d1">
           <div className="flex items-center gap-3">
-            <BrandLogo className="h-12 w-auto max-w-[200px] object-contain rounded-md" />
+            <BrandLogo className="h-12 w-auto max-w-[200px] object-contain" />
             <div>
               <div className="text-xl font-bold">Linkco MR</div>
               <div className="text-sm text-white/70">Work orders · Material requests</div>
