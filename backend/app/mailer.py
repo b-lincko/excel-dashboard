@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import smtplib
 import ssl
 import urllib.error
@@ -11,12 +12,14 @@ from email.message import EmailMessage
 from typing import Any, Optional
 
 from . import database
-from .config import load_config
+from .config import load_config, save_config
 
 OUTBOX: list[dict[str, Any]] = []
 
 SECRET_FIELDS = ("jwt_secret", "smtp_password", "resend_api_key")
 FAKE_EMAIL_SUFFIXES = ("@woms.local", "@local")
+# Resend's sandbox sender — the only From address allowed before a domain is verified.
+RESEND_TEST_FROM = "onboarding@resend.dev"
 
 
 def _testing() -> bool:
@@ -139,11 +142,12 @@ def send_mail(
         OUTBOX.append(payload)
         return {"ok": True, "provider": "test", "to": dest}
     try:
+        info: dict[str, Any] = {}
         if provider == "resend":
-            _send_resend(cfg, payload)
+            info = _send_resend(cfg, payload) or {}
         else:
             _send_smtp(cfg, payload)
-        return {"ok": True, "provider": provider, "to": dest}
+        return {"ok": True, "provider": provider, "to": dest, **info}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "provider": provider, "to": dest}
 
@@ -179,7 +183,55 @@ def _send_smtp(cfg, payload: dict[str, Any]) -> None:
         smtp.send_message(msg)
 
 
-def _send_resend(cfg, payload: dict[str, Any]) -> None:
+def _resend_owner_from_error(detail: str) -> str:
+    """Pull the account owner's address out of Resend's testing-mode rejection."""
+    match = re.search(r"\(\s*\[?([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})\]?\s*\)", detail or "")
+    return match.group(1).strip().lower() if match else ""
+
+
+def _remember_resend_test_inbox(owner: str) -> None:
+    owner = str(owner or "").strip().lower()
+    if not owner:
+        return
+    try:
+        cfg = load_config()
+        if str(cfg.resend_test_inbox or "").strip().lower() == owner:
+            return
+        cfg.resend_test_inbox = owner
+        save_config(cfg)
+    except Exception:
+        pass
+
+
+def _apply_resend_test_mode(payload: dict[str, Any], from_name: str, owner: str) -> dict[str, Any]:
+    """Redirect the email to the Resend account owner, clearly labelled."""
+    intended = payload["to"]
+    note = (
+        f"Resend testing mode: no verified domain yet, so email is delivered to the account owner ({owner}). "
+        "This message was intended for "
+        f"{intended}. Verify a domain at resend.com/domains to deliver directly."
+    )
+    sender = f"{from_name} <{RESEND_TEST_FROM}>" if from_name else RESEND_TEST_FROM
+    out = dict(payload)
+    out["from"] = sender
+    out["to"] = owner
+    out["subject"] = f"[TEST → {intended}] {payload['subject']}"
+    out["text"] = note + "\n\n" + payload["text"]
+    banner = (
+        f'<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;'
+        f'margin:0 0 16px;font-size:13px;color:#92400e">{html.escape(note)}</div>'
+    )
+    out["html"] = payload["html"].replace("<body>", "<body>" + banner, 1) if "<body>" in payload["html"] else banner + payload["html"]
+    return out
+
+
+class _ResendDomainError(Exception):
+    def __init__(self, detail: str):
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _send_resend(cfg, payload: dict[str, Any]) -> dict[str, Any]:
     key = str(getattr(cfg, "resend_api_key", "") or "").strip()
     if not key:
         raise ValueError("Resend API key is required.")
@@ -188,9 +240,30 @@ def _send_resend(cfg, payload: dict[str, Any]) -> None:
     if not from_addr:
         raise ValueError("Set a From email address in Settings. It must be on a domain verified in Resend.")
     sender = f"{from_name} <{from_addr}>" if from_name else from_addr
+    payload = dict(payload)
+    payload["from"] = sender
+    try:
+        _post_resend(key, payload)
+        return {"ok": True, "to": payload["to"]}
+    except _ResendDomainError as exc:
+        # No verified domain (or outside the sandbox allow-list): Resend only
+        # delivers to the account owner from onboarding@resend.dev. Learn the
+        # owner once, then deliver there with a [TEST → …] label.
+        owner = _resend_owner_from_error(exc.detail) or str(getattr(cfg, "resend_test_inbox", "") or "").strip().lower()
+        if not owner:
+            raise ValueError(
+                "Resend refused the sender/recipient. Verify a domain at resend.com/domains and use it in the "
+                "From address — or set the Resend test inbox in Settings to your Resend account email."
+            ) from exc
+        _remember_resend_test_inbox(owner)
+        _post_resend(key, _apply_resend_test_mode(payload, from_name, owner))
+        return {"ok": True, "to": owner, "test_mode": True, "intended_to": payload["to"]}
+
+
+def _post_resend(key: str, payload: dict[str, Any]) -> None:
     body = json.dumps(
         {
-            "from": sender,
+            "from": payload["from"],
             "to": [payload["to"]],
             "subject": payload["subject"],
             "html": payload["html"],
@@ -213,6 +286,8 @@ def _send_resend(cfg, payload: dict[str, Any]) -> None:
             resp.read()
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:400]
+        if exc.code == 403 and ("testing emails" in detail or "verify a domain" in detail):
+            raise _ResendDomainError(detail) from exc
         hint = ""
         if exc.code in {401, 403}:
             hint = " Check the API key."

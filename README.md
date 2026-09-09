@@ -130,7 +130,7 @@ Open the UI, then sign in:
 - **Work order table** — search, sort, filter, pagination, column visibility, CSV export, inline drill-down
 - **Edit** — Save writes SQLite only. Close order sets CLOSED (remark required). Excel is updated at midnight.
 - **PO approvals with follow-up** — assign → managers sign (or return) → route → Accounts. **Follow up** pings whoever holds the ball (inbox + email) with a cooldown
-- **Email notifications** — preset for the **Resend API** (SMTP optional): verification, password resets, PO requests, follow-ups, assign-to pings, @mentions to verified addresses
+- **Email notifications** — preset for the **Resend API** (SMTP optional): verification, password resets, PO requests, follow-ups, assign-to pings, @mentions. No verified domain yet? Resend testing mode is handled automatically — mail lands in the account owner's inbox labelled `[TEST → recipient]` until you verify a domain at resend.com/domains
 - **Audit log** — user, time, work order, field, old/new value (SQLite)
 - **Backups** — midnight and Backup now dump DB → Excel then snapshot the pair under `backups/YYYY-MM-DD/`. Pairs older than 30 days move to `backups/archive/YYYY-MM/`; archives older than 6 months are deleted. Restore of a pair rolls both back; Excel-only copies do not overwrite live history
 - **Conflict detection** — if Excel changed since you loaded the record, you get a warning instead of a silent overwrite

@@ -232,6 +232,10 @@ class AppConfig(BaseModel):
     smtp_password: str = ""
     smtp_security: str = "starttls"
     resend_api_key: str = ""
+    # Resend without a verified domain only delivers to the account owner's
+    # address (from onboarding@resend.dev). We learn that address from the
+    # provider's rejection and store it here so delivery keeps working.
+    resend_test_inbox: str = ""
     po_ping_cooldown_minutes: int = 30
     auto_refresh_seconds: int = 60
     id_prefix: str = "MR"

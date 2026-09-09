@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (PO follow-up/ping with cooldown + email; mail preset for the Resend API with change-only validation; honest `is_configured`).
+Last updated: 2026-09-09 (Resend no-domain testing mode: auto-learn owner inbox, deliver from onboarding@resend.dev with [TEST -> recipient] labels until a domain is verified).
 
 ---
 
@@ -193,7 +193,7 @@ Dedicated page **`/approvals`** (Daily nav **Purchase Approval**, `g then p`). G
 
 Inbox API: `GET /api/po-approvals?q=` → lanes `incoming | assigned | changes | to_sign | ready | accounts`. Per-WO actions stay on `GET/POST /api/work-orders/{id}/approval*`. States: `none | assigned | submitted | changes_requested | approved | sent_to_accounts`. Extra grants: `po_dispatch`, `po_approve`, `accounts`.
 
-**Email** (`backend/app/mailer.py`): admin Settings → Email. Provider `off` | `smtp` | `resend` — **preset is `resend`** (the app is set for the Resend API: admin pastes the `re_…` key + a From address on a domain verified in Resend; until then sends skip gracefully). `is_configured()` is honest: provider `resend` needs the API key, `smtp` needs a host — `email_ready` / `email_enabled` reflect that. Settings PUT validates mail only when an email value actually changes (a preset-but-unconfigured provider must not block unrelated saves). From name/address, public URL for links, SMTP host/port/user/password/STARTTLS|SSL, or Resend API key. Secrets are write-only (`smtp_password_set` / `resend_api_key_set`). Blank password on save keeps the stored value. `POST /api/settings/email/test` sends a test.
+**Email** (`backend/app/mailer.py`): admin Settings → Email. Provider `off` | `smtp` | `resend` — **preset is `resend`** (the app is set for the Resend API: admin pastes the `re_…` key + a From address on a domain verified in Resend; until then sends skip gracefully). `is_configured()` is honest: provider `resend` needs the API key, `smtp` needs a host — `email_ready` / `email_enabled` reflect that. Settings PUT validates mail only when an email value actually changes (a preset-but-unconfigured provider must not block unrelated saves). **No verified domain yet (Resend testing mode):** on Resend 403 `testing emails`/`verify a domain`, the app parses the account-owner address from the rejection, saves it to `resend_test_inbox`, and retries from `onboarding@resend.dev` to the owner with subject `[TEST → <intended recipient>]` plus an amber note in text/HTML. Result carries `test_mode: true`, `to: owner`, `intended_to` (Settings test toast shows it). Sends self-heal once the domain is verified (normal send just succeeds). `resend_test_inbox` is a plain (non-secret) setting, editable in Settings → Email. From name/address, public URL for links, SMTP host/port/user/password/STARTTLS|SSL, or Resend API key. Secrets are write-only (`smtp_password_set` / `resend_api_key_set`). Blank password on save keeps the stored value. `POST /api/settings/email/test` sends a test.
 
 - Verification: creating/changing a real email sends `/verify-email?token=`. Account can resend. `email_verified` on users. `@woms.local` seed addresses are never mailed.
 - Password reset: Login **Forgot password?** → `/api/auth/forgot` (always 200) → `/reset-password?token=`.
@@ -408,7 +408,7 @@ cd frontend && npm run build
 | `tests/test_business_flow.py` | Dummy multi-line MR, delete WO, mentions, chat clear/delete, supplier add/remove, backup pair |
 | `tests/test_po_approval.py` | Technician-only assign, empty-type due date, PLACED overdue via ETA, PO assign → submit → sign → lock → Accounts, inbox lanes, manager must wait for resubmit |
 | `tests/test_po_followup.py` | Follow-up ping targets per state, cooldown 429, permission refusals, caps, follow-up email via OUTBOX |
-| `tests/test_email.py` | Settings hide SMTP/Resend secrets and keep blank-password, verification + reset links, request email to verified addresses, skip `@woms.local` |
+| `tests/test_email.py` | Settings hide SMTP/Resend secrets and keep blank-password, verification + reset links, request email to verified addresses, skip `@woms.local` | + Resend no-domain testing-mode redirect (learn owner, `[TEST → …]` resend)
 
 Pitfalls (do not repeat):
 
@@ -548,6 +548,8 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-09** Backup must not fail: durable Excel copy with retry/fsync, SQLite snapshot retries, still snapshot `.db` if Excel copy fails. Excel upload reads the temp workbook (header-row scan, fuzzy sheet names) before replacing live files; refuse empty / &lt; 50% so `wo_cache` is not wiped.
 - **2026-09-09** PO signatures live on `/approvals` (not only the MR tab). `GET /api/po-approvals` is the role inbox. Manager `decide()` only from `submitted`.
 - **2026-09-09** Email is optional. Admin picks SMTP or Resend. Verification and reset go through email; PO/request pings also email verified addresses. Inbox stays in-app.
+- **2026-09-09 (this session)** Resend testing mode: unverified-domain 403s no longer fail — mailer learns the owner inbox from the error, persists `resend_test_inbox`, and delivers from onboarding@resend.dev to the owner with [TEST -> recipient] labels; self-heals after domain verification.
+
 - **2026-09-09 (this session)** PO follow-up: `POST /{id}/approval/ping` pings the pending person per state with a `ping` history event, in-app inbox ping, and email riding `email_notify_po`; cooldown `po_ping_cooldown_minutes` (30) returns 429. Mail is preset to `resend` (key + verified-domain From to activate); `is_configured` now requires the provider secret; Settings PUT validates mail only when email values change so unfinished email setup never blocks backup/other saves.
 
 - **2026-09-09 (this session)** Motion + onboarding pass: login entrance animation and spinner→checkmark sign-in button; signature pad gets ink-weight strokes, self-drawing demo hint, "captured" tick; `SignSuccess` stamp overlay after an approving decide; dedicated manager signing tour (`SIGNING_TOUR_STEPS v1`, separate storage key, auto-starts once on first `/approvals` visit for people who can sign; replay from Guide / "How signing works"). `TourContext` now hosts two decks (`main`, `signing`); `Tour.jsx` is deck-agnostic. Training deck gained a "What's new — September 2026" section and its save/backup slides were corrected to DB-first (saves write SQLite only; Excel updates at midnight / Backup now). All new motion respects `prefers-reduced-motion`.

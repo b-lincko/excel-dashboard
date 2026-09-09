@@ -499,7 +499,12 @@ function EmailPanel({ cfg, setCfg, toast }) {
     setBusy(true);
     try {
       const d = await api.post("/api/settings/email/test", { to: testTo });
-      toast(`Test sent to ${d.to}`, "success");
+      toast(
+        d.test_mode
+          ? `Testing mode: delivered to ${d.to}${d.intended_to && d.intended_to !== d.to ? ` (intended for ${d.intended_to})` : ""}`
+          : `Test sent to ${d.to}`,
+        d.test_mode ? "info" : "success"
+      );
     } catch (e) {
       toast(e.message || "Could not send test email", "error");
     } finally {
@@ -638,6 +643,26 @@ function EmailPanel({ cfg, setCfg, toast }) {
           <p className="text-[11px] text-slate-500 mt-1">
             Create the key at resend.com/api-keys. The From email must be on a domain you verified in Resend.
           </p>
+          <div className="mt-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 p-3 space-y-2">
+            <div className="text-xs font-semibold text-amber-800 dark:text-amber-200">No domain yet? It still sends</div>
+            <p className="text-[11px] text-amber-800/90 dark:text-amber-200/80">
+              Without a verified domain, Resend delivers every message to your Resend account email, from
+              onboarding@resend.dev. The app handles this automatically: the subject shows{" "}
+              <b>[TEST → intended recipient]</b>. Verify a domain at resend.com/domains to deliver directly to everyone.
+            </p>
+            <div>
+              <label className="lbl">Resend account email (test inbox)</label>
+              <input
+                type="email"
+                value={cfg.resend_test_inbox || ""}
+                onChange={(e) => setCfg({ ...cfg, resend_test_inbox: e.target.value })}
+                placeholder="you@your-resend-account.com"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Usually filled in automatically after the first send. You can set it yourself too.
+              </p>
+            </div>
+          </div>
         </div>
       )}
       {provider !== "off" && (

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import sys
+import urllib.error
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -156,3 +158,113 @@ def test_email_off_skips_send():
     result = mailer.send_mail("person@example.com", "Hello", "Body")
     assert result.get("skipped")
     assert mailer.OUTBOX == []
+
+
+_RESEND_403_BODY = (
+    '{"statusCode":403,"name":"validation_error","message":"You can only send testing emails to your own email '
+    'address ([linkco@spotmodapk.pro]). To send emails to other recipients, please verify a domain at '
+    'resend.com/domains, and change the `from` address to an email using this domain."}'
+)
+
+
+def _resend_403():
+    return urllib.error.HTTPError(
+        "https://api.resend.com/emails",
+        403,
+        "Forbidden",
+        {"Content-Type": "application/json"},
+        io.BytesIO(_RESEND_403_BODY.encode("utf-8")),
+    )
+
+
+class _FakeResp:
+    def read(self):
+        return b'{"id":"re_test"}'
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_resend_test_mode_redirects_to_owner(monkeypatch):
+    """No verified domain: the app learns the owner from the 403, then delivers
+    from onboarding@resend.dev to the owner with a [TEST ...] subject."""
+    from app import mailer as mailer_mod
+
+    calls = []
+
+    def fake_urlopen(req, timeout=20, context=None):
+        calls.append(req)
+        if len(calls) == 1:
+            raise _resend_403()
+        return _FakeResp()
+
+    saved = {}
+
+    class Cfg:
+        email_provider = "resend"
+        email_from_name = "Linkco MR"
+        email_from_address = "mr@linkco.com.qa"
+        resend_api_key = "re_test_key"
+        smtp_host = ""
+        resend_test_inbox = ""
+
+    monkeypatch.setattr(mailer_mod, "_testing", lambda: False)
+    monkeypatch.setattr(mailer_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mailer_mod, "load_config", lambda: Cfg())
+    monkeypatch.setattr(mailer_mod, "save_config", lambda cfg: saved.update(resend_test_inbox=cfg.resend_test_inbox))
+
+    result = mailer_mod.send_mail("manager@example.com", "PO request", "Body text")
+    assert result.get("ok") is True
+    assert result.get("test_mode") is True
+    assert result.get("to") == "linkco@spotmodapk.pro"
+    assert result.get("intended_to") == "manager@example.com"
+    assert len(calls) == 2
+    second = calls[1].data.decode("utf-8")
+    assert "onboarding@resend.dev" in second
+    assert "linkco@spotmodapk.pro" in second
+    assert "[TEST" in second and "manager@example.com" in second
+    assert saved.get("resend_test_inbox") == "linkco@spotmodapk.pro"
+
+
+def test_resend_test_mode_uses_known_inbox(monkeypatch):
+    """A saved test inbox is reused even when the error body is not parsable."""
+    from app import mailer as mailer_mod
+
+    calls = []
+
+    def fake_urlopen(req, timeout=20, context=None):
+        calls.append(req)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(
+                "https://api.resend.com/emails",
+                403,
+                "Forbidden",
+                {"Content-Type": "application/json"},
+                io.BytesIO(b'{"statusCode":403,"message":"please verify a domain at resend.com/domains"}'),
+            )
+        return _FakeResp()
+
+    class Cfg:
+        email_provider = "resend"
+        email_from_name = "Linkco MR"
+        email_from_address = "mr@linkco.com.qa"
+        resend_api_key = "re_test_key"
+        smtp_host = ""
+        resend_test_inbox = "owner@spotmodapk.pro"
+
+    monkeypatch.setattr(mailer_mod, "_testing", lambda: False)
+    monkeypatch.setattr(mailer_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mailer_mod, "load_config", lambda: Cfg())
+    monkeypatch.setattr(mailer_mod, "save_config", lambda cfg: None)
+
+    result = mailer_mod.send_mail("owner@spotmodapk.pro", "Hello", "Body")
+    assert result.get("ok") is True
+    assert result.get("test_mode") is True
+    assert result.get("to") == "owner@spotmodapk.pro"
+    body = calls[1].data.decode("utf-8")
+    assert "onboarding@resend.dev" in body
+    # Recipient was already the owner - delivered as addressed.
+    assert '"to": ["owner@spotmodapk.pro"]' in body
