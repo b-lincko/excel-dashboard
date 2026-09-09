@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 const UiContext = createContext(null);
 
@@ -29,6 +29,22 @@ export function UiProvider({ children }) {
     });
   }, []);
 
+  const dismissToast = useCallback((id) => {
+    setToasts((list) => list.filter((t) => t.id !== id));
+  }, []);
+
+  useEffect(() => {
+    if (!dialog) return undefined;
+    function onKey(e) {
+      if (e.key === "Escape") {
+        dialog.resolve(false);
+        setDialog(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dialog]);
+
   const value = useMemo(() => ({ toast, ask }), [toast, ask]);
 
   return (
@@ -38,7 +54,7 @@ export function UiProvider({ children }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto rounded-xl px-4 py-3 text-sm shadow-lg border ${
+            className={`toast-in pointer-events-auto rounded-xl px-4 py-3 text-sm shadow-lg border flex items-start gap-3 ${
               t.tone === "error"
                 ? "bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-500/15 dark:text-rose-100 dark:border-rose-500/30"
                 : t.tone === "success"
@@ -46,7 +62,15 @@ export function UiProvider({ children }) {
                   : "bg-white text-slate-800 border-slate-200 dark:bg-ink-800 dark:text-slate-100 dark:border-white/10"
             }`}
           >
-            {t.message}
+            <div className="flex-1 min-w-0">{t.message}</div>
+            <button
+              type="button"
+              className="shrink-0 text-current/60 hover:text-current"
+              aria-label="Dismiss"
+              onClick={() => dismissToast(t.id)}
+            >
+              ×
+            </button>
           </div>
         ))}
       </div>

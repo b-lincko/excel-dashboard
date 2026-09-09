@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (2D animated mind map).
+Last updated: 2026-09-09 (ops-desk UI polish + production stability).
 
 ---
 
@@ -297,7 +297,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 ## 10. Frontend
 
 - React + Vite + Tailwind. Dev: `0.0.0.0:5173`, proxy `/api` → `127.0.0.1:8000`.
-- UI look: light canvas, teal brand (`#0D9F8A`), white sidebar, compact KPI tiles with a left accent (UpKeep-style CMMS). Do not invent dashboard numbers to match a mock.
+- UI look: light canvas, teal brand (`#0D9F8A`), white sidebar, compact KPI tiles with a left accent (UpKeep-style CMMS). Sidebar is **Daily / Lists / Ops / Admin** — Daily stays open (Queue, Work orders, Open, Overdue, Chat); other groups collapse. Work-order list defaults to a compact column set (`woms.columns`). Back and closing the tab prompt on unsaved MRs. Do not invent dashboard numbers to match a mock.
 - **Mind map** (`MindMap3D.jsx`): Dashboard graph is **2D SVG** of **live** `/api/dashboard` counts — radial layout, always-on labels, flowing links, gentle node drift, root pulse. Rebuilds only when the graph **fingerprint** (id/value/label) changes so dashboard polling does not remount. Pause drift on hover. Skip motion when `prefers-reduced-motion`. Click a node still filters real records. List view remains as a toggle. Sign-in left panel still uses Three.js (`LoginScene.jsx`) — no fake KPIs.
 - Production: `npm run build` → FastAPI serves `frontend/dist` when present.
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
@@ -360,7 +360,7 @@ cd frontend && npm run build
 | `tests/test_materials_catalog.py` | Lines, aliases, unique supplier dropdown, paired create-backup, line search, suggest, presence |
 | `tests/test_delay_sites.py` | Extra sites / delay rules / camp filters / mind-map Sites camps |
 | `tests/test_reports.py` | Daily/weekly window, one-page PDF, one-sheet XLSX, JSON API |
-| `tests/test_production_hardening.py` | Login lockout, jwt_secret stripped from Settings, password min 8 |
+| `tests/test_production_hardening.py` | Login lockout, jwt_secret stripped from Settings, password min 8, `/api/health` SQLite + request id |
 | `tests/test_users_access.py` | User CRUD, extra grants, profile, password, last-admin guard |
 | `tests/test_audit_fixes.py` | Logout revoke, password invalidates token, upload needs settings, folder jail, write-backup prune |
 | `tests/test_priority_blockades.py` | Priority case-fold, blockades exclude OPEN/PLACED, flag=blockade |
@@ -459,6 +459,7 @@ Must remain true:
 - [x] Audit fixes: header suggest search, admin-only workbook seed, default-password gate, JWT logout revoke, extra-grant limits, write-backup prune, autobackup on by default
 - [x] Camp sites: SH5 Site - 1/2/3/4A/5/7 and SH1 L1, L2, L3, L4, L5, L7, LS1, LS2 (filters + create), no new Excel sheets
 - [x] Chat: Clear / Delete buttons; no conversation until the user sends; delete own message; catalog add/remove suppliers
+- [x] Ops-desk polish: Daily nav, compact list columns, unsaved-change guard, abort in-flight list fetches
 
 When you complete or change a requirement, tick/retarget it here.
 

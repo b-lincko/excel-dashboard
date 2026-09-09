@@ -9,6 +9,19 @@ import Filters from "../components/Filters.jsx";
 import SiteSwitcher from "../components/SiteSwitcher.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 
+const DEFAULT_COLS = [
+  "work_order_id",
+  "department",
+  "created_date",
+  "description",
+  "assigned_to",
+  "priority",
+  "status",
+  "supplier",
+  "due_date",
+  "aging_days",
+];
+
 const ALL_COLS = [
   ["work_order_id", "IM WO #"],
   ["department", "Site"],
@@ -90,7 +103,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
     } catch {
       /* ignore */
     }
-    return new Set(ALL_COLS.map((c) => c[0]));
+    return new Set(DEFAULT_COLS);
   });
   const [showCols, setShowCols] = useState(false);
   const [q, setQ] = useState(filters.q || "");
@@ -132,12 +145,12 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
     api.get("/api/views").then((d) => setViews(d.items || [])).catch(() => {});
   }, []);
 
-  function load(silent = false) {
+  function load(silent = false, signal) {
     if (!silent) setLoading(true);
     if (!silent) setError("");
     const params = { ...filters, q, sort, order, page, page_size: pageSize };
     api
-      .get(`/api/work-orders${qs(params)}`)
+      .get(`/api/work-orders${qs(params)}`, signal ? { signal } : undefined)
       .then((d) => {
         setRows(d.items || []);
         setTotal(d.total || 0);
@@ -145,13 +158,16 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
         hadRows.current = true;
       })
       .catch((e) => {
+        if (e.aborted) return;
         if (!silent) setError(e.message);
       })
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
-    load(hadRows.current);
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    load(hadRows.current, ctrl?.signal);
+    return () => ctrl?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, sort, order, page, pageSize]);
 
@@ -314,8 +330,12 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
+          <div className="page-kicker">Operations</div>
           <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
           <p className="text-sm text-slate-500">{subtitle}</p>
+          <p className="text-[11px] text-slate-400 mt-1 hidden sm:block">
+            <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> open · <kbd>x</kbd> select
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button className="btn-outline" onClick={() => load()}>

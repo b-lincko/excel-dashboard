@@ -355,16 +355,7 @@ export default function WorkOrderDetail() {
     }
   }
 
-  async function goBack() {
-    if (dirty) {
-      const ok = await ask({
-        title: "Discard unsaved changes?",
-        body: "Edits on this page have not been saved to the database.",
-        confirmLabel: "Discard",
-        danger: true,
-      });
-      if (!ok) return;
-    }
+  function goBack() {
     nav(-1);
   }
 

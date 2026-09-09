@@ -206,8 +206,9 @@ export default function ActionQueue() {
 
   return (
     <div className="space-y-5 briefing" data-tour="queue">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
+      <div className="page-head">
         <div>
+          <div className="page-kicker">Daily path</div>
           <h1 className="text-2xl font-bold tracking-tight">Today’s action queue</h1>
           <p className="text-sm text-slate-500">
             What to work now · {data?.as_of || "—"} · week {data?.week || "—"}

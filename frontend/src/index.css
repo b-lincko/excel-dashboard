@@ -18,6 +18,20 @@ body,
 body {
   margin: 0;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:focus-visible {
+  outline: 2px solid #0d9f8a;
+  outline-offset: 2px;
+}
+
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible),
+input:focus:not(:focus-visible),
+select:focus:not(:focus-visible),
+textarea:focus:not(:focus-visible) {
+  outline: none;
 }
 
 ::-webkit-scrollbar {
@@ -84,7 +98,7 @@ body {
     @apply px-3 py-2.5 border-b border-slate-200 dark:border-white/10 whitespace-nowrap bg-slate-50 dark:bg-ink-900 sticky top-0;
   }
   table.data td {
-    @apply px-3 py-2.5 border-b border-slate-100 dark:border-white/5 whitespace-nowrap;
+    @apply px-3 py-2 border-b border-slate-100 dark:border-white/5 whitespace-nowrap;
   }
   table.data tbody tr {
     @apply hover:bg-slate-50 cursor-pointer;
@@ -142,6 +156,20 @@ body {
 
   kbd {
     @apply inline-flex items-center rounded border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 px-1.5 py-0.5 font-mono text-[11px] font-semibold;
+  }
+
+  .page-head {
+    @apply flex flex-wrap items-end justify-between gap-3;
+  }
+  .page-kicker {
+    @apply text-[11px] font-semibold uppercase tracking-wider text-slate-400;
+  }
+  .nav-link {
+    @apply flex items-center gap-3 px-3 py-1.5 rounded-lg text-sm font-medium transition;
+  }
+  .nav-link.is-on {
+    @apply bg-brand-50 text-brand-800 dark:bg-white/10 dark:text-white;
+    box-shadow: inset 3px 0 0 #0d9f8a;
   }
 }
 
@@ -209,9 +237,23 @@ body {
 .mm-paused .mm-halo {
   animation-play-state: paused;
 }
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.toast-in {
+  animation: toast-in 0.18s ease-out;
+}
 @media (prefers-reduced-motion: reduce) {
   .mm-link,
-  .mm-halo {
+  .mm-halo,
+  .toast-in {
     animation: none;
   }
 }

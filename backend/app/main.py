@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -72,7 +73,9 @@ app.add_middleware(
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
+    rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
     response = await call_next(request)
+    response.headers["X-Request-ID"] = rid
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "same-origin")
@@ -95,13 +98,26 @@ app.include_router(files.router)
 
 @app.get("/api/health")
 def health():
-    live = excel_service.ping()
+    db_ok = True
+    cache = 0
+    db_error = None
+    try:
+        cache = database.wo_cache_count()
+    except Exception as exc:
+        db_ok = False
+        db_error = str(exc)
+    live = {}
+    try:
+        live = excel_service.ping() or {}
+    except Exception as exc:
+        live = {"error": str(exc)}
     return {
-        "ok": True,
+        "ok": db_ok,
+        "database": db_ok,
         "excel": live.get("synchronized"),
         "records": live.get("record_count"),
-        "cache": database.wo_cache_count(),
-        "error": live.get("error"),
+        "cache": cache,
+        "error": db_error or live.get("error"),
         "stale": live.get("stale"),
     }
 

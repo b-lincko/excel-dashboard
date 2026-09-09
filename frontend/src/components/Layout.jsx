@@ -44,14 +44,15 @@ import CommandPalette from "./CommandPalette.jsx";
 import { useTour } from "../context/TourContext.jsx";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, group: "Work", page: "dashboard" },
-  { to: "/guide", label: "Guide", icon: CircleHelp, group: "Work" },
-  { to: "/work-orders", label: "Work orders", icon: ClipboardList, group: "Work", page: "work_orders" },
-  { to: "/open", label: "Open", icon: FolderOpen, group: "Work", page: "open" },
-  { to: "/placed", label: "Placed", icon: Truck, group: "Work", page: "placed" },
-  { to: "/overdue", label: "Overdue", icon: AlertTriangle, group: "Work", page: "overdue" },
-  { to: "/closed", label: "Closed", icon: CheckCircle2, group: "Work", page: "closed" },
-  { to: "/queue", label: "Action queue", icon: ListTodo, group: "Ops", page: "queue" },
+  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, group: "Daily", page: "dashboard" },
+  { to: "/queue", label: "Action queue", icon: ListTodo, group: "Daily", page: "queue" },
+  { to: "/work-orders", label: "Work orders", icon: ClipboardList, group: "Daily", page: "work_orders" },
+  { to: "/open", label: "Open", icon: FolderOpen, group: "Daily", page: "open" },
+  { to: "/overdue", label: "Overdue", icon: AlertTriangle, group: "Daily", page: "overdue" },
+  { to: "/chat", label: "Chat", icon: MessageSquare, group: "Daily", page: "chat" },
+  { to: "/placed", label: "Placed", icon: Truck, group: "Lists", page: "placed" },
+  { to: "/closed", label: "Closed", icon: CheckCircle2, group: "Lists", page: "closed" },
+  { to: "/guide", label: "Guide", icon: CircleHelp, group: "Lists" },
   { to: "/digest", label: "Morning digest", icon: ClipboardCheck, group: "Ops", page: "digest" },
   { to: "/alerts", label: "SLA alerts", icon: Bell, group: "Ops", page: "alerts" },
   { to: "/handover", label: "Handover", icon: ClipboardCheck, group: "Ops", page: "handover" },
@@ -61,7 +62,6 @@ const NAV = [
   { to: "/supplier-suggest", label: "Supplier suggest", icon: PackageSearch, group: "Ops", page: "supplier_suggest" },
   { to: "/analytics", label: "Analytics", icon: BarChart3, perm: "analytics", group: "Ops", page: "analytics" },
   { to: "/reports", label: "Reports", icon: FileText, perm: "reports", group: "Ops", page: "reports" },
-  { to: "/chat", label: "Chat", icon: MessageSquare, group: "Ops", page: "chat" },
   { to: "/projects", label: "Projects", icon: FolderKanban, group: "Ops", page: "projects" },
   { to: "/import", label: "Import", icon: Upload, perm: "edit", group: "Ops", page: "import" },
   { to: "/performance", label: "Performance", icon: UserCheck, perm: "analytics", group: "Admin", page: "performance" },
@@ -69,6 +69,18 @@ const NAV = [
   { to: "/users", label: "Users", icon: Users, perm: "users", group: "Admin" },
   { to: "/settings", label: "Settings", icon: Settings, perm: "settings", group: "Admin" },
 ];
+
+const NAV_COLLAPSE_DEFAULT = { Lists: true, Ops: true, Admin: true };
+
+function readNavCollapsed() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("woms.nav.collapsed") || "null");
+    if (raw && typeof raw === "object") return { ...NAV_COLLAPSE_DEFAULT, ...raw };
+  } catch {
+    /* ignore */
+  }
+  return { ...NAV_COLLAPSE_DEFAULT };
+}
 
 const TITLES = {
   "/": "Dashboard",
@@ -119,6 +131,7 @@ export default function Layout() {
   const searchRef = useRef(null);
   const accountRef = useRef(null);
   const inboxRef = useRef(null);
+  const [navCollapsed, setNavCollapsed] = useState(readNavCollapsed);
 
   useEffect(() => {
     const title = Object.entries(TITLES).find(([path]) => (path === "/" ? loc.pathname === "/" : loc.pathname.startsWith(path)));
@@ -346,6 +359,22 @@ export default function Layout() {
     if (!last || last.group !== n.group) groups.push({ group: n.group, items: [n] });
     else last.items.push(n);
   });
+  const activeGroup =
+    items.find((n) => (n.end ? loc.pathname === n.to : loc.pathname === n.to || loc.pathname.startsWith(`${n.to}/`)))
+      ?.group || "Daily";
+
+  function toggleNavGroup(group) {
+    if (group === "Daily") return;
+    setNavCollapsed((prev) => {
+      const next = { ...prev, [group]: !prev[group] };
+      try {
+        localStorage.setItem("woms.nav.collapsed", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
 
   const sidebar = (
     <>
@@ -361,31 +390,44 @@ export default function Layout() {
           <X size={18} />
         </button>
       </div>
-      <nav className="px-3 flex-1 space-y-4 overflow-y-auto" aria-label="Main">
-        {groups.map((g) => (
-          <div key={g.group} data-tour={g.group === "Work" ? "nav-work" : undefined}>
-            <div className="px-3 mb-1 text-[10px] uppercase tracking-wider text-slate-400">{g.group}</div>
-            <div className="space-y-0.5">
-              {g.items.map((n) => (
-                <NavLink
-                  key={n.to}
-                  to={n.to}
-                  end={n.end}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition ${
-                      isActive
-                        ? "bg-brand-50 text-brand-800 dark:bg-white/10 dark:text-white"
-                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/5"
-                    }`
-                  }
-                >
-                  <n.icon size={16} />
-                  {n.label}
-                </NavLink>
-              ))}
+      <nav className="px-3 flex-1 space-y-3 overflow-y-auto pb-3" aria-label="Main">
+        {groups.map((g) => {
+          const folded = g.group !== "Daily" && navCollapsed[g.group] && activeGroup !== g.group;
+          return (
+            <div key={g.group} data-tour={g.group === "Daily" ? "nav-work" : undefined}>
+              <button
+                type="button"
+                className="w-full px-3 mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                onClick={() => toggleNavGroup(g.group)}
+                aria-expanded={!folded}
+              >
+                {g.group}
+                {g.group !== "Daily" && <ChevronDown size={12} className={folded ? "-rotate-90 transition" : "transition"} />}
+              </button>
+              {!folded && (
+                <div className="space-y-0.5">
+                  {g.items.map((n) => (
+                    <NavLink
+                      key={n.to}
+                      to={n.to}
+                      end={n.end}
+                      className={({ isActive }) =>
+                        `nav-link ${
+                          isActive
+                            ? "is-on"
+                            : "text-slate-600 hover:text-slate-900 hover:bg-slate-50 dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/5"
+                        }`
+                      }
+                    >
+                      <n.icon size={16} />
+                      {n.label}
+                    </NavLink>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
       <div className="p-4 border-t border-slate-100 dark:border-white/5">
         <NavLink to="/account" className="block text-xs text-slate-500 mb-1 truncate hover:text-brand-700 dark:text-slate-400 dark:hover:text-white">
@@ -495,9 +537,6 @@ export default function Layout() {
                 </div>
               )}
             </div>
-            <button type="submit" className="btn-outline !px-2 sm:!px-2.5 !py-1.5 text-xs whitespace-nowrap" title="Search material requests">
-              Search
-            </button>
           </form>
           <div className="flex items-center gap-1.5 sm:gap-2 text-xs">
             <span
@@ -642,7 +681,7 @@ export default function Layout() {
           </div>
         </header>
         <main id="main" className="flex-1 overflow-auto p-4 sm:p-6">
-          <ErrorBoundary>
+          <ErrorBoundary resetKey={loc.pathname}>
             <Outlet />
           </ErrorBoundary>
         </main>

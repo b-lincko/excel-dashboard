@@ -122,11 +122,12 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
+      <div className="page-head">
         <div>
+          <div className="page-kicker">Live</div>
           <h1 className="text-2xl font-bold tracking-tight">Material Request dashboard</h1>
           <p className="text-sm text-slate-500">
-            Live records · {data?.as_of || "—"} · {data?.sync?.record_count ?? data?.count ?? "—"} material requests
+            {data?.as_of || "—"} · {data?.sync?.record_count ?? data?.count ?? "—"} material requests
             {loading ? " · updating…" : ""}
           </p>
         </div>

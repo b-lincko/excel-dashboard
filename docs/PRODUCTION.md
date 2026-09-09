@@ -8,7 +8,7 @@ The app is a working operations desk, not a mock. Use this list before people de
 - Conflict warning (HTTP 409) instead of silent overwrite.
 - Excel write: lock → paired backup → temp → validate → atomic replace.
 - Excel failure keeps the database row.
-- Paired backups (`.xlsx` + `.db`) on every save, Backup now, and the schedule.
+- Paired backups (`.xlsx` + `.db`) at midnight and Backup now. Daily create/update/delete write SQLite only.
 - Restore of a pair rolls both back; Excel-only leftover files do not seed SQLite.
 - Roles and permissions; audit log; JWT sessions (12 hours).
 - Login lockout after 8 failed attempts / 10 minutes (per username + IP).

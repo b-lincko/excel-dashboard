@@ -27,7 +27,13 @@ const Materials = lazy(() => import("./pages/Materials.jsx"));
 const Guide = lazy(() => import("./pages/Guide.jsx"));
 
 function Fallback() {
-  return <div className="text-sm text-slate-500 py-10 text-center">Loading…</div>;
+  return (
+    <div className="py-10 space-y-3 max-w-xl mx-auto">
+      <div className="skel h-8 w-48" />
+      <div className="skel h-32" />
+      <div className="skel h-32" />
+    </div>
+  );
 }
 
 function Guard({ children }) {
@@ -36,7 +42,10 @@ function Guard({ children }) {
   if (loading) {
     return (
       <div className="min-h-screen grid place-items-center bg-slate-50 dark:bg-ink-900">
-        <div className="text-sm text-slate-500">Loading workspace…</div>
+        <div className="text-center space-y-3">
+          <div className="h-10 w-10 mx-auto rounded-xl bg-brand-600 text-white grid place-items-center font-extrabold">WO</div>
+          <div className="text-sm text-slate-500">Loading workspace…</div>
+        </div>
       </div>
     );
   }

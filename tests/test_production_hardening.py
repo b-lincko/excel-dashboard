@@ -39,6 +39,18 @@ def test_settings_never_returns_jwt_secret():
     assert data.get("jwt_secret_set") is True
 
 
+def test_health_reports_database():
+    database.init_db()
+    client = TestClient(app)
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("ok") is True
+    assert body.get("database") is True
+    assert isinstance(body.get("cache"), int)
+    assert res.headers.get("x-request-id") or res.headers.get("X-Request-ID")
+
+
 def test_new_user_password_min_eight():
     database.init_db()
     client = TestClient(app)

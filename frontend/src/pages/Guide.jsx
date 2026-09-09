@@ -94,8 +94,8 @@ export default function Guide() {
         </div>
         <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
           <Item k="Dashboard" v="Live counts. The mind map is a 2D animated graph of those same counts — click a node, then Open list. Click a KPI to open the matching rows." />
-          <Item k="Work orders" v="Every MR. Bulk assign, status, remarks." />
-          <Item k="Action queue" v="What to work now, grouped by urgency." />
+          <Item k="Work orders" v="Every MR. Compact columns by default — add more under Columns. Bulk assign, status, remarks. Back or closing the tab asks if the MR is unsaved." />
+          <Item k="Action queue" v="First item in Daily on the left. What to work now, grouped by urgency." />
           <Item k="Morning digest" v="Overdue / NTP / due soon by site then assignee." />
           <Item k="Suppliers / PO" v="RFQ → PO → ETA board and on-time rate." />
           <Item k="Materials" v="Who supplied an item before. Catalog tab adds and removes vendors. Aliases group spellings." />

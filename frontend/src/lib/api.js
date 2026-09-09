@@ -23,10 +23,15 @@ async function parseBody(res) {
   return { json: false, data: null, detail: await res.text() };
 }
 
-async function request(path, { method = "GET", body, headers, raw, timeoutMs = 60000 } = {}) {
+async function request(path, { method = "GET", body, headers, raw, timeoutMs = 60000, signal } = {}) {
   const token = getToken();
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = ctrl ? window.setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  const onAbort = () => ctrl?.abort();
+  if (ctrl && signal) {
+    if (signal.aborted) ctrl.abort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  }
   let res;
   try {
     res = await fetch(path, {
@@ -41,14 +46,18 @@ async function request(path, { method = "GET", body, headers, raw, timeoutMs = 6
     });
   } catch (e) {
     const aborted = e?.name === "AbortError";
+    if (aborted && signal?.aborted) {
+      throw fail("Request cancelled", { status: 0, aborted: true, cause: e });
+    }
     throw fail(
       aborted
-        ? "The request timed out. The API may still be applying Excel — wait a moment and try again."
-        : "API is not running on port 8000. Keep the “Linkco MR API” window open (run.bat starts it).",
+        ? "The request timed out. Wait a moment and try again."
+        : "Could not reach the server. Check that Linkco MR API is running.",
       { status: 0, timeout: aborted, offline: !aborted, cause: e }
     );
   } finally {
     if (timer) window.clearTimeout(timer);
+    if (signal) signal.removeEventListener("abort", onAbort);
   }
   if (res.status === 401) {
     setToken(null);
