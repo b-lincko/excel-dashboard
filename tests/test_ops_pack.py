@@ -117,12 +117,15 @@ def test_claim_digest_timeline_mapping_similar_cards_backup(workbook):
     assert held.status_code == 200, held.text
     assert str(held.json()["item"].get("status") or "").upper() == "ON HOLD"
 
-    claimed = client.post(f"/api/work-orders/{rid}/claim?force=true", headers=headers)
+    tech = client.post("/api/auth/login", json={"username": "arun", "password": "arun1234"})
+    assert tech.status_code == 200, tech.text
+    theaders = {"Authorization": f"Bearer {tech.json()['access_token']}"}
+    claimed = client.post(f"/api/work-orders/{rid}/claim?force=true", headers=theaders)
     assert claimed.status_code == 200, claimed.text
     assert claimed.json()["item"]["assigned_to"]
     excel_service.invalidate()
     live = excel_service.get_by_id(rid)
-    assert str(live.get("assigned_to") or "").strip()
+    assert str(live.get("assigned_to") or "").strip().lower() == "arun"
 
     chat = client.post(f"/api/work-orders/{rid}/chat", headers=headers, json={"body": "pytest timeline chat"})
     assert chat.status_code == 200, chat.text

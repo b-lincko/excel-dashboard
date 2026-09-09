@@ -385,7 +385,7 @@ cd frontend && npm run build
 | `tests/test_database_sot.py` | DB-first save, seed/reset confirm, snapshot pair + Excel-only restore, download zip + upload + restore |
 | `tests/test_backup_bulletproof.py` | Backup still snapshots SQLite if Excel copy fails; upload refuses garbage/empty/tiny workbooks; header-row and sheet-name read |
 | `tests/test_excel_and_api.py` | Read Excel, DB-only create + export, backup schedule/archive/prune, close order |
-| `tests/test_ops_pack.py` | Queue, digest, timeline, mapping, backup health |
+| `tests/test_ops_pack.py` | Queue, digest, timeline, mapping, backup health. Claim uses a technician (`arun`), not admin |
 | `tests/test_collab_*.py` | Chat, watches, row restore |
 | `tests/test_materials_catalog.py` | Lines, aliases, unique supplier dropdown, paired create-backup, line search, suggest, presence |
 | `tests/test_delay_sites.py` | Extra sites / delay rules / camp filters / mind-map Sites camps |
