@@ -309,7 +309,15 @@ def _signature_image(data_url: Any):
         blob = base64.b64decode(raw)
         if not blob:
             return None
-        return Image(ImageReader(io.BytesIO(blob)), width=55 * mm, height=22 * mm)
+        reader = ImageReader(io.BytesIO(blob))
+        iw, ih = reader.getSize()
+        max_w, max_h = 80 * mm, 28 * mm
+        aspect = (iw / ih) if ih else 2.8
+        width, height = max_w, max_w / max(aspect, 0.1)
+        if height > max_h:
+            height = max_h
+            width = height * aspect
+        return Image(reader, width=width, height=height)
     except Exception:
         return None
 
@@ -413,7 +421,7 @@ def po_approval_pdf(rec: dict[str, Any], approval: Optional[dict[str, Any]] = No
     else:
         story.append(Paragraph(_esc(rec.get("description") or "—")[:1200], value))
     story.append(Spacer(1, 10))
-    story.append(Paragraph("Manager decision", label))
+    story.append(Paragraph("Authorized signature", label))
     story.append(
         Paragraph(
             f"State: {_esc(approval.get('state') or 'none')} · signed by {_esc(approval.get('signed_by') or '—')} "
@@ -425,9 +433,33 @@ def po_approval_pdf(rec: dict[str, Any], approval: Optional[dict[str, Any]] = No
         story.append(Paragraph(_esc(approval.get("comment"))[:800], value))
     sig = _signature_image(approval.get("signature_png"))
     if sig:
-        story.append(Spacer(1, 6))
-        story.append(Paragraph("Digital signature", label))
-        story.append(sig)
+        story.append(Spacer(1, 8))
+        block = Table(
+            [
+                [sig],
+                [HRFlowable(width="80mm", thickness=0.6, color=colors.HexColor("#0F172A"), spaceBefore=2, spaceAfter=2)],
+                [
+                    Paragraph(
+                        f"{_esc(approval.get('signed_by') or 'Authorized signatory')}<br/>"
+                        f"{_esc(str(approval.get('signed_at') or '')[:16])}",
+                        meta,
+                    )
+                ],
+            ],
+            colWidths=[90 * mm],
+        )
+        block.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ]
+            )
+        )
+        story.append(block)
     else:
         story.append(Paragraph("No signature on file yet.", meta))
     doc.build(story)
@@ -898,22 +930,3 @@ def render(kind: str, fmt: str, filters: dict[str, Any]) -> tuple[bytes, str, st
         if fmt == "pdf":
             return period_pdf(payload), f"{slug}.pdf", "application/pdf"
         raise ValueError(f"Unsupported format {fmt}")
-    records = records_for_report(kind, filters)
-    title_map = {
-        "monthly": "Monthly Work Order Report",
-        "yearly": "Yearly Work Order Report",
-        "open": "Open Work Order Report",
-        "overdue": "Overdue Work Order Report",
-        "closed": "Closed Work Order Report",
-        "delay": "Delay / Issue Report",
-        "department": "Department Report",
-        "technician": "Technician Report",
-    }
-    title = title_map.get(kind, "Work Order Report")
-    if fmt == "csv":
-        return to_csv(records), f"{kind}_report_{stamp}.csv", "text/csv"
-    if fmt == "xlsx":
-        return to_xlsx(records, title), f"{kind}_report_{stamp}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    if fmt == "pdf":
-        return to_pdf(records, title), f"{kind}_report_{stamp}.pdf", "application/pdf"
-    raise ValueError(f"Unsupported format {fmt}")

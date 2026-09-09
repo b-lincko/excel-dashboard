@@ -8,16 +8,16 @@ import { useLiveReload } from "../lib/live.js";
 import SignaturePad from "../components/SignaturePad.jsx";
 
 const LANES = [
-  { id: "incoming", label: "New POs", hint: "Abubacar assigns a technician" },
-  { id: "assigned", label: "With technician", hint: "Update suppliers, then send PDF" },
+  { id: "incoming", label: "New slips", hint: "Assign a technician" },
+  { id: "assigned", label: "With technician", hint: "Update suppliers, then send to manager(s)" },
   { id: "changes", label: "Changes requested", hint: "Fix what the manager wrote, send again" },
-  { id: "to_sign", label: "Waiting for signature", hint: "Operational manager reviews the PDF" },
-  { id: "ready", label: "Signed · send to Accounts", hint: "Locked. Dispatcher sends it on." },
+  { id: "to_sign", label: "Waiting for signature", hint: "Selected managers review the PDF" },
+  { id: "ready", label: "Signed · send on", hint: "Holder sends to Accounts or someone else" },
   { id: "accounts", label: "Sent to Accounts", hint: "Done" },
 ];
 
 const STATE_LABEL = {
-  none: "New PO",
+  none: "New",
   assigned: "Assigned",
   changes_requested: "Changes requested",
   submitted: "Waiting for signature",
@@ -41,6 +41,10 @@ export default function PoApprovals() {
   const [assignee, setAssignee] = useState("");
   const [comment, setComment] = useState("");
   const [signature, setSignature] = useState("");
+  const [pickedManagers, setPickedManagers] = useState([]);
+  const [returnTo, setReturnTo] = useState("");
+  const [routeTo, setRouteTo] = useState("");
+  const [accountsTo, setAccountsTo] = useState("");
 
   function loadInbox() {
     api
@@ -153,11 +157,11 @@ export default function PoApprovals() {
       <div className="page-head">
         <div>
           <div className="page-kicker">Digital signature</div>
-          <h1 className="text-2xl font-bold tracking-tight">PO signatures</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Purchase Approval</h1>
           <p className="text-sm text-slate-500">
-            Abubacar receives a PO, assigns a technician (Arun, Nesar, Yousuf, or a new User). That person updates the
-            order and sends a PDF to the operational manager. The manager signs, or writes the changes and returns it.
-            After a signature the PO is locked. Abubacar then sends it to Accounts.
+            Assign a technician, then send the purchase slip to one, two, or three managers. A manager draws a digital
+            signature (it prints on the PDF at corporate size) and sends the signed slip back to the sender or someone
+            else. That person can send it to Accounts or another person. Unassign if it was given to the wrong technician.
           </p>
         </div>
       </div>
@@ -260,6 +264,10 @@ export default function PoApprovals() {
                     {STATE_LABEL[a.state] || a.state}
                   </span>
                   {a.assignee ? <span className="text-slate-500">Technician {a.assignee}</span> : null}
+                  {a.holder ? <span className="text-slate-500">Holding: {a.holder}</span> : null}
+                  {(a.manager_list || []).length ? (
+                    <span className="text-slate-500">Managers {(a.manager_list || []).join(", ")}</span>
+                  ) : null}
                   {a.locked ? <span className="text-emerald-700 font-medium">Locked — cannot be changed</span> : null}
                 </div>
                 {a.comment && a.state === "changes_requested" ? (
@@ -287,19 +295,61 @@ export default function PoApprovals() {
                       disabled={busy || !assignee}
                       onClick={() => run("/approval/assign", { assignee })}
                     >
-                      <Send size={14} /> Assign PO
+                      <Send size={14} /> Assign
                     </button>
+                    {caps.can_unassign && (
+                      <button className="btn-outline" disabled={busy} onClick={() => run("/approval/unassign")}>
+                        Unassign
+                      </button>
+                    )}
                   </div>
+                )}
+                {!caps.can_assign && caps.can_unassign && (
+                  <button className="btn-outline" disabled={busy} onClick={() => run("/approval/unassign")}>
+                    Unassign
+                  </button>
                 )}
 
                 {caps.can_submit && (
                   <div className="space-y-2">
                     <p className="text-sm text-slate-500">
-                      Update suppliers and items on the material request first, then send this PDF to the operational
-                      manager.
+                      Update suppliers and items on the material request, then send this PDF to one, two, or three
+                      managers.
                     </p>
-                    <button className="btn-primary" disabled={busy} onClick={() => run("/approval/submit")}>
-                      <FileText size={14} /> Send PDF to manager
+                    <div>
+                      <label className="lbl">Managers (pick 1–3)</label>
+                      <div className="flex flex-col gap-1">
+                        {(caps.managers || []).map((m) => {
+                          const on = pickedManagers.includes(m.username);
+                          return (
+                            <label key={m.username} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                className="!w-auto"
+                                checked={on}
+                                onChange={() => {
+                                  setPickedManagers((prev) => {
+                                    if (on) return prev.filter((x) => x !== m.username);
+                                    if (prev.length >= 3) return prev;
+                                    return [...prev, m.username];
+                                  });
+                                }}
+                              />
+                              {m.label}
+                            </label>
+                          );
+                        })}
+                        {!(caps.managers || []).length && (
+                          <p className="text-xs text-slate-500">No managers with sign permission yet.</p>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      className="btn-primary"
+                      disabled={busy || !pickedManagers.length}
+                      onClick={() => run("/approval/submit", { managers: pickedManagers })}
+                    >
+                      <FileText size={14} /> Send to {pickedManagers.length || "—"} manager{pickedManagers.length === 1 ? "" : "s"}
                     </button>
                   </div>
                 )}
@@ -307,15 +357,26 @@ export default function PoApprovals() {
                 {caps.can_decide && (
                   <div className="space-y-3">
                     <p className="text-sm text-slate-500">
-                      Review the PDF. Draw a signature to approve (this locks the PO), or write the changes and return it
-                      to {a.assignee || "the technician"}.
+                      Review the PDF. Draw a signature to approve (this locks prices and suppliers), then send the signed
+                      slip back to the sender or someone else. Or write the changes and return it unsigned.
                     </p>
                     <div>
                       <label className="lbl">Digital signature</label>
                       <SignaturePad value={signature} onChange={setSignature} />
                     </div>
                     <div>
-                      <label className="lbl">Changes (required to return)</label>
+                      <label className="lbl">Send signed slip to</label>
+                      <select value={returnTo} onChange={(e) => setReturnTo(e.target.value)}>
+                        <option value={a.assignee || ""}>{a.assignee ? `Sender · ${a.assignee}` : "Sender"}</option>
+                        {(caps.people || []).map((p) => (
+                          <option key={p.username} value={p.username}>
+                            {p.label} ({p.role})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="lbl">Changes (required to return unsigned)</label>
                       <textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -325,15 +386,15 @@ export default function PoApprovals() {
                         onClick={() =>
                           run(
                             "/approval/decide",
-                            { approve: true, signature_png: signature, comment },
+                            { approve: true, signature_png: signature, comment, return_to: returnTo },
                             {
-                              confirm: "Sign and lock this PO? After this, suppliers, items and prices cannot be changed.",
-                              confirmLabel: "Sign & lock",
+                              confirm: "Sign and lock this purchase slip? After this, suppliers, items and prices cannot be changed.",
+                              confirmLabel: "Sign & send",
                             }
                           )
                         }
                       >
-                        <Stamp size={14} /> Sign &amp; approve
+                        <Stamp size={14} /> Sign &amp; send
                       </button>
                       <button
                         className="btn-outline"
@@ -346,16 +407,56 @@ export default function PoApprovals() {
                   </div>
                 )}
 
+                {caps.can_route && (
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <div className="flex-1 min-w-[12rem]">
+                      <label className="lbl">Send signed slip to someone else</label>
+                      <select value={routeTo} onChange={(e) => setRouteTo(e.target.value)}>
+                        <option value="">—</option>
+                        {(caps.people || []).map((p) => (
+                          <option key={p.username} value={p.username}>
+                            {p.label} ({p.role})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      className="btn-outline"
+                      disabled={busy || !routeTo}
+                      onClick={() => run("/approval/route", { to: routeTo })}
+                    >
+                      Send
+                    </button>
+                  </div>
+                )}
+
                 {caps.can_send_accounts && (
-                  <button
-                    className="btn-primary"
-                    disabled={busy}
-                    onClick={() =>
-                      run("/approval/send-accounts", {}, { confirm: "Send this signed PO to Accounts?", confirmLabel: "Send" })
-                    }
-                  >
-                    <PenLine size={14} /> Send to Accounts
-                  </button>
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <div className="flex-1 min-w-[12rem]">
+                      <label className="lbl">Accounts (optional person)</label>
+                      <select value={accountsTo} onChange={(e) => setAccountsTo(e.target.value)}>
+                        <option value="">Accounts inbox</option>
+                        {(caps.people || []).map((p) => (
+                          <option key={p.username} value={p.username}>
+                            {p.label} ({p.role})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      className="btn-primary"
+                      disabled={busy}
+                      onClick={() =>
+                        run(
+                          "/approval/send-accounts",
+                          { to: accountsTo },
+                          { confirm: "Send this signed purchase slip to Accounts?", confirmLabel: "Send" }
+                        )
+                      }
+                    >
+                      <PenLine size={14} /> Send to Accounts
+                    </button>
+                  </div>
                 )}
               </div>
 

@@ -102,6 +102,8 @@ def empty_approval(rec: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         "signature_png": "",
         "signed_at": "",
         "signed_by": "",
+        "managers": "",
+        "holder": "",
         "locked": 0,
         "updated_at": "",
         "updated_by": "",
@@ -189,7 +191,113 @@ def public_approval(item: dict[str, Any]) -> dict[str, Any]:
     sig = str(out.get("signature_png") or "")
     out["has_signature"] = bool(sig)
     out.pop("signature_png", None)
+    out["manager_list"] = split_names(out.get("managers") or "")
     return out
+
+
+def split_names(raw: Any) -> list[str]:
+    text = str(raw or "").replace(";", ",")
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in text.split(","):
+        name = part.strip()
+        key = _norm(name)
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
+def people() -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for user in database.list_users():
+        if not user.get("is_active"):
+            continue
+        name = str(user.get("full_name") or user.get("username") or "").strip()
+        out.append(
+            {
+                "username": user["username"],
+                "full_name": str(user.get("full_name") or ""),
+                "label": name or user["username"],
+                "role": str(user.get("role") or ""),
+            }
+        )
+    return out
+
+
+def manager_users() -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for user in users_with_perm("po_approve"):
+        if str(user.get("role") or "").lower() == "admin":
+            continue
+        name = str(user.get("full_name") or user.get("username") or "").strip()
+        out.append(
+            {
+                "username": user["username"],
+                "full_name": str(user.get("full_name") or ""),
+                "label": name or user["username"],
+            }
+        )
+    if not out:
+        for user in users_with_perm("po_approve"):
+            name = str(user.get("full_name") or user.get("username") or "").strip()
+            out.append(
+                {
+                    "username": user["username"],
+                    "full_name": str(user.get("full_name") or ""),
+                    "label": name or user["username"],
+                }
+            )
+    return out
+
+
+def _normalize_managers(raw: Any) -> list[str]:
+    names = raw if isinstance(raw, (list, tuple)) else split_names(raw)
+    allowed: dict[str, str] = {}
+    for u in manager_users():
+        allowed[_norm(u["username"])] = u["username"]
+        allowed[_norm(u.get("full_name"))] = u["username"]
+        allowed[_norm(u.get("label"))] = u["username"]
+    out: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        login = allowed.get(_norm(name)) or _resolve_login(name)
+        if not login or login in seen:
+            continue
+        person = database.get_user_by_username(login)
+        if not person or not has_perm(person, "po_approve"):
+            continue
+        seen.add(login)
+        out.append(login)
+        if len(out) >= 3:
+            break
+    return out
+
+
+def _is_selected_manager(user: Optional[dict[str, Any]], approval: dict[str, Any]) -> bool:
+    if not user:
+        return False
+    if str(user.get("role") or "").lower() == "admin":
+        return True
+    if not has_perm(user, "po_approve"):
+        return False
+    selected = {_norm(n) for n in split_names(approval.get("managers") or "")}
+    if not selected:
+        return str(approval.get("state") or "") == "submitted"
+    me = {_norm(user.get("username")), _norm(user.get("full_name"))}
+    return bool(me & selected)
+
+
+def _is_holder(user: Optional[dict[str, Any]], approval: dict[str, Any]) -> bool:
+    if not user:
+        return False
+    holder = str(approval.get("holder") or "")
+    if not holder:
+        return False
+    if _norm(user.get("username")) == _norm(holder) or _norm(user.get("full_name")) == _norm(holder):
+        return True
+    return _resolve_login(holder) == user.get("username")
 
 
 def assign(rec: dict[str, Any], actor: dict[str, Any], assignee: str) -> dict[str, Any]:
@@ -208,6 +316,8 @@ def assign(rec: dict[str, Any], actor: dict[str, Any], assignee: str) -> dict[st
         coordinator=actor["username"],
         assignee=name,
         manager="",
+        managers="",
+        holder="",
         accounts_by=current.get("accounts_by") or "",
         comment="",
         signature_png="",
@@ -230,7 +340,34 @@ def assign(rec: dict[str, Any], actor: dict[str, Any], assignee: str) -> dict[st
     return {**item, "events": database.list_po_approval_events(str(rec.get("record_id") or ""))}
 
 
-def submit(rec: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+def unassign(rec: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+    if not has_perm(actor, "po_dispatch"):
+        raise PermissionError("Only a dispatcher can unassign a purchase approval.")
+    current = approval_for(rec)
+    if current.get("state") in LOCKED_STATES:
+        raise ValueError("This purchase slip is signed and locked.")
+    item = database.upsert_po_approval(
+        str(rec.get("record_id") or ""),
+        work_order_id=str(rec.get("work_order_id") or ""),
+        state="none",
+        coordinator=current.get("coordinator") or actor["username"],
+        assignee="",
+        manager="",
+        managers="",
+        holder="",
+        accounts_by="",
+        comment="",
+        signature_png="",
+        signed_at="",
+        signed_by="",
+        locked=0,
+        updated_by=actor["username"],
+    )
+    database.add_po_approval_event(str(rec.get("record_id") or ""), "unassign", actor["username"], "Unassigned")
+    return {**item, "events": database.list_po_approval_events(str(rec.get("record_id") or ""))}
+
+
+def submit(rec: dict[str, Any], actor: dict[str, Any], managers: Any = None) -> dict[str, Any]:
     current = approval_for(rec)
     if current.get("state") in LOCKED_STATES:
         raise ValueError("This PO is approved and locked.")
@@ -240,7 +377,12 @@ def submit(rec: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
     assignee_login = _resolve_login(current.get("assignee"))
     if not mine and assignee_login != actor.get("username") and str(actor.get("role") or "") != "admin":
         if _norm(actor.get("full_name")) != _norm(current.get("assignee")):
-            raise PermissionError("Only the assigned technician can send this PO to the manager.")
+            raise PermissionError("Only the assigned technician can send this purchase slip to a manager.")
+    picks = _normalize_managers(managers)
+    if not picks:
+        picks = [u["username"] for u in manager_users()[:3]]
+    if not picks:
+        raise ValueError("Pick at least one manager to send this purchase slip to.")
     item = database.upsert_po_approval(
         str(rec.get("record_id") or ""),
         work_order_id=str(rec.get("work_order_id") or ""),
@@ -248,6 +390,8 @@ def submit(rec: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
         coordinator=current.get("coordinator") or "",
         assignee=current.get("assignee") or "",
         manager="",
+        managers=",".join(picks),
+        holder="",
         accounts_by=current.get("accounts_by") or "",
         comment=current.get("comment") or "",
         signature_png="",
@@ -256,12 +400,12 @@ def submit(rec: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
         locked=0,
         updated_by=actor["username"],
     )
-    database.add_po_approval_event(str(rec.get("record_id") or ""), "submit", actor["username"], "Sent to operational manager")
+    labels = ", ".join(picks)
+    database.add_po_approval_event(
+        str(rec.get("record_id") or ""), "submit", actor["username"], f"Sent to {labels}"
+    )
     wo = rec.get("work_order_id") or rec.get("record_id")
-    managers = [str(u.get("username") or "") for u in users_with_perm("po_approve") if str(u.get("role") or "") != "admin"]
-    if not managers:
-        managers = [str(u.get("username") or "") for u in users_with_perm("po_approve")]
-    _notify_many(managers, actor["username"], "po", f"{actor['username']} sent PO {wo} for signature", rec)
+    _notify_many(picks, actor["username"], "po", f"{actor['username']} sent purchase slip {wo} for your signature", rec)
     return {**item, "events": database.list_po_approval_events(str(rec.get("record_id") or ""))}
 
 
@@ -272,20 +416,26 @@ def decide(
     approve: bool,
     comment: str = "",
     signature_png: str = "",
+    return_to: str = "",
 ) -> dict[str, Any]:
     if not has_perm(actor, "po_approve"):
-        raise PermissionError("Only an operational manager can sign or return this PO.")
+        raise PermissionError("Only a manager can sign or return this purchase slip.")
     current = approval_for(rec)
     if current.get("state") != "submitted":
-        raise ValueError("There is no PO waiting for the manager. The technician must send it first.")
+        raise ValueError("There is no purchase slip waiting for a manager. Send it first.")
+    if not _is_selected_manager(actor, current):
+        raise PermissionError("This slip was not sent to you.")
     if current.get("state") in LOCKED_STATES:
-        raise ValueError("This PO is already approved and locked.")
+        raise ValueError("This purchase slip is already signed and locked.")
     note = str(comment or "").strip()
     wo = rec.get("work_order_id") or rec.get("record_id")
     rid = str(rec.get("record_id") or "")
     if approve:
         if not str(signature_png or "").strip():
-            raise ValueError("Draw a signature to approve this PO.")
+            raise ValueError("Draw a digital signature to approve this purchase slip.")
+        holder = _resolve_login(return_to) or str(return_to or "").strip()
+        if not holder:
+            holder = _resolve_login(current.get("assignee")) or str(current.get("assignee") or "")
         item = database.upsert_po_approval(
             rid,
             work_order_id=str(rec.get("work_order_id") or ""),
@@ -293,6 +443,8 @@ def decide(
             coordinator=current.get("coordinator") or "",
             assignee=current.get("assignee") or "",
             manager=actor["username"],
+            managers=current.get("managers") or "",
+            holder=holder,
             accounts_by="",
             comment=note,
             signature_png=str(signature_png or ""),
@@ -301,16 +453,24 @@ def decide(
             locked=1,
             updated_by=actor["username"],
         )
-        database.add_po_approval_event(rid, "approve", actor["username"], note or "Signed and approved")
+        database.add_po_approval_event(
+            rid, "approve", actor["username"], note or f"Signed and sent to {holder or 'sender'}"
+        )
         ping = []
-        for name in (current.get("coordinator"), _resolve_login(current.get("assignee")), current.get("assignee")):
+        for name in (holder, current.get("coordinator"), _resolve_login(current.get("assignee")), current.get("assignee")):
             login = _resolve_login(name) or (name if name and database.get_user_by_username(str(name)) else None)
             if login:
                 ping.append(login)
-        _notify_many(ping, actor["username"], "po", f"{actor['username']} signed PO {wo}. It is locked.", rec)
+        _notify_many(
+            ping,
+            actor["username"],
+            "po",
+            f"{actor['username']} signed purchase slip {wo}. It is locked.",
+            rec,
+        )
         return {**item, "events": database.list_po_approval_events(rid)}
     if not note:
-        raise ValueError("Write the changes you need when returning a PO.")
+        raise ValueError("Write the changes you need when returning a purchase slip.")
     item = database.upsert_po_approval(
         rid,
         work_order_id=str(rec.get("work_order_id") or ""),
@@ -318,6 +478,8 @@ def decide(
         coordinator=current.get("coordinator") or "",
         assignee=current.get("assignee") or "",
         manager=actor["username"],
+        managers=current.get("managers") or "",
+        holder="",
         accounts_by="",
         comment=note,
         signature_png="",
@@ -339,12 +501,18 @@ def decide(
     return {**item, "events": database.list_po_approval_events(rid)}
 
 
-def send_accounts(rec: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
-    if not has_perm(actor, "po_dispatch") and not has_perm(actor, "accounts"):
-        raise PermissionError("Only a dispatcher (Abubacar, or a user granted that right) can send the PO to Accounts.")
+def send_accounts(rec: dict[str, Any], actor: dict[str, Any], to: str = "") -> dict[str, Any]:
     current = approval_for(rec)
     if current.get("state") != "approved":
-        raise ValueError("Approve and lock the PO before sending it to Accounts.")
+        raise ValueError("Sign the purchase slip before sending it to Accounts.")
+    if not (
+        has_perm(actor, "po_dispatch")
+        or has_perm(actor, "accounts")
+        or _is_holder(actor, current)
+        or str(actor.get("role") or "").lower() == "admin"
+    ):
+        raise PermissionError("Only the person holding this signed slip (or a dispatcher) can send it to Accounts.")
+    dest = _resolve_login(to) or str(to or "").strip()
     item = database.upsert_po_approval(
         str(rec.get("record_id") or ""),
         work_order_id=str(rec.get("work_order_id") or ""),
@@ -352,6 +520,8 @@ def send_accounts(rec: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
         coordinator=current.get("coordinator") or actor["username"],
         assignee=current.get("assignee") or "",
         manager=current.get("manager") or "",
+        managers=current.get("managers") or "",
+        holder=dest or current.get("holder") or "",
         accounts_by=actor["username"],
         comment=current.get("comment") or "",
         signature_png=current.get("signature_png") or "",
@@ -360,9 +530,56 @@ def send_accounts(rec: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
         locked=1,
         updated_by=actor["username"],
     )
-    database.add_po_approval_event(str(rec.get("record_id") or ""), "send_accounts", actor["username"], "Sent to Accounts")
+    note = f"Sent to Accounts" + (f" ({dest})" if dest else "")
+    database.add_po_approval_event(str(rec.get("record_id") or ""), "send_accounts", actor["username"], note)
     wo = rec.get("work_order_id") or rec.get("record_id")
-    notify_accounts(actor["username"], rec, f"{actor['username']} sent approved PO {wo} to Accounts")
+    ping = [dest] if dest else []
+    ping.extend(str(u.get("username") or "") for u in users_with_perm("accounts"))
+    if not ping:
+        ping = [str(u.get("username") or "") for u in users_with_perm("po_dispatch")]
+    _notify_many(ping, actor["username"], "accounts", f"{actor['username']} sent signed purchase slip {wo} to Accounts", rec)
+    return {**item, "events": database.list_po_approval_events(str(rec.get("record_id") or ""))}
+
+
+def route(rec: dict[str, Any], actor: dict[str, Any], to: str) -> dict[str, Any]:
+    current = approval_for(rec)
+    if current.get("state") != "approved":
+        raise ValueError("Sign the purchase slip before sending it on.")
+    if not (
+        has_perm(actor, "po_dispatch")
+        or _is_holder(actor, current)
+        or str(actor.get("role") or "").lower() == "admin"
+    ):
+        raise PermissionError("Only the person holding this signed slip can send it to someone else.")
+    dest = _resolve_login(to) or str(to or "").strip()
+    if not dest:
+        raise ValueError("Pick someone to send this signed slip to.")
+    item = database.upsert_po_approval(
+        str(rec.get("record_id") or ""),
+        work_order_id=str(rec.get("work_order_id") or ""),
+        state="approved",
+        coordinator=current.get("coordinator") or "",
+        assignee=current.get("assignee") or "",
+        manager=current.get("manager") or "",
+        managers=current.get("managers") or "",
+        holder=dest,
+        accounts_by=current.get("accounts_by") or "",
+        comment=current.get("comment") or "",
+        signature_png=current.get("signature_png") or "",
+        signed_at=current.get("signed_at") or "",
+        signed_by=current.get("signed_by") or "",
+        locked=1,
+        updated_by=actor["username"],
+    )
+    database.add_po_approval_event(str(rec.get("record_id") or ""), "route", actor["username"], f"Sent to {dest}")
+    wo = rec.get("work_order_id") or rec.get("record_id")
+    notify.notify(
+        dest,
+        "po",
+        f"{actor['username']} sent signed purchase slip {wo} to you",
+        record_id=str(rec.get("record_id") or ""),
+        work_order_id=str(rec.get("work_order_id") or ""),
+    )
     return {**item, "events": database.list_po_approval_events(str(rec.get("record_id") or ""))}
 
 
@@ -374,12 +591,18 @@ def capabilities(user: dict[str, Any], rec: dict[str, Any], approval: dict[str, 
     ) == _norm(assignee)
     if _resolve_login(assignee) == user.get("username"):
         mine = True
+    holding = _is_holder(user, approval)
     return {
         "can_assign": has_perm(user, "po_dispatch") and state not in LOCKED_STATES,
+        "can_unassign": has_perm(user, "po_dispatch") and state in {"assigned", "submitted", "changes_requested"},
         "can_submit": mine and state in {"assigned", "changes_requested"},
-        "can_decide": has_perm(user, "po_approve") and state == "submitted",
-        "can_send_accounts": (has_perm(user, "po_dispatch") or has_perm(user, "accounts")) and state == "approved",
+        "can_decide": _is_selected_manager(user, approval) and state == "submitted",
+        "can_route": state == "approved" and (holding or has_perm(user, "po_dispatch")),
+        "can_send_accounts": state == "approved"
+        and (holding or has_perm(user, "po_dispatch") or has_perm(user, "accounts")),
         "technicians": technician_users(),
+        "managers": manager_users(),
+        "people": people(),
         "dispatchers": [
             {"username": u["username"], "full_name": u.get("full_name") or ""}
             for u in users_with_perm("po_dispatch")
@@ -407,6 +630,10 @@ def lane_for(state: Any) -> str:
 def is_mine(user: Optional[dict[str, Any]], approval: dict[str, Any]) -> bool:
     if not user:
         return False
+    if _is_holder(user, approval):
+        return True
+    if str(approval.get("state") or "") == "submitted" and _is_selected_manager(user, approval):
+        return True
     assignee = str(approval.get("assignee") or "")
     if not assignee:
         return False
@@ -441,8 +668,8 @@ def _visible(user: dict[str, Any], lane: str, mine: bool) -> bool:
         return True
     if has_perm(user, "po_dispatch"):
         return True
-    if has_perm(user, "po_approve") and lane in {"to_sign", "ready", "accounts", "changes"}:
-        return True
+    if has_perm(user, "po_approve") and lane in {"to_sign", "changes"}:
+        return mine
     if has_perm(user, "accounts") and lane in {"ready", "accounts"}:
         return True
     return mine

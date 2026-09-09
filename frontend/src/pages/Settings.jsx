@@ -555,7 +555,7 @@ function EmailPanel({ cfg, setCfg, toast }) {
             checked={cfg.email_notify_po !== false}
             onChange={(e) => setCfg({ ...cfg, email_notify_po: e.target.checked })}
           />
-          PO signature requests
+          Purchase approval requests
         </label>
         <label className="inline-flex items-center gap-2">
           <input

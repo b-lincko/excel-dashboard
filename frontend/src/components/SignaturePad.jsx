@@ -69,7 +69,7 @@ export default function SignaturePad({ value, onChange, disabled }) {
     <div>
       <canvas
         ref={canvasRef}
-        className="w-full h-28 rounded-lg border border-slate-200 bg-white touch-none dark:border-white/10"
+        className="w-full h-40 rounded-lg border border-slate-200 bg-white touch-none dark:border-white/10"
         onMouseDown={start}
         onMouseMove={move}
         onMouseUp={end}

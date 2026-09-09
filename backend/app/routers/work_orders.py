@@ -139,10 +139,19 @@ class AssignPoBody(BaseModel):
     assignee: str = ""
 
 
+class SubmitPoBody(BaseModel):
+    managers: list[str] = Field(default_factory=list)
+
+
 class DecidePoBody(BaseModel):
     approve: bool
     comment: str = ""
     signature_png: str = ""
+    return_to: str = ""
+
+
+class RoutePoBody(BaseModel):
+    to: str = ""
 
 
 def _raise_excel(exc: Exception):

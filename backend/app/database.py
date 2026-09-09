@@ -223,6 +223,8 @@ CREATE TABLE IF NOT EXISTS po_approvals (
     coordinator TEXT,
     assignee TEXT,
     manager TEXT,
+    managers TEXT,
+    holder TEXT,
     accounts_by TEXT,
     comment TEXT,
     signature_png TEXT,
@@ -2195,6 +2197,8 @@ def upsert_po_approval(
     coordinator: str = "",
     assignee: str = "",
     manager: str = "",
+    managers: str = "",
+    holder: str = "",
     accounts_by: str = "",
     comment: str = "",
     signature_png: str = "",
@@ -2210,15 +2214,17 @@ def upsert_po_approval(
     with connect() as conn:
         conn.execute(
             """INSERT INTO po_approvals
-               (record_id, work_order_id, state, coordinator, assignee, manager, accounts_by, comment,
+               (record_id, work_order_id, state, coordinator, assignee, manager, managers, holder, accounts_by, comment,
                 signature_png, signed_at, signed_by, locked, updated_at, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(record_id) DO UPDATE SET
                  work_order_id = excluded.work_order_id,
                  state = excluded.state,
                  coordinator = excluded.coordinator,
                  assignee = excluded.assignee,
                  manager = excluded.manager,
+                 managers = excluded.managers,
+                 holder = excluded.holder,
                  accounts_by = excluded.accounts_by,
                  comment = excluded.comment,
                  signature_png = excluded.signature_png,
@@ -2234,6 +2240,8 @@ def upsert_po_approval(
                 coordinator or "",
                 assignee or "",
                 manager or "",
+                managers or "",
+                holder or "",
                 accounts_by or "",
                 comment or "",
                 signature_png or "",

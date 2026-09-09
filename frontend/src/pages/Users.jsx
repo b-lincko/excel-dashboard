@@ -24,7 +24,7 @@ const PAGE_LABELS = {
   digest: "Morning digest",
   materials: "Materials",
   supplier_suggest: "Supplier suggest",
-  po_approvals: "PO signatures",
+  po_approvals: "Purchase Approval",
 };
 
 const ACTION_LABELS = {

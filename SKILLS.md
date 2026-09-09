@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (email: admin SMTP or Resend, verification + reset links, PO/request emails).
+Last updated: 2026-09-09 (Purchase Approval: pick 1–3 managers, corporate PDF signature, route after sign, unassign, working Resend).
 
 ---
 
@@ -182,13 +182,13 @@ Due offsets (purchase type, days): Direct Cash 3, Local PO 5, International/Serv
 
 **PO digital signature** (`backend/app/approvals.py`, tables `po_approvals` / `po_approval_events`):
 
-Dedicated page **`/approvals`** (Daily nav **PO signatures**, `g then p`, command palette, Guide). Guest page key `po_approvals`. Inbox notifications `kind=po` / `accounts` open `/approvals?id=`.
+Dedicated page **`/approvals`** (Daily nav **Purchase Approval**, `g then p`). Guest page key `po_approvals`.
 
-1. Dispatcher (`po_dispatch`; Abubacar seeded if extras empty) sees **New POs** when `po_number` is recorded and assigns a technician.
-2. Technician (Arun, Nesar, Yousuf, or any `role=user`) updates suppliers/items on the MR, then **Send PDF to manager**.
-3. Operational manager (`po_approve`) reviews the PDF **in the page** (auth blob iframe, not download-only), **signs** (PNG data-URL) or **returns with a comment**.
-4. Approve only from state `submitted` — after a return the technician must send again. Approve **locks** PO fields (`po_number`, supplier, lines, dates, prices, description). Notify dispatcher + technician.
-5. Dispatcher (or `accounts`) **Send to Accounts**.
+1. Dispatcher assigns a technician (or **Unassign**).
+2. Technician sends the PDF to **1–3 managers** (`managers` column).
+3. A selected manager **must digital-sign**. The signature prints on the PDF at corporate size (~80×28 mm, aspect kept). They then send the signed slip back to the sender or someone else (`holder`).
+4. The holder (or dispatcher) sends it to **Accounts** or another person (`POST .../approval/route`).
+5. Approve **locks** PO fields. Extra grants: `po_dispatch`, `po_approve`, `accounts`.
 
 Inbox API: `GET /api/po-approvals?q=` → lanes `incoming | assigned | changes | to_sign | ready | accounts`. Per-WO actions stay on `GET/POST /api/work-orders/{id}/approval*`. States: `none | assigned | submitted | changes_requested | approved | sent_to_accounts`. Extra grants: `po_dispatch`, `po_approve`, `accounts`.
 

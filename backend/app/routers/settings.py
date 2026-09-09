@@ -4,7 +4,7 @@ import io
 import zipfile
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -95,15 +95,15 @@ class EmailTestBody(BaseModel):
 
 
 @router.post("/email/test")
-def send_test_email(body: EmailTestBody, user=Depends(require_permission("settings"))):
+def send_test_email(body: EmailTestBody, request: Request, user=Depends(require_permission("settings"))):
     dest = str(body.to or user.get("email") or "").strip()
     if not dest:
         raise HTTPException(status_code=400, detail="Enter an address to send the test to.")
     result = mailer.send_mail(
         dest,
         "Linkco MR test email",
-        "If you can read this, SMTP or Resend is working. Verification links and PO requests will use the same connection.",
-        url=mailer.link_for("/"),
+        "If you can read this, SMTP or Resend is working. Verification links and purchase-approval requests will use the same connection.",
+        url=mailer.link_for("/", request),
         cta="Open Linkco MR",
         title="Test email",
     )

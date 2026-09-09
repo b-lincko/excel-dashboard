@@ -7,7 +7,7 @@ const PAGES = [
   { id: "dash", label: "Dashboard", hint: "g d", to: "/", page: "dashboard" },
   { id: "wo", label: "Work orders", hint: "g w", to: "/work-orders", page: "work_orders" },
   { id: "queue", label: "Action queue", hint: "g q", to: "/queue", page: "queue" },
-  { id: "po", label: "PO signatures", hint: "g p", to: "/approvals", page: "po_approvals" },
+  { id: "po", label: "Purchase Approval", hint: "g p", to: "/approvals", page: "po_approvals" },
   { id: "new", label: "New material request", hint: "n", to: "/work-orders/new", need: "create" },
   { id: "chat", label: "Chat", hint: "g c", to: "/chat", page: "chat" },
   { id: "materials", label: "Materials", to: "/materials", page: "materials" },

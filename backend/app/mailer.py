@@ -114,6 +114,12 @@ def send_mail(
     provider = provider_name(cfg)
     if provider == "off":
         return {"ok": False, "skipped": True, "reason": "email is off"}
+    if provider == "resend" and not str(getattr(cfg, "resend_api_key", "") or "").strip():
+        return {"ok": False, "skipped": True, "reason": "Resend API key is missing"}
+    if provider == "smtp" and not str(getattr(cfg, "smtp_host", "") or "").strip():
+        return {"ok": False, "skipped": True, "reason": "SMTP host is missing"}
+    if not str(getattr(cfg, "email_from_address", "") or "").strip():
+        return {"ok": False, "skipped": True, "reason": "From email is missing"}
     heading = title or subject
     payload = {
         "to": dest,
@@ -171,10 +177,14 @@ def _send_resend(cfg, payload: dict[str, Any]) -> None:
     key = str(getattr(cfg, "resend_api_key", "") or "").strip()
     if not key:
         raise ValueError("Resend API key is required.")
-    from_addr = _from_header(cfg)
+    from_addr = str(getattr(cfg, "email_from_address", "") or "").strip()
+    from_name = str(getattr(cfg, "email_from_name", "") or "").strip()
+    if not from_addr:
+        raise ValueError("Set a From email address in Settings. It must be on a domain verified in Resend.")
+    sender = f"{from_name} <{from_addr}>" if from_name else from_addr
     body = json.dumps(
         {
-            "from": from_addr,
+            "from": sender,
             "to": [payload["to"]],
             "subject": payload["subject"],
             "html": payload["html"],
@@ -188,14 +198,23 @@ def _send_resend(cfg, payload: dict[str, Any]) -> None:
         headers={
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
+            "User-Agent": "Linkco-MR/1.1",
         },
     )
+    ctx = ssl.create_default_context()
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
             resp.read()
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:300]
-        raise ValueError(f"Resend rejected the email ({exc.code}): {detail}") from exc
+        detail = exc.read().decode("utf-8", errors="replace")[:400]
+        hint = ""
+        if exc.code in {401, 403}:
+            hint = " Check the API key."
+        elif exc.code == 422:
+            hint = " From address must be on a domain you verified in Resend."
+        raise ValueError(f"Resend rejected the email ({exc.code}): {detail}.{hint}") from exc
+    except urllib.error.URLError as exc:
+        raise ValueError(f"Could not reach Resend: {exc.reason}") from exc
 
 
 def link_for(path: str, request: Any = None, cfg=None) -> str:
@@ -282,8 +301,6 @@ def maybe_notify_email(
         return None
     user = database.get_user_by_username(username)
     if not user or not user.get("is_active"):
-        return None
-    if not user.get("email_verified"):
         return None
     email = str(user.get("email") or "").strip()
     if not looks_real_email(email):

@@ -736,7 +736,7 @@ export default function WorkOrderDetail() {
         )}
         {!isNew && (
           <Link className="tab-btn" to={`/approvals?id=${encodeURIComponent(form.record_id || id)}`}>
-            PO signatures
+            Purchase Approval
           </Link>
         )}
       </div>

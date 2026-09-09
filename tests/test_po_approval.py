@@ -130,3 +130,37 @@ def test_inbox_lanes_and_resubmit(tmp_path, monkeypatch):
     assert signed["state"] == "approved"
     ready = approvals.inbox(abu)
     assert any(i["record_id"] == rec["record_id"] for i in ready["lanes"]["ready"])
+
+
+def test_unassign_managers_and_route(tmp_path, monkeypatch):
+    db = tmp_path / "po-route.db"
+    monkeypatch.setattr(database, "DB_PATH", db)
+    database.init_db()
+    rec = {
+        "record_id": "TEST:PO-ROUTE",
+        "work_order_id": "482100",
+        "po_number": "PO-R",
+        "status": "PLACED",
+        "assigned_to": "Nesar",
+    }
+    database.upsert_wo_record(rec)
+    abu = database.get_user_by_username("abubacar")
+    nesar = database.get_user_by_username("nesar")
+    manager = database.get_user_by_username("manager")
+    approvals.assign(rec, abu, "Nesar")
+    cleared = approvals.unassign(rec, abu)
+    assert cleared["state"] == "none"
+    assert not cleared.get("assignee")
+    approvals.assign(rec, abu, "Nesar")
+    sent = approvals.submit(rec, nesar, managers=["manager"])
+    assert sent["state"] == "submitted"
+    assert "manager" in str(sent.get("managers") or "")
+    signed = approvals.decide(
+        rec, manager, approve=True, signature_png="data:image/png;base64,aaaa", return_to="nesar"
+    )
+    assert signed["state"] == "approved"
+    assert str(signed.get("holder") or "").lower() == "nesar"
+    routed = approvals.route(rec, nesar, "abubacar")
+    assert str(routed.get("holder") or "").lower() == "abubacar"
+    sent_acc = approvals.send_accounts(rec, abu, to="admin")
+    assert sent_acc["state"] == "sent_to_accounts"

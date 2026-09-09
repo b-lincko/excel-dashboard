@@ -107,6 +107,46 @@ def test_verify_link_and_request_email(tmp_path, monkeypatch):
     invalidate_config_cache()
 
 
+def test_resend_posts_when_configured(monkeypatch):
+    from app import mailer as mailer_mod
+
+    class FakeResp:
+        def read(self):
+            return b'{"id":"re_test"}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    captured = {}
+
+    def fake_urlopen(req, timeout=20, context=None):
+        captured["url"] = req.full_url
+        captured["body"] = req.data.decode("utf-8")
+        captured["auth"] = req.headers.get("Authorization") or req.headers.get("authorization")
+        return FakeResp()
+
+    monkeypatch.setattr(mailer_mod, "_testing", lambda: False)
+    monkeypatch.setattr(mailer_mod.urllib.request, "urlopen", fake_urlopen)
+
+    class Cfg:
+        email_provider = "resend"
+        email_from_name = "Linkco MR"
+        email_from_address = "ops@example.com"
+        resend_api_key = "re_test_key"
+        smtp_host = ""
+
+    monkeypatch.setattr(mailer_mod, "load_config", lambda: Cfg())
+    result = mailer_mod.send_mail("tech@example.com", "Hello", "Body text")
+    assert result.get("ok") is True
+    assert captured["url"] == "https://api.resend.com/emails"
+    assert "re_test_key" in (captured.get("auth") or "")
+    assert "ops@example.com" in captured["body"]
+    assert "tech@example.com" in captured["body"]
+
+
 def test_email_off_skips_send():
     mailer.OUTBOX.clear()
     invalidate_config_cache()
