@@ -37,7 +37,13 @@ def provider_name(cfg=None) -> str:
 
 
 def is_configured(cfg=None) -> bool:
-    return provider_name(cfg) != "off"
+    cfg = cfg or load_config()
+    provider = provider_name(cfg)
+    if provider == "resend":
+        return bool(str(getattr(cfg, "resend_api_key", "") or "").strip())
+    if provider == "smtp":
+        return bool(str(getattr(cfg, "smtp_host", "") or "").strip())
+    return False
 
 
 def public_base(request: Any = None, cfg=None) -> str:
@@ -265,7 +271,7 @@ def send_reset(user: dict[str, Any], request: Any = None) -> dict[str, Any]:
 
 def notify_path(kind: str, record_id: str = "", work_order_id: str = "", thread_id: Any = None) -> str:
     rid = str(record_id or "").strip()
-    if kind in {"po", "accounts"} and rid:
+    if kind in {"po", "accounts", "ping"} and rid:
         return f"/approvals?id={rid}"
     if rid:
         return f"/work-orders/{rid}"
@@ -277,7 +283,7 @@ def notify_path(kind: str, record_id: str = "", work_order_id: str = "", thread_
 def should_email_kind(kind: str, cfg=None) -> bool:
     cfg = cfg or load_config()
     key = str(kind or "").strip().lower()
-    if key in {"po", "accounts"}:
+    if key in {"po", "accounts", "ping"}:
         return bool(getattr(cfg, "email_notify_po", True))
     if key == "assign":
         return bool(getattr(cfg, "email_notify_assign", True))
@@ -310,6 +316,7 @@ def maybe_notify_email(
     wo = work_order_id or record_id
     subject = {
         "po": f"PO request{f' · {wo}' if wo else ''}",
+        "ping": f"PO follow-up{f' · {wo}' if wo else ''}",
         "accounts": f"PO for Accounts{f' · {wo}' if wo else ''}",
         "assign": f"Assigned to you{f' · {wo}' if wo else ''}",
         "mention": "You were mentioned in Linkco MR",

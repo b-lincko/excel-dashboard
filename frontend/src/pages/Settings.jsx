@@ -512,17 +512,19 @@ function EmailPanel({ cfg, setCfg, toast }) {
       <div>
         <div className="font-semibold">Email</div>
         <p className="text-xs text-slate-500">
-          SMTP or Resend sends verification links, password resets, and PO / assignment requests. The in-app inbox still
-          works if mail is off. Secrets are never returned after save.
+          The app is preset for the <strong>Resend API</strong>: paste your key and a From address on a domain verified in
+          Resend, then Save and send a test. SMTP stays available. Emails cover verification, password resets, PO / approval
+          requests, follow-ups, assignment pings and @mentions. The in-app inbox still works if mail is off. Secrets are
+          never returned after save.
         </p>
       </div>
       <div className="grid md:grid-cols-2 gap-3">
         <div>
           <label className="lbl">Provider</label>
           <select value={provider} onChange={(e) => setCfg({ ...cfg, email_provider: e.target.value })}>
-            <option value="off">Off</option>
+            <option value="resend">Resend API (preset)</option>
             <option value="smtp">SMTP</option>
-            <option value="resend">Resend API</option>
+            <option value="off">Off</option>
           </select>
         </div>
         <div>
@@ -555,7 +557,7 @@ function EmailPanel({ cfg, setCfg, toast }) {
             checked={cfg.email_notify_po !== false}
             onChange={(e) => setCfg({ ...cfg, email_notify_po: e.target.checked })}
           />
-          Purchase approval requests
+          Purchase approval requests &amp; follow-ups
         </label>
         <label className="inline-flex items-center gap-2">
           <input
@@ -633,6 +635,9 @@ function EmailPanel({ cfg, setCfg, toast }) {
             placeholder={cfg.resend_api_key_set ? "Leave blank to keep the saved key" : "re_…"}
             autoComplete="new-password"
           />
+          <p className="text-[11px] text-slate-500 mt-1">
+            Create the key at resend.com/api-keys. The From email must be on a domain you verified in Resend.
+          </p>
         </div>
       )}
       {provider !== "off" && (

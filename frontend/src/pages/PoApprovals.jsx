@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { FileText, PenLine, Send, Stamp } from "lucide-react";
+import { FileText, PenLine, Send, Stamp, BellRing } from "lucide-react";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
@@ -48,6 +48,7 @@ export default function PoApprovals() {
   const [returnTo, setReturnTo] = useState("");
   const [routeTo, setRouteTo] = useState("");
   const [accountsTo, setAccountsTo] = useState("");
+  const [pingNote, setPingNote] = useState("");
   const [celebrate, setCelebrate] = useState(false);
 
   function loadInbox() {
@@ -145,6 +146,7 @@ export default function PoApprovals() {
         setSignature("");
         setCelebrate(true);
       }
+      if (path.includes("ping")) setPingNote("");
       loadInbox();
     } catch (e) {
       setError(typeof e.detail === "string" ? e.detail : e.message);
@@ -158,6 +160,14 @@ export default function PoApprovals() {
   const item = detail?.item || {};
   const techs = caps.technicians || data?.technicians || [];
   const who = user?.full_name || user?.username || "";
+
+  const pingWaitMin = useMemo(() => {
+    if (!caps.last_ping_at || !caps.ping_cooldown_minutes) return 0;
+    const last = new Date(String(caps.last_ping_at).replace(" ", "T") + "Z").getTime();
+    if (Number.isNaN(last)) return 0;
+    const end = last + Number(caps.ping_cooldown_minutes) * 60000;
+    return Math.max(0, Math.ceil((end - Date.now()) / 60000));
+  }, [caps.last_ping_at, caps.ping_cooldown_minutes]);
 
   return (
     <div className="space-y-5">
@@ -292,6 +302,41 @@ export default function PoApprovals() {
                     Manager asked for: {a.comment}
                   </div>
                 ) : null}
+
+                {caps.can_ping && (
+                  <div className="rounded-lg border border-slate-200 dark:border-white/10 p-3 space-y-2" data-tour="appr-followup">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Follow up</div>
+                      <span className="text-xs text-slate-500">
+                        {pingWaitMin > 0
+                          ? `You can nudge again in ~${pingWaitMin} min`
+                          : caps.last_ping_at
+                            ? `Last follow-up ${caps.last_ping_at} UTC`
+                            : "No follow-up sent yet"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Nudge {caps.ping_label || "them"} — an inbox ping, plus an email when mail is on.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        className="flex-1 min-w-[12rem]"
+                        value={pingNote}
+                        maxLength={200}
+                        onChange={(e) => setPingNote(e.target.value)}
+                        placeholder="Optional note — e.g. “Please sign today, delivery is waiting”"
+                      />
+                      <button
+                        className="btn-outline"
+                        disabled={busy || pingWaitMin > 0}
+                        onClick={() => run("/approval/ping", { note: pingNote })}
+                      >
+                        <BellRing size={14} /> Send follow-up
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {error && <div className="text-sm text-rose-600">{error}</div>}
 
                 {caps.can_assign && (

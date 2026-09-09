@@ -52,12 +52,33 @@ def _merge_settings(current: dict[str, Any], incoming: dict[str, Any]) -> dict[s
         provider = "off"
     else:
         merged["email_provider"] = provider
-    if provider != "off" and not str(merged.get("email_from_address") or "").strip():
-        raise HTTPException(status_code=422, detail="From email is required when email is on.")
-    if provider == "smtp" and not str(merged.get("smtp_host") or "").strip():
-        raise HTTPException(status_code=422, detail="SMTP host is required.")
-    if provider == "resend" and not str(merged.get("resend_api_key") or "").strip():
-        raise HTTPException(status_code=422, detail="Resend API key is required.")
+    # Only validate the mail setup when this save actually changes an email
+    # value. The preset provider (Resend) without a key yet must not block
+    # unrelated settings saves; sends simply skip until key + From exist.
+    email_keys = {
+        "email_provider",
+        "email_from_address",
+        "email_from_name",
+        "email_public_url",
+        "resend_api_key",
+        "smtp_host",
+        "smtp_port",
+        "smtp_username",
+        "smtp_password",
+        "smtp_security",
+        "email_notify_po",
+        "email_notify_assign",
+        "email_notify_mention",
+        "email_notify_chat",
+    }
+    email_touched = any(merged.get(k) != current.get(k) for k in email_keys)
+    if provider != "off" and email_touched:
+        if not str(merged.get("email_from_address") or "").strip():
+            raise HTTPException(status_code=422, detail="From email is required when email is on.")
+        if provider == "smtp" and not str(merged.get("smtp_host") or "").strip():
+            raise HTTPException(status_code=422, detail="SMTP host is required.")
+        if provider == "resend" and not str(merged.get("resend_api_key") or "").strip():
+            raise HTTPException(status_code=422, detail="Resend API key is required.")
     return merged
 
 

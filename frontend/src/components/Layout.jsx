@@ -616,7 +616,7 @@ export default function Layout() {
                         onClick={async () => {
                           await api.post("/api/notifications/read", { ids: [n.id] });
                           loadInbox();
-                          if (n.record_id && (n.kind === "po" || n.kind === "accounts"))
+                          if (n.record_id && (n.kind === "po" || n.kind === "accounts" || n.kind === "ping"))
                             nav(`/approvals?id=${encodeURIComponent(n.record_id)}`);
                           else if (n.record_id) nav(`/work-orders/${encodeURIComponent(n.record_id)}`);
                           else if (n.thread_id) nav(`/chat?thread=${encodeURIComponent(n.thread_id)}`);

@@ -150,6 +150,10 @@ class DecidePoBody(BaseModel):
     return_to: str = ""
 
 
+class PingPoBody(BaseModel):
+    note: str = ""
+
+
 class RoutePoBody(BaseModel):
     to: str = ""
 
@@ -938,6 +942,18 @@ def send_po_accounts(wo_id: str, user=Depends(require_permission("edit"))):
     rec = _wo_or_404(wo_id)
     try:
         approval = approvals.send_accounts(rec, user)
+    except (PermissionError, ValueError) as exc:
+        _raise_approval(exc)
+    return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}
+
+
+@router.post("/{wo_id}/approval/ping")
+def ping_po(wo_id: str, body: PingPoBody, user=Depends(require_permission("edit"))):
+    rec = _wo_or_404(wo_id)
+    try:
+        approval = approvals.follow_up(rec, user, note=body.note)
+    except approvals.PingCooldown as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
     except (PermissionError, ValueError) as exc:
         _raise_approval(exc)
     return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}

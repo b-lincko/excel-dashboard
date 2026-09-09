@@ -367,7 +367,7 @@
         <div class="card"><h3 class="ok">Purchase Approval desk</h3><p>A dedicated screen — <strong>/approvals</strong> — for the whole signature flow: assign, send to managers, sign, route, Accounts.</p></div>
         <div class="card"><h3 class="ok">Digital signatures</h3><p>Managers draw a signature once per slip. It prints on the PDF at <strong>corporate size</strong> (~80×28&nbsp;mm). Signing locks the slip.</p></div>
         <div class="card"><h3 class="ok">Manager signing tour</h3><p>An in-app tour walks managers through signing, step by step. Button: <strong>How signing works</strong> on the approvals desk.</p></div>
-        <div class="card"><h3 class="ok">Email out</h3><p>SMTP or Resend. Verification, password reset, PO requests and @mentions reach verified addresses. In-app inbox still works without mail.</p></div>
+        <div class="card"><h3 class="ok">Email + follow-ups</h3><p>Preset for the <strong>Resend API</strong>. Verification, resets, PO requests, <strong>follow-up nudges</strong> and @mentions reach verified addresses. The inbox works without mail too.</p></div>
       </div>
       <p style="margin-top:22px">Also new: an animated sign-in screen, an animated signature pad with a self-drawing hint, and a <strong>Signed &amp; locked</strong> stamp the moment a manager signs.</p>
     </section>
@@ -386,6 +386,7 @@
         <li>Open it from <strong>Daily → Purchase Approval</strong>, or press <kbd>g</kbd> then <kbd>p</kbd>.</li>
         <li><strong>Unassign</strong> hands the slip back if the wrong technician has it.</li>
         <li>Approve <strong>locks</strong> suppliers, items and prices — changes need a fresh slip.</li>
+        <li><strong class="ok">New: Follow up</strong> — waiting too long? Nudge whoever holds the ball (managers, technician or holder) with one click: an inbox ping plus an email.</li>
       </ul>
     </section>
 
@@ -414,11 +415,11 @@
 
     <section class="slide">
       <p class="kicker">What's new · email</p>
-      <h2>Mail is optional — and useful</h2>
+      <h2>Set up for Resend — turn the key</h2>
       <div class="row three">
-        <div class="card"><h3>Admin sets it once</h3><p>Settings → Email. Pick <strong>SMTP</strong> or <strong>Resend</strong>, set From and the public URL used in links. Send a test.</p></div>
-        <div class="card"><h3>Accounts get real mail</h3><p>Address verification, password reset, PO signature requests, Accounts hand-offs, assign-to pings and @mentions — to <strong>verified</strong> addresses only.</p></div>
-        <div class="card"><h3>Nothing depends on it</h3><p>Seed logins at <code>@woms.local</code> are never mailed. Mail off? The in-app inbox still carries every ping.</p></div>
+        <div class="card"><h3>Preset: Resend API</h3><p>Settings → Email already points at <strong>Resend</strong>. Paste your <code>re_…</code> API key, set a From address on a verified domain, Save, send a test.</p></div>
+        <div class="card"><h3>Accounts get real mail</h3><p>Verification, password reset, PO signature requests, <strong>follow-up nudges</strong>, Accounts hand-offs, assign-to pings and @mentions — to verified addresses only.</p></div>
+        <div class="card"><h3>Nothing depends on it</h3><p>No key yet? Everything still works — the in-app inbox carries every ping. SMTP stays available; mail can be switched off.</p></div>
       </div>
     </section>
 

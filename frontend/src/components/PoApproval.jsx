@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { BellRing } from "lucide-react";
 import { api } from "../lib/api.js";
 import { useTour } from "../context/TourContext.jsx";
+import { useUi } from "../context/UiContext.jsx";
 import SignaturePad from "./SignaturePad.jsx";
 import SignSuccess from "./SignSuccess.jsx";
 
@@ -16,6 +18,7 @@ const LABELS = {
 
 export default function PoApproval({ woId, onNotice }) {
   const { startSigning } = useTour();
+  const { ask, toast } = useUi();
   const [data, setData] = useState(null);
   const [assignee, setAssignee] = useState("");
   const [comment, setComment] = useState("");
@@ -61,6 +64,26 @@ export default function PoApproval({ woId, onNotice }) {
   const caps = data.caps || {};
   const techs = caps.technicians || [];
 
+  async function ping() {
+    const ok = await ask({
+      title: "Send a follow-up?",
+      body: `Nudge ${caps.ping_label || "them"} — they get an inbox ping and, when mail is on, an email.`,
+      confirmLabel: "Send follow-up",
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError("");
+    try {
+      const d = await api.post(`/api/work-orders/${encodeURIComponent(woId)}/approval/ping`, {});
+      setData((prev) => ({ ...prev, approval: d.approval, caps: d.caps }));
+      toast("Follow-up sent", "success");
+    } catch (e) {
+      setError(typeof e.detail === "string" ? e.detail : e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="card p-5 space-y-4">
       <div>
@@ -90,6 +113,16 @@ export default function PoApproval({ woId, onNotice }) {
         {a.assignee ? <span className="text-slate-500">Technician {a.assignee}</span> : null}
         {a.locked ? <span className="text-emerald-700">Locked</span> : null}
       </div>
+      {caps.can_ping && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className="btn-outline" disabled={busy} onClick={ping}>
+            <BellRing size={14} /> Follow up
+          </button>
+          <span className="text-xs text-slate-500">
+            Nudge {caps.ping_label || "them"} — inbox ping, plus an email when mail is on.
+          </span>
+        </div>
+      )}
       {a.comment ? <p className="text-sm text-amber-800 dark:text-amber-200">Manager: {a.comment}</p> : null}
       {error && <div className="text-sm text-rose-600">{error}</div>}
 

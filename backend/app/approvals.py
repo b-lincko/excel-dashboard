@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from . import database, notify
+from .config import load_config
 from .security import user_permissions
 
 STATES = ("none", "assigned", "submitted", "changes_requested", "approved", "sent_to_accounts")
 LOCKED_STATES = {"approved", "sent_to_accounts"}
+PING_STATES = {"assigned", "changes_requested", "submitted", "approved"}
 PO_LOCK_FIELDS = {
     "po_number",
     "supplier",
@@ -21,6 +24,10 @@ PO_LOCK_FIELDS = {
     "final_price",
 }
 PRICE_FIELDS = ("unit_price", "price", "total_price", "final_price")
+
+
+class PingCooldown(Exception):
+    """Raised when a follow-up is sent again inside the cooldown window."""
 
 
 def _norm(value: Any) -> str:
@@ -583,6 +590,129 @@ def route(rec: dict[str, Any], actor: dict[str, Any], to: str) -> dict[str, Any]
     return {**item, "events": database.list_po_approval_events(str(rec.get("record_id") or ""))}
 
 
+# ---------- Follow up (ping) ----------
+
+PING_LABELS = {
+    "assigned": "the technician",
+    "changes_requested": "the technician",
+    "submitted": "the manager(s) who must sign",
+    "approved": "the person holding the signed slip",
+}
+
+
+def ping_target_label(state: Any) -> str:
+    return PING_LABELS.get(str(state or "").strip().lower(), "")
+
+
+def ping_targets(approval: dict[str, Any]) -> list[str]:
+    """Logins that currently hold the ball on this slip."""
+    state = str(approval.get("state") or "").strip().lower()
+    out: list[str] = []
+    if state == "submitted":
+        for name in split_names(approval.get("managers") or ""):
+            login = _resolve_login(name)
+            if login and login not in out:
+                out.append(login)
+    elif state in {"assigned", "changes_requested"}:
+        login = _resolve_login(approval.get("assignee"))
+        if login:
+            out.append(login)
+    elif state == "approved":
+        login = _resolve_login(approval.get("holder"))
+        if login:
+            out.append(login)
+    return out
+
+
+def last_ping_at(approval: dict[str, Any]) -> str:
+    for ev in reversed(approval.get("events") or []):
+        if str(ev.get("action") or "") == "ping":
+            return str(ev.get("created_at") or "")
+    return ""
+
+
+def _parse_ping_time(value: Any) -> Optional[datetime]:
+    try:
+        return datetime.strptime(str(value or "").strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def ping_cooldown_minutes() -> int:
+    try:
+        return max(0, int(getattr(load_config(), "po_ping_cooldown_minutes", 30) or 0))
+    except Exception:
+        return 30
+
+
+def can_ping(user: Optional[dict[str, Any]], approval: dict[str, Any]) -> bool:
+    if not user:
+        return False
+    state = str(approval.get("state") or "").strip().lower()
+    if state not in PING_STATES:
+        return False
+    login = _norm(user.get("username"))
+    involved = (
+        has_perm(user, "po_dispatch")
+        or _resolve_login(approval.get("assignee")) == user.get("username")
+        or _is_holder(user, approval)
+        or _norm(approval.get("coordinator")) == login
+    )
+    if not involved:
+        return False
+    return any(t for t in ping_targets(approval) if _norm(t) != login)
+
+
+def follow_up(rec: dict[str, Any], actor: dict[str, Any], note: str = "") -> dict[str, Any]:
+    """Nudge whoever is holding the ball: managers sign, technician fixes/sends, holder routes."""
+    current = approval_for(rec)
+    state = str(current.get("state") or "").strip().lower()
+    rid = str(rec.get("record_id") or "")
+    if state in {"", "none"}:
+        raise ValueError("Nothing to follow up yet — assign a technician to this PO first.")
+    if state == "sent_to_accounts":
+        raise ValueError("This slip is already with Accounts — nothing to follow up.")
+    if state not in PING_STATES:
+        raise ValueError("There is nothing to follow up on this slip right now.")
+    login = str(actor.get("username") or "")
+    involved = (
+        has_perm(actor, "po_dispatch")
+        or _resolve_login(current.get("assignee")) == login
+        or _is_holder(actor, current)
+        or _norm(current.get("coordinator")) == _norm(login)
+    )
+    if not involved:
+        raise PermissionError("Only someone on this purchase slip (dispatcher, technician, holder) can follow up.")
+    targets = [t for t in ping_targets(current) if t and _norm(t) != _norm(login)]
+    if not targets:
+        raise ValueError("Everyone who needs it already has it — there is nobody to follow up.")
+    cooldown = ping_cooldown_minutes()
+    last = _parse_ping_time(last_ping_at(current))
+    if cooldown > 0 and last:
+        waited = (datetime.now(timezone.utc) - last).total_seconds() / 60.0
+        if waited < cooldown:
+            raise PingCooldown(
+                f"A follow-up was sent {max(1, int(waited))} minutes ago — try again in about {max(1, int(cooldown - waited))} minutes."
+            )
+    text = str(note or "").strip()[:200]
+    wo = rec.get("work_order_id") or rec.get("record_id")
+    labels = ", ".join(targets)
+    database.add_po_approval_event(rid, "ping", login, text or f"Follow-up sent to {labels}")
+    message = f"{login} followed up on purchase slip {wo}"
+    if state == "submitted":
+        message += " — it is waiting for your signature"
+    elif state == "assigned":
+        message += " — please update suppliers and send it to the manager"
+    elif state == "changes_requested":
+        message += " — please make the requested changes and send it again"
+    elif state == "approved":
+        message += " — you hold the signed slip, please send it on or to Accounts"
+    if text:
+        message += f": {text}"
+    _notify_many(targets, login, "ping", message, rec)
+    return {**current, "events": database.list_po_approval_events(rid)}
+
+
 def capabilities(user: dict[str, Any], rec: dict[str, Any], approval: dict[str, Any]) -> dict[str, Any]:
     state = str(approval.get("state") or "none")
     assignee = str(approval.get("assignee") or "")
@@ -600,6 +730,11 @@ def capabilities(user: dict[str, Any], rec: dict[str, Any], approval: dict[str, 
         "can_route": state == "approved" and (holding or has_perm(user, "po_dispatch")),
         "can_send_accounts": state == "approved"
         and (holding or has_perm(user, "po_dispatch") or has_perm(user, "accounts")),
+        "can_ping": can_ping(user, approval),
+        "ping_label": ping_target_label(state),
+        "ping_targets": ping_targets(approval),
+        "last_ping_at": last_ping_at(approval),
+        "ping_cooldown_minutes": ping_cooldown_minutes(),
         "technicians": technician_users(),
         "managers": manager_users(),
         "people": people(),

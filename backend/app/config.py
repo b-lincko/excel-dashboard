@@ -216,7 +216,9 @@ class AppConfig(BaseModel):
     allow_open_with_close_date: bool = True
     jwt_secret: str = "woms-dev-secret-change-in-production-2026"
     jwt_expire_hours: int = 12
-    email_provider: str = "off"
+    # Mail is preset for the Resend API: paste the key + a From address on a
+    # domain verified in Resend, and it goes live. SMTP stays available.
+    email_provider: str = "resend"
     email_from_name: str = "Linkco MR"
     email_from_address: str = ""
     email_public_url: str = ""
@@ -230,6 +232,7 @@ class AppConfig(BaseModel):
     smtp_password: str = ""
     smtp_security: str = "starttls"
     resend_api_key: str = ""
+    po_ping_cooldown_minutes: int = 30
     auto_refresh_seconds: int = 60
     id_prefix: str = "MR"
     permissions: dict[str, list[str]] = Field(

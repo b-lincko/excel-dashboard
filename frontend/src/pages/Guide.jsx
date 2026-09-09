@@ -105,6 +105,11 @@ export default function Guide() {
           to the sender or someone else. That person can send it to Accounts or another person. After a signature the
           slip is locked.
         </p>
+        <p className="text-sm text-slate-500">
+          Waiting too long? <b>Follow up</b> nudges whoever holds the ball — the managers who must sign, the technician,
+          or the person holding the signed slip — with an inbox ping and an email (when mail is on). A cooldown keeps the
+          nudges polite.
+        </p>
         {can("po_approve") && (
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
