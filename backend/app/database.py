@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -866,20 +868,37 @@ def snapshot_to(dest: Path) -> Path:
     """Copy the live SQLite file with the backup API (safe while connections are open)."""
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(dest.name + ".tmp")
-    if tmp.exists():
-        tmp.unlink()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    src = sqlite3.connect(str(DB_PATH), timeout=15)
-    dst = sqlite3.connect(str(tmp), timeout=15)
-    try:
-        src.backup(dst)
-        dst.commit()
-    finally:
-        dst.close()
-        src.close()
-    tmp.replace(dest)
-    return dest
+    last_err: Optional[BaseException] = None
+    for attempt in range(3):
+        tmp = dest.with_name(dest.name + f".tmp{os.getpid()}-{attempt}")
+        try:
+            if tmp.exists():
+                tmp.unlink()
+            src = sqlite3.connect(str(DB_PATH), timeout=15)
+            dst = sqlite3.connect(str(tmp), timeout=15)
+            try:
+                src.backup(dst)
+                dst.commit()
+            finally:
+                dst.close()
+                src.close()
+            try:
+                with open(tmp, "rb+") as fh:
+                    fh.flush()
+                    os.fsync(fh.fileno())
+            except OSError:
+                pass
+            tmp.replace(dest)
+            return dest
+        except Exception as exc:
+            last_err = exc
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            time.sleep(0.2 * (attempt + 1))
+    raise RuntimeError(f"Could not snapshot the database: {last_err}") from last_err
 
 
 def restore_from(src: Path) -> None:

@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import tempfile
 import threading
+import time
 import uuid
 import zipfile
 from datetime import datetime, timedelta
@@ -99,6 +100,64 @@ def _replace_excel_file(src: Path, dest: Path) -> None:
     src.unlink(missing_ok=True)
 
 
+def _looks_like_xlsx(content: bytes) -> bool:
+    return bool(content) and content[:2] == b"PK"
+
+
+def _looks_like_xls(content: bytes) -> bool:
+    return bool(content) and content[:4] == b"\xd0\xcf\x11\xe0"
+
+
+def _norm_sheet_name(name: str) -> str:
+    return " ".join(str(name or "").replace("_", " ").lower().split())
+
+
+def _copy_file_durable(src: Path, dest: Path, attempts: int = 3) -> None:
+    """Copy with fsync + inode-safe replace. Retries lock/busy errors."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    last_err: Optional[BaseException] = None
+    for attempt in range(max(1, attempts)):
+        tmp = dest.with_name(f".{dest.name}.part{os.getpid()}-{attempt}")
+        try:
+            with open(src, "rb") as inf, open(tmp, "wb") as out:
+                shutil.copyfileobj(inf, out, length=1024 * 1024)
+                out.flush()
+                os.fsync(out.fileno())
+            src_size = src.stat().st_size
+            if tmp.stat().st_size != src_size:
+                raise OSError("Copied file size does not match the source.")
+            _replace_excel_file(tmp, dest)
+            if not dest.is_file() or dest.stat().st_size != src_size:
+                raise OSError("Backup file was not written completely.")
+            return
+        except Exception as exc:
+            last_err = exc
+            tmp.unlink(missing_ok=True)
+            time.sleep(0.2 * (attempt + 1))
+    raise OSError(str(last_err) if last_err else "Could not copy file.") from last_err
+
+
+_SKIP_SHEET_HINTS = ("report", "file pah", "file path", "dashboard", "pivot")
+_HEADER_SCAN_ROWS = 8
+_READ_MAX_COL = 80
+
+
+def _headers_from_cells(cells: list[Any]) -> list[str]:
+    headers: list[str] = []
+    for col_i, val in enumerate(cells, start=1):
+        if isinstance(val, ArrayFormula):
+            val = None
+        headers.append(str(val) if val is not None else f"Column{col_i}")
+    while headers and headers[-1].startswith("Column"):
+        headers.pop()
+    return headers
+
+
+def _header_score(headers: list[str], mapping: dict[str, str]) -> int:
+    present = {norm_header(h) for h in headers}
+    return sum(1 for key in mapping if key in present)
+
+
 def _is_formula(value: Any) -> bool:
     if isinstance(value, ArrayFormula):
         return True
@@ -181,12 +240,33 @@ class ExcelService:
 
     def data_sheets(self, wb: Workbook) -> list[str]:
         cfg = self.cfg()
-        names = [n for n in (cfg.worksheets or []) if n in wb.sheetnames]
-        if names:
-            return names
-        if cfg.worksheet_name in wb.sheetnames:
+        names = list(wb.sheetnames or [])
+        if not names:
+            return []
+        configured = [n for n in (cfg.worksheets or []) if n]
+        exact = [n for n in configured if n in names]
+        if exact:
+            return exact
+        wanted = {_norm_sheet_name(n) for n in configured}
+        if cfg.worksheet_name:
+            wanted.add(_norm_sheet_name(cfg.worksheet_name))
+        fuzzy: list[str] = []
+        for sn in names:
+            low = _norm_sheet_name(sn)
+            if any(hint in low for hint in _SKIP_SHEET_HINTS):
+                continue
+            compact = low.replace(" ", "")
+            if low in wanted or any(w and (w in low or low in w) for w in wanted if w):
+                fuzzy.append(sn)
+                continue
+            if "mr log" in low or "mrlog" in compact or "linkco" in low:
+                fuzzy.append(sn)
+        if fuzzy:
+            return fuzzy
+        if cfg.worksheet_name in names:
             return [cfg.worksheet_name]
-        return [wb.sheetnames[0]] if wb.sheetnames else []
+        usable = [n for n in names if not any(h in _norm_sheet_name(n) for h in _SKIP_SHEET_HINTS)]
+        return usable[:4] if usable else names[:1]
 
     def site_label(self, sheet_name: str) -> str:
         return self.cfg().worksheet_labels.get(sheet_name) or sheet_name
@@ -288,23 +368,55 @@ class ExcelService:
             return str(value)
         return str(value).strip() if isinstance(value, str) else value
 
-    def _load_workbook(self, data_only: bool = False, read_only: bool = False):
-        path = self.excel_path()
-        if not path.exists():
+    def _open_workbook(self, path: Path, data_only: bool = False, read_only: bool = False):
+        if not path.exists() or not path.is_file():
             raise ExcelUnavailable("Excel file is currently unavailable.")
         try:
-            return load_workbook(
-                path,
-                data_only=data_only,
-                read_only=read_only,
-                keep_vba=(path.suffix == ".xlsm" and not read_only),
-            )
-        except PermissionError as exc:
-            raise ExcelLocked(
-                "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
-            ) from exc
-        except Exception as exc:
-            raise ExcelUnavailable(f"Excel file could not be opened: {exc}") from exc
+            head = path.read_bytes()[:8]
+        except OSError as exc:
+            raise ExcelUnavailable(f"Excel file could not be read: {exc}") from exc
+        if _looks_like_xls(head):
+            raise ExcelUnavailable("That file is old Excel (.xls). Save it as .xlsx and upload again.")
+        if head and not _looks_like_xlsx(head):
+            raise ExcelUnavailable("That file is not an Excel workbook (.xlsx).")
+        keep_vba = path.suffix.lower() == ".xlsm" and not read_only
+        last_exc: Optional[BaseException] = None
+        attempts = [(read_only, data_only)]
+        if read_only:
+            attempts.append((False, data_only))
+        for ro, do in attempts:
+            try:
+                try:
+                    return load_workbook(
+                        path,
+                        data_only=do,
+                        read_only=ro,
+                        keep_vba=keep_vba and not ro,
+                        keep_links=False,
+                    )
+                except TypeError:
+                    return load_workbook(
+                        path,
+                        data_only=do,
+                        read_only=ro,
+                        keep_vba=keep_vba and not ro,
+                    )
+            except PermissionError as exc:
+                last_exc = exc
+                if ro:
+                    continue
+                raise ExcelLocked(
+                    "Excel file is currently being used by another process. Changes cannot be saved until the file becomes available."
+                ) from exc
+            except Exception as exc:
+                last_exc = exc
+                if ro:
+                    continue
+                raise ExcelUnavailable(f"Excel file could not be opened: {exc}") from exc
+        raise ExcelUnavailable(f"Excel file could not be opened: {last_exc}")
+
+    def _load_workbook(self, data_only: bool = False, read_only: bool = False):
+        return self._open_workbook(self.excel_path(), data_only=data_only, read_only=read_only)
 
     def _sheet(self, wb: Workbook, name: Optional[str] = None):
         name = name or self.cfg().worksheet_name
@@ -327,56 +439,77 @@ class ExcelService:
 
     def _read_sheet_records(self, ws, sheet_name: str) -> tuple[list[str], list[dict[str, Any]]]:
         cfg = self.cfg()
-        header_row = cfg.header_row
-        start = cfg.data_start_row
+        header_row_cfg = int(cfg.header_row or 1)
+        start_cfg = int(cfg.data_start_row or (header_row_cfg + 1))
         mapping = cfg.mapping.excel_to_internal()
         fields = list(cfg.mapping.model_dump().keys())
         site = self.site_label(sheet_name)
         headers: list[str] = []
+        header_idx = header_row_cfg
         id_field_header = None
         records: list[dict[str, Any]] = []
         empty_streak = 0
-        max_col = 40
-        for idx, row in enumerate(ws.iter_rows(min_row=header_row, max_col=max_col), start=header_row):
-            if idx == header_row:
-                headers = []
-                for col_i, cell in enumerate(row, start=1):
-                    if cell.value is None:
-                        headers.append(f"Column{col_i}")
-                    else:
-                        headers.append(str(cell.value))
-                while headers and headers[-1].startswith("Column"):
-                    headers.pop()
-                max_col = max(len(headers), 1)
-                for h in headers:
-                    if mapping.get(norm_header(h)) == "work_order_id":
-                        id_field_header = h
-                        break
-                continue
-            if idx < start:
-                continue
+        rows_iter = enumerate(ws.iter_rows(min_row=1, max_col=_READ_MAX_COL), start=1)
+        buffer: list[tuple[int, list[Any]]] = []
+        for idx, row in rows_iter:
+            buffer.append((idx, [cell.value for cell in row]))
+            if idx >= _HEADER_SCAN_ROWS:
+                break
+        best_score = -1.0
+        for i, vals in buffer:
+            candidate = _headers_from_cells(vals)
+            score = float(_header_score(candidate, mapping))
+            if i == header_row_cfg:
+                score += 0.5
+            if score > best_score:
+                best_score = score
+                header_idx = i
+                headers = candidate
+        if best_score < 1:
+            for i, vals in buffer:
+                if i == header_row_cfg:
+                    headers = _headers_from_cells(vals)
+                    header_idx = i
+                    break
+        for h in headers:
+            if mapping.get(norm_header(h)) == "work_order_id":
+                id_field_header = h
+                break
+        data_start = start_cfg if header_idx == header_row_cfg else header_idx + 1
+        status_header = next((h for h in headers if mapping.get(norm_header(h)) == "status"), None)
+
+        def consume(idx: int, values: list[Any]) -> None:
+            nonlocal empty_streak
+            if not headers or idx == header_idx or idx < data_start:
+                return
             raw: dict[str, Any] = {}
             empty = True
-            for header, cell in zip(headers, row):
-                raw[header] = cell.value
-                if _cell_plain(cell.value) not in (None, ""):
+            for header, val in zip(headers, values):
+                raw[header] = val
+                if _cell_plain(val) not in (None, ""):
                     empty = False
             if empty:
                 empty_streak += 1
-                if empty_streak > 80:
-                    break
-                continue
+                return
             empty_streak = 0
             wo_val = raw.get(id_field_header) if id_field_header else None
             if wo_val in (None, ""):
                 # Keep STATUS=OPEN rows even when IM WO # is blank so the Open KPI matches the workbook.
-                status_header = next((h for h in headers if mapping.get(norm_header(h)) == "status"), None)
                 st = _cell_plain(raw.get(status_header)) if status_header else None
                 if st in (None, ""):
-                    continue
+                    return
             records.append(
                 self.map_row(raw, idx, sheet_name, cfg=cfg, mapping=mapping, fields=fields, site=site)
             )
+
+        for i, vals in buffer:
+            consume(i, vals)
+            if empty_streak > 80:
+                return headers, records
+        for idx, row in rows_iter:
+            consume(idx, [cell.value for cell in row])
+            if empty_streak > 80:
+                break
         return headers, records
 
     def invalidate(self) -> None:
@@ -428,12 +561,9 @@ class ExcelService:
         self._apply_due_date(target)
         return target
 
-    def read_workbook(self) -> list[dict[str, Any]]:
-        """Read live Excel into mapped records. Does not write SQLite."""
-        mt = self.mtime()
-        if not self.available():
-            raise ExcelUnavailable("Excel file is currently unavailable.")
-        wb = self._load_workbook(data_only=False, read_only=True)
+    def read_records_from(self, path: Path) -> list[dict[str, Any]]:
+        """Parse a workbook path into mapped records. Does not write SQLite or replace live Excel."""
+        wb = self._open_workbook(path, data_only=False, read_only=True)
         try:
             all_records: list[dict[str, Any]] = []
             headers: list[str] = []
@@ -453,21 +583,47 @@ class ExcelService:
             wb.close()
         self._headers = [norm_header(h) for h in headers]
         self._delay_columns_ready = delay_ready_all and bool(headers)
-        self._mtime = mt
-        self._fingerprint = self.fingerprint()
         return all_records
 
-    def seed_from_excel(self, username: str = "seed", replace_lines: bool = False) -> dict[str, Any]:
+    def read_workbook(self) -> list[dict[str, Any]]:
+        """Read live Excel into mapped records. Does not write SQLite."""
+        if not self.available():
+            raise ExcelUnavailable("Excel file is currently unavailable.")
+        mt = self.mtime()
+        records = self.read_records_from(self.excel_path())
+        self._mtime = mt
+        self._fingerprint = self.fingerprint()
+        return records
+
+    def seed_from_records(
+        self,
+        records: list[dict[str, Any]],
+        username: str = "seed",
+        replace_lines: bool = False,
+        fingerprint: str = "",
+        protect_live: bool = False,
+    ) -> dict[str, Any]:
+        live_count = database.wo_cache_count()
+        if not records:
+            return {
+                "ok": False,
+                "error": "No material requests found in the workbook. Check sheet names and the header row (IM Work Order # / STATUS).",
+                "count": live_count,
+            }
+        if protect_live and live_count and len(records) < max(1, int(live_count * 0.5)):
+            return {
+                "ok": False,
+                "error": (
+                    f"Workbook only has {len(records)} material requests, but the live database has {live_count}. "
+                    "Refusing to replace so records are not wiped. Upload the full log or restore a backup."
+                ),
+                "count": live_count,
+                "parsed": len(records),
+            }
         try:
-            records = self.read_workbook()
-        except (ExcelLocked, ExcelUnavailable, PermissionError, OSError) as exc:
-            return {"ok": False, "error": str(exc), "count": database.wo_cache_count()}
+            n = database.replace_wo_cache(records, fingerprint or self._fingerprint or self.fingerprint())
         except Exception as exc:
-            return {"ok": False, "error": f"Could not read Excel: {exc}", "count": database.wo_cache_count()}
-        try:
-            n = database.replace_wo_cache(records, self._fingerprint or self.fingerprint())
-        except Exception as exc:
-            return {"ok": False, "error": f"Database seed failed: {exc}", "count": 0}
+            return {"ok": False, "error": f"Database seed failed: {exc}", "count": live_count}
         self._cache = records
         self._stale = False
         self._last_error = None
@@ -487,6 +643,17 @@ class ExcelService:
             except Exception as exc:
                 return {"ok": True, "count": n, "error": None, "warning": f"Catalog seed skipped: {exc}"}
         return {"ok": True, "count": n, "error": None}
+
+    def seed_from_excel(self, username: str = "seed", replace_lines: bool = False) -> dict[str, Any]:
+        try:
+            records = self.read_workbook()
+        except (ExcelLocked, ExcelUnavailable, PermissionError, OSError) as exc:
+            return {"ok": False, "error": str(exc), "count": database.wo_cache_count()}
+        except Exception as exc:
+            return {"ok": False, "error": f"Could not read Excel: {exc}", "count": database.wo_cache_count()}
+        return self.seed_from_records(
+            records, username=username, replace_lines=replace_lines, protect_live=True
+        )
 
     def _seed_catalog(self, records: list[dict[str, Any]], username: str) -> None:
         suppliers: list[str] = []
@@ -588,6 +755,34 @@ class ExcelService:
     WRITE_REASONS = ("write", "update", "bulk", "create", "delete", "import", "upload", "reconcile")
 
     def create_backup(self, reason: str = "write") -> Optional[Path]:
+        """Always try to snapshot SQLite. Excel copy is best-effort. Never raise."""
+        try:
+            return self._create_backup_inner(reason)
+        except Exception:
+            try:
+                return self._emergency_db_snapshot(reason)
+            except Exception:
+                return None
+
+    def _emergency_db_snapshot(self, reason: str) -> Optional[Path]:
+        from ..config import DB_PATH
+
+        dest_dir = self.backup_dir() / datetime.now().strftime("%Y-%m-%d")
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        db_dest = dest_dir / f"woms_{ts}_{reason}.db"
+        try:
+            database.snapshot_to(db_dest)
+            return db_dest
+        except Exception:
+            if DB_PATH.exists():
+                _copy_file_durable(DB_PATH, db_dest)
+                return db_dest
+            return None
+
+    def _create_backup_inner(self, reason: str) -> Optional[Path]:
+        from ..config import DB_PATH
+
         src = self.excel_path()
         day = datetime.now().strftime("%Y-%m-%d")
         ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -595,19 +790,54 @@ class ExcelService:
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest: Optional[Path] = None
         stem = src.stem if src.exists() else "woms"
-        if src.exists():
+        if src.exists() and src.is_file():
             dest = dest_dir / f"{stem}_{ts}_{reason}{src.suffix}"
-            shutil.copy2(src, dest)
-            database.set_sync_meta("last_backup", str(dest))
+            try:
+                _copy_file_durable(src, dest)
+                if dest.suffix.lower() in {".xlsx", ".xlsm"}:
+                    try:
+                        self._validate_saved(dest)
+                    except Exception:
+                        if not dest.is_file() or dest.stat().st_size <= 0:
+                            dest.unlink(missing_ok=True)
+                            dest = None
+                try:
+                    if dest is not None:
+                        database.set_sync_meta("last_backup", str(dest))
+                except Exception:
+                    pass
+            except Exception:
+                if dest is not None:
+                    dest.unlink(missing_ok=True)
+                dest = None
         db_dest = dest_dir / f"{stem}_{ts}_{reason}.db"
-        try:
-            database.snapshot_to(db_dest)
-            if dest is None:
-                dest = db_dest
-                database.set_sync_meta("last_backup", str(dest))
-        except Exception:
-            if db_dest.exists():
+        db_ok = False
+        last_db_err: Optional[BaseException] = None
+        for attempt in range(3):
+            try:
+                database.snapshot_to(db_dest)
+                self._assert_sqlite(db_dest)
+                db_ok = True
+                break
+            except Exception as exc:
+                last_db_err = exc
+                time.sleep(0.2 * (attempt + 1))
+        if not db_ok:
+            try:
+                if DB_PATH.exists():
+                    _copy_file_durable(DB_PATH, db_dest)
+                    db_ok = True
+            except Exception as exc:
+                last_db_err = exc
                 db_dest.unlink(missing_ok=True)
+        if dest is None and db_ok:
+            dest = db_dest
+            try:
+                database.set_sync_meta("last_backup", str(dest))
+            except Exception:
+                pass
+        if dest is None and last_db_err:
+            return None
         return dest
 
     def store_uploaded_backup(self, content: bytes, filename: str = "backup.xlsx") -> dict[str, Any]:
@@ -626,9 +856,12 @@ class ExcelService:
         db_path: Optional[Path] = None
 
         def _safe_write(dest: Path, data: bytes) -> None:
-            tmp = dest.with_suffix(dest.suffix + ".tmp")
-            tmp.write_bytes(data)
-            os.replace(tmp, dest)
+            tmp = dest.with_name(f".{dest.name}.part{os.getpid()}")
+            with open(tmp, "wb") as out:
+                out.write(data)
+                out.flush()
+                os.fsync(out.fileno())
+            _replace_excel_file(tmp, dest)
 
         if lower.endswith(".zip"):
             try:
@@ -660,6 +893,10 @@ class ExcelService:
             if excel_path is None and db_path is None:
                 raise ValueError("The zip must contain an Excel workbook (.xlsx/.xlsm) and/or a .db snapshot.")
         elif lower.endswith((".xlsx", ".xlsm")):
+            if _looks_like_xls(content[:8]):
+                raise ValueError("That file is old Excel (.xls). Save it as .xlsx and upload again.")
+            if not _looks_like_xlsx(content[:8]):
+                raise ValueError("That file is not an Excel workbook (.xlsx).")
             ext = ".xlsm" if lower.endswith(".xlsm") else ".xlsx"
             excel_path = dest_dir / f"{stem}_{ts}_upload{ext}"
             _safe_write(excel_path, content)
@@ -692,19 +929,24 @@ class ExcelService:
             health = {"ok": False, "error": str(exc), "path": str(dest)}
         return self._uploaded_meta(dest, health)
 
+    def _assert_sqlite(self, path: Path) -> None:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            con.execute("SELECT 1").fetchone()
+            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        finally:
+            con.close()
+        if "wo_cache" not in tables and "users" not in tables:
+            raise ValueError("That database does not look like a WOMS snapshot (missing wo_cache/users).")
+
     def _validate_db(self, path: Path) -> None:
         try:
-            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-            try:
-                tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-            finally:
-                con.close()
-        except sqlite3.Error as exc:
+            self._assert_sqlite(path)
+        except Exception as exc:
             path.unlink(missing_ok=True)
+            if isinstance(exc, ValueError):
+                raise
             raise ValueError(f"That file is not a readable SQLite database: {exc}") from exc
-        if "wo_cache" not in tables and "users" not in tables:
-            path.unlink(missing_ok=True)
-            raise ValueError("That database does not look like a WOMS snapshot (missing wo_cache/users).")
 
     def _uploaded_meta(self, dest: Path, health: Optional[dict[str, Any]]) -> dict[str, Any]:
         db_pair = dest if dest.suffix.lower() == ".db" else dest.with_suffix(".db")
@@ -849,21 +1091,40 @@ class ExcelService:
 
     def restore_backup(self, backup_path: str) -> dict[str, Any]:
         src = self._resolve_backup(backup_path)
-        self.create_backup(reason="pre_restore")
+        suffix = src.suffix.lower()
+        if suffix not in {".xlsx", ".xlsm", ".db"}:
+            raise ValueError("Backup must be an Excel workbook or a .db snapshot")
+        if suffix in {".xlsx", ".xlsm"}:
+            try:
+                self._validate_saved(src)
+            except Exception as exc:
+                raise ValueError(f"Backup workbook is not readable: {exc}") from exc
+        db_src = src if suffix == ".db" else src.with_suffix(".db")
+        if db_src.is_file():
+            try:
+                self._assert_sqlite(db_src)
+            except Exception as exc:
+                raise ValueError(f"Backup database is not readable: {exc}") from exc
+        try:
+            self.create_backup(reason="pre_restore")
+        except Exception:
+            pass
         restored_excel = False
         restored_db = False
-        suffix = src.suffix.lower()
         if suffix in {".xlsx", ".xlsm"}:
             dest = self.excel_path()
             dest.parent.mkdir(parents=True, exist_ok=True)
-            with self._file_lock():
-                shutil.copy2(src, dest)
-            restored_excel = True
+            tmp = _temp_xlsx(dest.parent)
+            try:
+                _copy_file_durable(src, tmp)
+                with self._file_lock():
+                    _replace_excel_file(tmp, dest)
+                restored_excel = True
+            finally:
+                tmp.unlink(missing_ok=True)
             db_src = src.with_suffix(".db")
-        elif suffix == ".db":
-            db_src = src
         else:
-            raise ValueError("Backup must be an Excel workbook or a .db snapshot")
+            db_src = src
         if db_src.is_file():
             database.restore_from(db_src)
             restored_db = True
@@ -882,15 +1143,7 @@ class ExcelService:
         return src
 
     def records_from_path(self, path: Path) -> list[dict[str, Any]]:
-        wb = load_workbook(path, data_only=False, read_only=True)
-        try:
-            recs: list[dict[str, Any]] = []
-            for sheet_name in self.data_sheets(wb):
-                _, rows = self._read_sheet_records(wb[sheet_name], sheet_name)
-                recs.extend(rows)
-            return recs
-        finally:
-            wb.close()
+        return self.read_records_from(path)
 
     def match_record(
         self,
@@ -1232,7 +1485,7 @@ class ExcelService:
         return FileLock(str(self.lock_path()), timeout=timeout)
 
     def _validate_saved(self, path: Path) -> None:
-        wb = load_workbook(path, read_only=True, data_only=False)
+        wb = self._open_workbook(path, read_only=True, data_only=False)
         try:
             if not wb.sheetnames:
                 raise ValueError("Workbook has no worksheets after save")
@@ -1925,15 +2178,46 @@ class ExcelService:
     def replace_from_bytes(self, content: bytes, username: str, filename: str = "upload.xlsx") -> dict[str, Any]:
         if not content or len(content) < 100:
             raise ValueError("The uploaded file is empty or too small to be an Excel workbook.")
+        if _looks_like_xls(content[:8]):
+            raise ValueError("That file is old Excel (.xls). Save it as .xlsx and upload again.")
+        if not _looks_like_xlsx(content[:8]):
+            raise ValueError("That file is not an Excel workbook (.xlsx).")
         dest = self.excel_path()
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = _temp_xlsx(dest.parent)
         tmp.write_bytes(content)
         try:
             self._validate_saved(tmp)
+            records = self.read_records_from(tmp)
+        except (ExcelLocked, ExcelUnavailable) as exc:
+            tmp.unlink(missing_ok=True)
+            raise ValueError(str(exc)) from exc
         except Exception as exc:
             tmp.unlink(missing_ok=True)
             raise ValueError(f"That file could not be opened as Excel: {exc}") from exc
+        if not records:
+            sheets = "unknown"
+            try:
+                wb = self._open_workbook(tmp, read_only=True)
+                try:
+                    sheets = ", ".join(wb.sheetnames) or "none"
+                finally:
+                    wb.close()
+            except Exception:
+                pass
+            tmp.unlink(missing_ok=True)
+            raise ValueError(
+                "Could not find material-request rows in that workbook. "
+                f"Sheets seen: {sheets}. Expected headers such as IM Work Order # and STATUS."
+            )
+        live_count = database.wo_cache_count()
+        if live_count and len(records) < max(1, int(live_count * 0.5)):
+            parsed = len(records)
+            tmp.unlink(missing_ok=True)
+            raise ValueError(
+                f"Workbook only has {parsed} material requests, but the live database has {live_count}. "
+                "Refusing to replace so records are not wiped. Upload the full log or restore a backup."
+            )
         try:
             lock = self._file_lock()
             lock.acquire()
@@ -1947,8 +2231,12 @@ class ExcelService:
                 self.create_backup(reason="upload")
             _replace_excel_file(tmp, dest)
             self.invalidate()
-            seeded = self.seed_from_excel(username=username, replace_lines=True)
-            records = list(self._cache or [])
+            seeded = self.seed_from_records(
+                records,
+                username=username,
+                replace_lines=True,
+                fingerprint=self.fingerprint(),
+            )
             if not seeded.get("ok"):
                 raise ExcelUnavailable(seeded.get("error") or "Uploaded workbook could not be seeded.")
             database.add_audit(username, "upload", details=f"Uploaded workbook {filename} ({len(records)} rows)")

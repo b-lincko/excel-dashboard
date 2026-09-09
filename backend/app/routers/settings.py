@@ -219,11 +219,25 @@ def create_backup(user=Depends(require_permission("backup"))):
         excel_service.export_database_to_excel(username=user["username"])
     except Exception as exc:
         export_err = str(exc)
-    path = excel_service.create_backup(reason="manual")
+    try:
+        path = excel_service.create_backup(reason="manual")
+    except Exception as exc:
+        path = None
+        if not export_err:
+            export_err = str(exc)
     cfg = load_config()
-    archived = excel_service.archive_old_backups(int(getattr(cfg, "backup_archive_days", 30) or 30))
-    pruned_arch = excel_service.prune_archives(int(getattr(cfg, "backup_archive_keep_days", 180) or 180))
-    pruned = excel_service.prune_backups(int(getattr(cfg, "backup_ratio", 14) or 0), reasons=("auto", "manual"))
+    try:
+        archived = excel_service.archive_old_backups(int(getattr(cfg, "backup_archive_days", 30) or 30))
+    except Exception:
+        archived = {"moved": 0}
+    try:
+        pruned_arch = excel_service.prune_archives(int(getattr(cfg, "backup_archive_keep_days", 180) or 180))
+    except Exception:
+        pruned_arch = {"removed": 0}
+    try:
+        pruned = excel_service.prune_backups(int(getattr(cfg, "backup_ratio", 14) or 0), reasons=("auto", "manual"))
+    except Exception:
+        pruned = 0
     health = None
     if path:
         try:
@@ -235,13 +249,17 @@ def create_backup(user=Depends(require_permission("backup"))):
         health["ok"] = False
         health["excel_export_ok"] = False
         health["error"] = export_err
+    try:
+        items = excel_service.list_backups()
+    except Exception:
+        items = []
     return {
         "path": str(path) if path else None,
         "pruned": pruned,
         "archived": archived,
         "pruned_archives": pruned_arch,
         "health": health,
-        "items": excel_service.list_backups(),
+        "items": items,
         "schedule": schedule_status(cfg),
     }
 

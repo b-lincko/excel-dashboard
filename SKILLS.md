@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (ops-desk UI polish + production stability).
+Last updated: 2026-09-09 (bulletproof backup + Excel upload parse-before-replace).
 
 ---
 
@@ -224,8 +224,8 @@ Boot (`main._boot`): `init_db()`. If `wo_cache` is empty and Excel exists → `s
 - `create_record` assigns `{site_label}:DB-{hex}` and `_sheet` via `worksheet_labels`. Excel append at dump time does **not** change `record_id`.
 - `export_database_to_excel()` dumps all DB rows into `file.xlsx` (lock + temp + validate + atomic replace). Match by `record_id` then `_row`+sheet; append unmatched creates; skip formula / due-date columns; never mass-delete Excel rows on a match miss.
 - `archive_old_backups(days)` / `prune_archives(keep_days)`.
-- `seed_from_excel` reads the workbook and `replace_wo_cache`.
-- `replace_from_bytes` replaces live Excel then seeds. Uses `_replace_excel_file` so a bind-mounted `file.xlsx` (Errno 16 busy) still updates.
+- `seed_from_excel` / `read_records_from` open with `read_only` then fall back, detect the header row in the first 8 rows, match data sheets by name or “MR log / Linkco”, and map up to 80 columns. Empty parse never calls `replace_wo_cache`. Seed refuses a workbook with &lt; 50% of live rows (`protect_live`).
+- `replace_from_bytes` **parses a temp copy first**. Refuse non-xlsx / old `.xls` / 0 MR rows / &lt; 50% of live `wo_cache`. Only then backup, `_replace_excel_file`, and `seed_from_records` of the already-parsed rows. A misread upload must not wipe the database.
 
 `resolve_excel_path`: if the configured path is not a file, substitute existing `ROOT/file.xlsx`. **Tests must not use `save_config(excel_path=missing.xlsx)` to simulate a missing workbook** — that still resolves to `file.xlsx` and can overwrite the real file. Stub `available()` instead. Always restore `file.xlsx` if a test hits it.
 
@@ -233,10 +233,11 @@ Boot (`main._boot`): `init_db()`. If `wo_cache` is empty and Excel exists → `s
 
 ## 8. Backup / restore
 
-Every `create_backup` writes **Excel + SQLite**:
+Every `create_backup` writes **Excel + SQLite** and **must not fail the operator**:
 
-- `{backup_dir}/{YYYY-MM-DD}/{stem}_{ts}_{reason}.xlsx` and matching `.db` via `database.snapshot_to`.
-- Midnight (`backup_time` default **00:00**) and Backup now: export DB → Excel first, then snapshot the pair. If Excel export fails, still snapshot SQLite and record the health error.
+- `{backup_dir}/{YYYY-MM-DD}/{stem}_{ts}_{reason}.xlsx` (durable copy: fsync + `_replace_excel_file` + size check, retries on lock/busy) and matching `.db` via `database.snapshot_to` (3 attempts + fsync).
+- If the Excel copy fails, still snapshot SQLite and return the `.db` path. `create_backup` never raises to Backup now / autobackup.
+- Midnight (`backup_time` default **00:00**) and Backup now: export DB → Excel first, then snapshot the pair. If Excel export fails, still snapshot SQLite and record the health error. Archive/prune errors must not abort the snapshot.
 - Reasons: snapshots (`manual`, `auto`, `pre_restore`) and remaining Excel writes (`import`, `upload`, `reconcile`). Daily CRUD no longer creates write-safety copies.
 - If Excel is missing, still snapshot SQLite (`woms_{ts}_{reason}.db`) and list that unpaired `.db`.
 - Autobackup no longer skips when Excel is unavailable.
@@ -245,7 +246,8 @@ Every `create_backup` writes **Excel + SQLite**:
 
 ### Restore
 
-- If sibling `.db` exists (or the item is a `.db`): restore **database + Excel**. Pre-restore snapshot is taken first.
+- Validate the backup workbook / `.db` before touching live files. Copy Excel via `_copy_file_durable` + `_replace_excel_file` (Docker EBUSY). Pre-restore snapshot is best-effort and must not block restore.
+- If sibling `.db` exists (or the item is a `.db`): restore **database + Excel**.
 - If Excel-only: replace `file.xlsx` only. **Do not silently seed/overwrite SQLite.** Operator must Seed from Excel if they want those rows.
 - Settings UI: DB column, different confirm copy, `data-tour="backup"`.
 - Health: backup row count (Excel and/or `wo_cache` in the `.db`) vs live DB count. Fail if backup has &lt; 50% of live rows.
@@ -354,6 +356,7 @@ cd frontend && npm run build
 | File | Covers |
 | ---- | ------ |
 | `tests/test_database_sot.py` | DB-first save, seed/reset confirm, snapshot pair + Excel-only restore, download zip + upload + restore |
+| `tests/test_backup_bulletproof.py` | Backup still snapshots SQLite if Excel copy fails; upload refuses garbage/empty/tiny workbooks; header-row and sheet-name read |
 | `tests/test_excel_and_api.py` | Read Excel, DB-only create + export, backup schedule/archive/prune, close order |
 | `tests/test_ops_pack.py` | Queue, digest, timeline, mapping, backup health |
 | `tests/test_collab_*.py` | Chat, watches, row restore |
@@ -426,10 +429,11 @@ Shipped milestones (do not regress):
 
 ### Backup behavior
 
-1. Midnight and Backup now export DB → Excel then pair `.xlsx` + `.db`. Archive after 30 days; prune archives after 180.
-2. Restore: pair → both; Excel-only leftover files → Excel only, no silent seed.
+1. Midnight and Backup now export DB → Excel then pair `.xlsx` + `.db`. Archive after 30 days; prune archives after 180. Excel copy failure must still snapshot SQLite; `create_backup` never raises.
+2. Restore: validate sources; pair → both; Excel-only leftover files → Excel only, no silent seed. Use inode-safe replace.
 3. Download zips the pair. Upload accepts `.xlsx` / `.db` / zip into the backup folder, then the UI prompts Restore.
-4. Operator recovery lives in `docs/RECOVERY.md` — do not bury commands only in chat.
+4. Settings Excel upload parses the temp workbook **before** replacing live Excel / seeding. Refuse 0-row or &lt; 50% of live.
+5. Operator recovery lives in `docs/RECOVERY.md` — do not bury commands only in chat.
 
 ---
 
@@ -489,3 +493,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-09** User reversed per-save Excel. SQLite is the only live store. Midnight (default 00:00) exports all DB rows into `file.xlsx` and snapshots SQLite. Archive pairs after 30 days; delete archives after 180. Close order button. 3D mind map fingerprints the graph so dashboard polls do not remount WebGL; sprite labels + min-height.
 - **2026-09-09** Seed technician logins Abubacar, Arun, Nesar, Yousuf (`TEAM_USERS`). Assign-to save/bulk/create pings that user in the inbox when the name matches username or full_name.
 - **2026-09-09** Mind map is 2D SVG with animation (not WebGL orbit). Labels stay readable; motion pauses on hover / reduced-motion.
+- **2026-09-09** Backup must not fail: durable Excel copy with retry/fsync, SQLite snapshot retries, still snapshot `.db` if Excel copy fails. Excel upload reads the temp workbook (header-row scan, fuzzy sheet names) before replacing live files; refuse empty / &lt; 50% so `wo_cache` is not wiped.

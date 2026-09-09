@@ -141,13 +141,27 @@ def run_due_backup(force: bool = False) -> Optional[Path]:
             excel_service.export_database_to_excel(username="system")
         except Exception as exc:
             export_err = str(exc)
-        dest = excel_service.create_backup(reason="auto")
+        try:
+            dest = excel_service.create_backup(reason="auto")
+        except Exception as exc:
+            dest = None
+            if export_err is None:
+                export_err = str(exc)
         archive_days = int(getattr(cfg, "backup_archive_days", 30) or 30)
         keep_days = int(getattr(cfg, "backup_archive_keep_days", 180) or 180)
-        archived = excel_service.archive_old_backups(archive_days)
-        pruned_arch = excel_service.prune_archives(keep_days)
+        try:
+            archived = excel_service.archive_old_backups(archive_days)
+        except Exception:
+            archived = {"moved": 0}
+        try:
+            pruned_arch = excel_service.prune_archives(keep_days)
+        except Exception:
+            pruned_arch = {"removed": 0}
         keep = int(getattr(cfg, "backup_ratio", 14) or 0)
-        pruned = excel_service.prune_backups(keep, reasons=("auto", "manual")) if keep else 0
+        try:
+            pruned = excel_service.prune_backups(keep, reasons=("auto", "manual")) if keep else 0
+        except Exception:
+            pruned = 0
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         database.set_sync_meta("last_auto_backup", stamp)
         health = None
