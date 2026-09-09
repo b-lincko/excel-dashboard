@@ -383,7 +383,7 @@ export default function Layout() {
   const sidebar = (
     <>
       <div className="px-5 py-5 flex items-center gap-3">
-        <BrandLogo className="h-10 w-auto max-w-[140px] object-contain" />
+        <BrandLogo className="h-9 w-auto max-w-[148px] object-contain rounded" />
         <div className="min-w-0">
           <div className="font-bold tracking-tight text-slate-900 dark:text-white leading-tight">Linkco MR</div>
           <div className="text-[11px] text-slate-400 truncate">Work orders · Material requests</div>

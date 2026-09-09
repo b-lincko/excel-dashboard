@@ -198,7 +198,7 @@ Inbox API: `GET /api/po-approvals?q=` → lanes `incoming | assigned | changes |
 - Password reset: Login **Forgot password?** → `/api/auth/forgot` (always 200) → `/reset-password?token=`.
 - Requests: in-app inbox still writes. If mail is on, verified addresses also get PO / Accounts / Assign-to / @mention emails (chat/follow off unless ticked). Pytest captures `mailer.OUTBOX` and does not hit the network.
 
-**Logo:** `frontend/public/linkco-logo.png` + `favicon.png` (local mark; the public Linkco URL is unreachable). Sidebar, login, and favicon use it.
+**Logo:** `frontend/public/linkco-logo.png` (white **Link** + red **co** + red molecule on black) and `favicon.png` (red molecule on black). Sidebar, login, loading, and browser tab use these only — no other logo files.
 
 **Sites on create/edit:** camp sites plus F5 / Office / Accommodations — not SH5-only.
 

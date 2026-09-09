@@ -46,7 +46,7 @@ function Guard({ children }) {
     return (
       <div className="min-h-screen grid place-items-center bg-slate-50 dark:bg-ink-900">
         <div className="text-center space-y-3">
-          <img src="/linkco-logo.png" alt="Linkco" className="h-10 w-auto max-w-[160px] mx-auto object-contain" />
+          <img src="/linkco-logo.png" alt="Linkco" className="h-10 w-auto max-w-[180px] mx-auto object-contain bg-black rounded" />
           <div className="text-sm text-slate-500">Loading workspace…</div>
         </div>
       </div>
