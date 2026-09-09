@@ -916,10 +916,20 @@ def assign_po(wo_id: str, body: AssignPoBody, user=Depends(require_permission("e
 
 
 @router.post("/{wo_id}/approval/submit")
-def submit_po(wo_id: str, user=Depends(require_permission("edit"))):
+def submit_po(wo_id: str, body: SubmitPoBody, user=Depends(require_permission("edit"))):
     rec = _wo_or_404(wo_id)
     try:
-        approval = approvals.submit(rec, user)
+        approval = approvals.submit(rec, user, managers=body.managers or None)
+    except (PermissionError, ValueError) as exc:
+        _raise_approval(exc)
+    return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}
+
+
+@router.post("/{wo_id}/approval/unassign")
+def unassign_po(wo_id: str, user=Depends(require_permission("edit"))):
+    rec = _wo_or_404(wo_id)
+    try:
+        approval = approvals.unassign(rec, user)
     except (PermissionError, ValueError) as exc:
         _raise_approval(exc)
     return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}

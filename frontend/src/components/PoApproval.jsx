@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { BellRing } from "lucide-react";
+import { BellRing, FileText, Send, Stamp } from "lucide-react";
 import { api } from "../lib/api.js";
 import { useTour } from "../context/TourContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
-import SignaturePad from "./SignaturePad.jsx";
 import SignSuccess from "./SignSuccess.jsx";
+import SignWindow from "./SignWindow.jsx";
 
 const LABELS = {
   none: "Not started",
@@ -21,11 +21,12 @@ export default function PoApproval({ woId, onNotice }) {
   const { ask, toast } = useUi();
   const [data, setData] = useState(null);
   const [assignee, setAssignee] = useState("");
-  const [comment, setComment] = useState("");
-  const [signature, setSignature] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [celebrate, setCelebrate] = useState(false);
+  const [celebrateNote, setCelebrateNote] = useState("");
+  const [signOpen, setSignOpen] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState("");
 
   function load() {
     api
@@ -41,21 +42,62 @@ export default function PoApproval({ woId, onNotice }) {
     if (woId) load();
   }, [woId]);
 
-  async function run(path, body) {
+  useEffect(() => {
+    if (!woId) {
+      setPdfUrl("");
+      return undefined;
+    }
+    let url = "";
+    api
+      .blob(`/api/work-orders/${encodeURIComponent(woId)}/approval/pdf`)
+      .then((blob) => {
+        url = URL.createObjectURL(blob);
+        setPdfUrl(url);
+      })
+      .catch(() => setPdfUrl(""));
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [woId, data?.approval?.state, data?.approval?.updated_at]);
+
+  async function run(path, body, { confirm, confirmLabel } = {}) {
+    if (confirm) {
+      const ok = await ask({ title: confirm, confirmLabel: confirmLabel || "Continue" });
+      if (!ok) return false;
+    }
     setBusy(true);
     setError("");
     try {
       const d = await api.post(`/api/work-orders/${encodeURIComponent(woId)}${path}`, body || {});
       setData((prev) => ({ ...prev, approval: d.approval, caps: d.caps }));
       onNotice?.(d.approval?.state === "approved" ? "PO signed and locked" : "PO updated");
-      if (path.includes("decide") && body?.approve) {
-        setSignature("");
-        setCelebrate(true);
-      }
+      if (path.includes("ping")) toast("Follow-up sent", "success");
+      return true;
     } catch (e) {
       setError(typeof e.detail === "string" ? e.detail : e.message);
+      return false;
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function decideInWindow(body) {
+    const ok = await run(
+      "/approval/decide",
+      body,
+      body.approve
+        ? {
+            confirm: "Sign and lock this purchase slip? After this, suppliers, items and prices cannot be changed.",
+            confirmLabel: "Sign & send",
+          }
+        : {}
+    );
+    if (ok) {
+      if (body.approve) {
+        setCelebrateNote(body.return_to ? `sent to ${body.return_to}` : "");
+        setCelebrate(true);
+      }
+      setSignOpen(false);
     }
   }
 
@@ -63,26 +105,7 @@ export default function PoApproval({ woId, onNotice }) {
   const a = data.approval || {};
   const caps = data.caps || {};
   const techs = caps.technicians || [];
-
-  async function ping() {
-    const ok = await ask({
-      title: "Send a follow-up?",
-      body: `Nudge ${caps.ping_label || "them"} — they get an inbox ping and, when mail is on, an email.`,
-      confirmLabel: "Send follow-up",
-    });
-    if (!ok) return;
-    setBusy(true);
-    setError("");
-    try {
-      const d = await api.post(`/api/work-orders/${encodeURIComponent(woId)}/approval/ping`, {});
-      setData((prev) => ({ ...prev, approval: d.approval, caps: d.caps }));
-      toast("Follow-up sent", "success");
-    } catch (e) {
-      setError(typeof e.detail === "string" ? e.detail : e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const item = data.item || {};
 
   return (
     <div className="card p-5 space-y-4">
@@ -91,9 +114,8 @@ export default function PoApproval({ woId, onNotice }) {
           <div>
             <div className="font-semibold">PO approval</div>
             <p className="text-xs text-slate-500">
-              Abubacar (or anyone granted PO dispatch) assigns a technician. That person updates the PO, sends a PDF to
-              the operational manager, who signs or returns written changes. After a signature the PO is locked. Dispatch
-              then sends it to Accounts.
+              Assign a technician, they send the slip to one to three managers, a manager signs (the slip locks), then it
+              goes to Accounts. The signatures desk has the full step-by-step view.
             </p>
           </div>
           {woId ? (
@@ -111,11 +133,80 @@ export default function PoApproval({ woId, onNotice }) {
       <div className="flex flex-wrap gap-2 text-sm">
         <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-white/10">{LABELS[a.state] || a.state || "Not started"}</span>
         {a.assignee ? <span className="text-slate-500">Technician {a.assignee}</span> : null}
+        {a.holder ? <span className="text-slate-500">Holding: {a.holder}</span> : null}
         {a.locked ? <span className="text-emerald-700">Locked</span> : null}
       </div>
+      {a.comment && a.state === "changes_requested" ? (
+        <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+          Manager asked for: {a.comment}
+        </div>
+      ) : null}
+      {error && <div className="text-sm text-rose-600">{error}</div>}
+
+      {caps.can_assign && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className="flex-1 min-w-[12rem]">
+            <option value="">Pick a technician…</option>
+            {techs.map((t) => (
+              <option key={t.username} value={t.label}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+          <button className="btn-primary" disabled={busy || !assignee} onClick={() => run("/approval/assign", { assignee })}>
+            <Send size={14} /> Assign
+          </button>
+          {caps.can_unassign && (
+            <button
+              className="btn-ghost text-sm text-slate-500"
+              disabled={busy}
+              onClick={() =>
+                run("/approval/unassign", {}, {
+                  confirm: "Unassign this slip? It goes back to “New”.",
+                  confirmLabel: "Unassign",
+                })
+              }
+            >
+              Unassign
+            </button>
+          )}
+        </div>
+      )}
+      {!caps.can_assign && caps.can_unassign && (
+        <button
+          className="btn-ghost text-sm text-slate-500"
+          disabled={busy}
+          onClick={() =>
+            run("/approval/unassign", {}, { confirm: "Unassign this slip? It goes back to “New”.", confirmLabel: "Unassign" })
+          }
+        >
+          Unassign technician
+        </button>
+      )}
+
+      {caps.can_submit && (
+        <div className="space-y-2">
+          <p className="text-sm text-slate-500">Send the current PDF to the managers who must sign (up to three).</p>
+          <button className="btn-primary" disabled={busy} onClick={() => run("/approval/submit", {})}>
+            <FileText size={14} /> Send to managers
+          </button>
+        </div>
+      )}
+
+      {caps.can_decide && (
+        <div className="space-y-2">
+          <p className="text-sm text-slate-500">
+            The slip is waiting for your signature. Review the PDF, then sign to lock it — or return it with changes.
+          </p>
+          <button type="button" className="btn-primary" onClick={() => setSignOpen(true)}>
+            <Stamp size={14} /> Review &amp; sign…
+          </button>
+        </div>
+      )}
+
       {caps.can_ping && (
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className="btn-outline" disabled={busy} onClick={ping}>
+          <button type="button" className="btn-outline" disabled={busy} onClick={() => run("/approval/ping", {})}>
             <BellRing size={14} /> Follow up
           </button>
           <span className="text-xs text-slate-500">
@@ -123,79 +214,11 @@ export default function PoApproval({ woId, onNotice }) {
           </span>
         </div>
       )}
-      {a.comment ? <p className="text-sm text-amber-800 dark:text-amber-200">Manager: {a.comment}</p> : null}
-      {error && <div className="text-sm text-rose-600">{error}</div>}
 
-      {caps.can_assign && (
-        <div className="flex flex-wrap gap-2 items-end">
-          <div className="flex-1 min-w-[12rem]">
-            <label className="lbl">Assign technician</label>
-            <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-              <option value="">—</option>
-              {techs.map((t) => (
-                <option key={t.username} value={t.label}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button className="btn-primary" disabled={busy || !assignee} onClick={() => run("/approval/assign", { assignee })}>
-            Assign PO
-          </button>
-        </div>
-      )}
-
-      {caps.can_submit && (
-        <div className="space-y-2">
-          <p className="text-sm text-slate-500">Send the current PO as a PDF to the operational manager.</p>
-          <div className="flex gap-2">
-            <button className="btn-primary" disabled={busy} onClick={() => run("/approval/submit")}>
-              Send to manager
-            </button>
-            <button
-              className="btn-outline"
-              type="button"
-              onClick={() => api.download(`/api/work-orders/${encodeURIComponent(woId)}/approval/pdf`, `PO_${woId}.pdf`)}
-            >
-              Preview PDF
-            </button>
-          </div>
-        </div>
-      )}
-
-      {caps.can_decide && (
-        <div className="space-y-3">
-          <p className="text-sm text-slate-500">Review the PDF, then sign to approve or write the changes and return it.</p>
-          <button
-            className="btn-outline"
-            type="button"
-            onClick={() => api.download(`/api/work-orders/${encodeURIComponent(woId)}/approval/pdf`, `PO_${woId}.pdf`)}
-          >
-            Open PDF
-          </button>
-          <div>
-            <label className="lbl">Digital signature</label>
-            <SignaturePad value={signature} onChange={setSignature} />
-          </div>
-          <div>
-            <label className="lbl">Changes (required to return)</label>
-            <textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
-          </div>
-          <div className="flex gap-2">
-            <button className="btn-primary" disabled={busy || !signature} onClick={() => run("/approval/decide", { approve: true, signature_png: signature, comment })}>
-              Sign &amp; approve
-            </button>
-            <button className="btn-outline" disabled={busy || !comment.trim()} onClick={() => run("/approval/decide", { approve: false, comment })}>
-              Return with changes
-            </button>
-          </div>
-        </div>
-      )}
-
-      {caps.can_send_accounts && (
-        <button className="btn-primary" disabled={busy} onClick={() => run("/approval/send-accounts")}>
-          Send to Accounts
-        </button>
+      {caps.can_route && (
+        <p className="text-sm text-slate-500">
+          This signed slip is with you — use the signatures desk to forward it or send it to Accounts.
+        </p>
       )}
 
       {(a.events || []).length > 0 && (
@@ -208,7 +231,27 @@ export default function PoApproval({ woId, onNotice }) {
           ))}
         </ul>
       )}
-      {celebrate && <SignSuccess onDone={() => setCelebrate(false)} />}
+
+      <SignWindow
+        open={signOpen}
+        onClose={() => {
+          if (!busy) setSignOpen(false);
+        }}
+        busy={busy}
+        error={signOpen ? error : ""}
+        item={item}
+        approval={a}
+        caps={caps}
+        pdfUrl={pdfUrl}
+        onDownload={() =>
+          api.download(
+            `/api/work-orders/${encodeURIComponent(woId)}/approval/pdf`,
+            `PO_${item.work_order_id || woId}.pdf`
+          )
+        }
+        onDecide={(body) => decideInWindow(body)}
+      />
+      {celebrate && <SignSuccess note={celebrateNote} onDone={() => setCelebrate(false)} />}
     </div>
   );
 }

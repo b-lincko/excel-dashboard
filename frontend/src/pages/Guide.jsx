@@ -100,10 +100,11 @@ export default function Guide() {
       <div className="card p-5 space-y-2">
         <div className="font-semibold">Purchase Approval (Daily → Purchase Approval, or g then p)</div>
         <p className="text-sm text-slate-500">
-          Dedicated desk at /approvals. Assign a technician (or Unassign). Send the PDF to one, two, or three managers.
-          A manager draws a digital signature — it prints on the PDF at corporate size — then sends the signed slip back
-          to the sender or someone else. That person can send it to Accounts or another person. After a signature the
-          slip is locked.
+          Dedicated desk at /approvals. It follows five steps — Request → Technician → Managers → Signed → Accounts —
+          and each screen shows only the action that is due next: assign (or Unassign), send to one to three managers,
+          then a manager opens <b>Review &amp; sign</b>: step one shows the request and the PDF, step two takes the
+          signature and the recipient. Signing locks the slip; “return with changes” sends it back to the technician to
+          fix and resend. The holder forwards the signed slip or files it with Accounts.
         </p>
         <p className="text-sm text-slate-500">
           Waiting too long? <b>Follow up</b> nudges whoever holds the ball — the managers who must sign, the technician,

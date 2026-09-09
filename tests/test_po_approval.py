@@ -164,3 +164,49 @@ def test_unassign_managers_and_route(tmp_path, monkeypatch):
     assert str(routed.get("holder") or "").lower() == "abubacar"
     sent_acc = approvals.send_accounts(rec, abu, to="admin")
     assert sent_acc["state"] == "sent_to_accounts"
+
+def test_unassign_route_and_dispatcher_submit(tmp_path, monkeypatch):
+    """Regression: the unassign endpoint must exist, the submit endpoint must
+    honor the picked managers, and a dispatcher/admin may submit (not only the
+    assignee technician)."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    db = tmp_path / "po-routes.db"
+    monkeypatch.setattr(database, "DB_PATH", db)
+    database.init_db()
+    rec = {
+        "record_id": "TEST:PO-ROUTES",
+        "work_order_id": "484000",
+        "po_number": "PO-ROUTES",
+        "status": "PLACED",
+        "supplier": "AAGE",
+        "assigned_to": "",
+    }
+    database.upsert_wo_record(rec)
+    client = TestClient(app)
+    token = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    base = f"/api/work-orders/{rec['record_id']}/approval"
+
+    assigned = client.post(f"{base}/assign", headers=headers, json={"assignee": "Nesar"})
+    assert assigned.status_code == 200, assigned.text
+    assert assigned.json()["approval"]["state"] == "assigned"
+    # Admin counts as a dispatcher: the send-to-managers step must be visible.
+    assert assigned.json()["caps"]["can_submit"] is True
+
+    submitted = client.post(f"{base}/submit", headers=headers, json={"managers": ["manager"]})
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["approval"]["state"] == "submitted"
+    assert submitted.json()["approval"]["manager_list"] == ["manager"]
+
+    # A technician who is not involved cannot unassign (403, not 405).
+    tech_token = client.post("/api/auth/login", json={"username": "arun", "password": "arun1234"}).json()["access_token"]
+    tech_headers = {"Authorization": f"Bearer {tech_token}"}
+    forbidden = client.post(f"{base}/unassign", headers=tech_headers)
+    assert forbidden.status_code == 403
+
+    unassigned = client.post(f"{base}/unassign", headers=headers)
+    assert unassigned.status_code == 200, unassigned.text
+    assert unassigned.json()["approval"]["state"] == "none"

@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (Resend no-domain testing mode: auto-learn owner inbox, deliver from onboarding@resend.dev with [TEST -> recipient] labels until a domain is verified).
+Last updated: 2026-09-09 (Approvals desk rebuilt: workflow stepper, Review & sign window; fixed missing /approval/unassign route; submit honors picked managers; dispatcher/admin can submit).
 
 ---
 
@@ -189,6 +189,8 @@ Dedicated page **`/approvals`** (Daily nav **Purchase Approval**, `g then p`). G
 3. A selected manager **must digital-sign**. The signature prints on the PDF at corporate size (~80×28 mm, aspect kept). They then send the signed slip back to the sender or someone else (`holder`).
 4. The holder (or dispatcher) sends it to **Accounts** or another person (`POST .../approval/route`).
 5. Approve **locks** PO fields. Extra grants: `po_dispatch`, `po_approve`, `accounts`.
+   - Routes on the WO router: `GET /{id}/approval`, `POST .../assign`, `POST .../submit` (body `{managers: []}` — **the picked list is honored**), `POST .../unassign` (dispatcher only, not from locked states), `POST .../decide`, `POST .../ping`, `POST .../send-accounts`, `GET .../approval/pdf`.
+   - **Submit** is allowed from `assigned`/`changes_requested` for the assignee **or a dispatcher/admin** (`caps.can_submit` matches). Empty managers body defaults to up to three `po_approve` managers.
 6. **Follow up (ping)** — `POST /api/work-orders/{id}/approval/ping` (permission `edit`). Anyone on the slip (dispatcher, assignee, holder, coordinator; admin) nudges whoever holds the ball: submitted → selected manager(s); assigned/changes_requested → technician; approved → holder. Records a `ping` event, sends an in-app ping (kind `ping`) and an email (rides `email_notify_po`). Cooldown per record: `po_ping_cooldown_minutes` (default 30) → HTTP **429** `PingCooldown`. `sent_to_accounts` / `none` refuse with 400. Caps: `can_ping`, `ping_label`, `ping_targets`, `last_ping_at`, `ping_cooldown_minutes`.
 
 Inbox API: `GET /api/po-approvals?q=` → lanes `incoming | assigned | changes | to_sign | ready | accounts`. Per-WO actions stay on `GET/POST /api/work-orders/{id}/approval*`. States: `none | assigned | submitted | changes_requested | approved | sent_to_accounts`. Extra grants: `po_dispatch`, `po_approve`, `accounts`.
@@ -356,6 +358,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - Steps in `SIGNING_TOUR_STEPS` (same file `lib/tour.js`). Storage: `localStorage["woms.signingTour.v1:"+username] = "done"`.
 - Deck choice lives in `TourContext` (`deck` = `main` | `signing`; `start()` = main, `startSigning()` = signing, `startDeck(name)` generic). `Tour.jsx` is deck-agnostic — it renders `steps` from context and navigates to each step's `path` (`/approvals`).
 - Auto-starts **once** on the user's first visit to `/approvals` when the filtered steps are non-empty (`po_approve` / `po_dispatch` / `accounts` grants; frontend `can()` already treats admin as all-perms). Replay via Guide (manager card) or the **How signing works** button on `/approvals` and the MR PO-approval panel.
+- `/approvals` UI (rebuilt): workflow stepper (Request → Technician → Managers → Signed → Accounts) with a plain-language status caption; a **Next step** card that shows only the actions currently available; **Review & sign…** opens `SignWindow.jsx` — a two-step modal (1 · View the request = summary + PDF, 2 · Sign the request = draw, pick the recipient, Sign & send with a lock confirm, or Return with changes). The signing tour auto-opens the window at step 2 when it reaches the hands-on steps. MR-page `PoApproval.jsx` reuses the same window.
 - Signing-desk `data-tour` ids (on `PoApprovals.jsx` / `SignaturePad.jsx`): `appr-head`, `appr-steps`, `appr-lanes`, `appr-list`, `appr-pdf`, `sign-pad` (signature canvas), `sign-return-to`, `sign-send`, `sign-return`, `appr-followup` (follow-up panel), `appr-accounts`.
 - Do not bump `SIGNING_TOUR_VERSION` when adding steps either; replay shows them.
 
@@ -408,6 +411,7 @@ cd frontend && npm run build
 | `tests/test_business_flow.py` | Dummy multi-line MR, delete WO, mentions, chat clear/delete, supplier add/remove, backup pair |
 | `tests/test_po_approval.py` | Technician-only assign, empty-type due date, PLACED overdue via ETA, PO assign → submit → sign → lock → Accounts, inbox lanes, manager must wait for resubmit |
 | `tests/test_po_followup.py` | Follow-up ping targets per state, cooldown 429, permission refusals, caps, follow-up email via OUTBOX |
+| `tests/test_po_approval.py` (added) | Regression: `/approval/unassign` route works (403 for outsiders), `/approval/submit` honors `{managers}`, admin/dispatcher `can_submit` |
 | `tests/test_email.py` | Settings hide SMTP/Resend secrets and keep blank-password, verification + reset links, request email to verified addresses, skip `@woms.local` | + Resend no-domain testing-mode redirect (learn owner, `[TEST → …]` resend)
 
 Pitfalls (do not repeat):
@@ -549,6 +553,8 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-09** PO signatures live on `/approvals` (not only the MR tab). `GET /api/po-approvals` is the role inbox. Manager `decide()` only from `submitted`.
 - **2026-09-09** Email is optional. Admin picks SMTP or Resend. Verification and reset go through email; PO/request pings also email verified addresses. Inbox stays in-app.
 - **2026-09-09 (this session)** Logo made transparent: black background removed from `linkco-logo.png`/`favicon.png` (unpremultiply-from-black keeps antialiased edges), new light-surface variant `linkco-logo-dark.png` (ink Link), `BrandLogo.jsx` switches variants by theme, `bg-black` patches dropped.
+- **2026-09-09 (this session)** Approvals desk UX rebuild + fixes: registered the missing `POST /{id}/approval/unassign` route (405 reported in the field), submit now passes the picked managers through (`SubmitPoBody`) and dispatchers/admins can submit (`can_submit`), desk shows a five-stage stepper with status captions and a Next-step card, and signing moved into a two-step `SignWindow` modal (view the request → sign/return) shared with the MR approval panel; signing tour auto-opens the window on hands-on steps.
+
 - **2026-09-09 (this session)** Resend testing mode: unverified-domain 403s no longer fail — mailer learns the owner inbox from the error, persists `resend_test_inbox`, and delivers from onboarding@resend.dev to the owner with [TEST -> recipient] labels; self-heals after domain verification.
 
 - **2026-09-09 (this session)** PO follow-up: `POST /{id}/approval/ping` pings the pending person per state with a `ping` history event, in-app inbox ping, and email riding `email_notify_po`; cooldown `po_ping_cooldown_minutes` (30) returns 429. Mail is preset to `resend` (key + verified-domain From to activate); `is_configured` now requires the provider secret; Settings PUT validates mail only when email values change so unfinished email setup never blocks backup/other saves.

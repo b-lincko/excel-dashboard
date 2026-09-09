@@ -382,9 +382,9 @@ def submit(rec: dict[str, Any], actor: dict[str, Any], managers: Any = None) -> 
         raise ValueError("Assign the PO to a technician before sending it to the operational manager.")
     mine = _norm(actor.get("username")) in {_norm(current.get("assignee")), _norm(actor.get("full_name"))}
     assignee_login = _resolve_login(current.get("assignee"))
-    if not mine and assignee_login != actor.get("username") and str(actor.get("role") or "") != "admin":
-        if _norm(actor.get("full_name")) != _norm(current.get("assignee")):
-            raise PermissionError("Only the assigned technician can send this purchase slip to a manager.")
+    dispatcher = has_perm(actor, "po_dispatch") or str(actor.get("role") or "") == "admin"
+    if not mine and not dispatcher:
+        raise PermissionError("Only the assigned technician or a dispatcher can send this purchase slip to a manager.")
     picks = _normalize_managers(managers)
     if not picks:
         picks = [u["username"] for u in manager_users()[:3]]
@@ -725,7 +725,7 @@ def capabilities(user: dict[str, Any], rec: dict[str, Any], approval: dict[str, 
     return {
         "can_assign": has_perm(user, "po_dispatch") and state not in LOCKED_STATES,
         "can_unassign": has_perm(user, "po_dispatch") and state in {"assigned", "submitted", "changes_requested"},
-        "can_submit": mine and state in {"assigned", "changes_requested"},
+        "can_submit": state in {"assigned", "changes_requested"} and (mine or has_perm(user, "po_dispatch")),
         "can_decide": _is_selected_manager(user, approval) and state == "submitted",
         "can_route": state == "approved" and (holding or has_perm(user, "po_dispatch")),
         "can_send_accounts": state == "approved"
