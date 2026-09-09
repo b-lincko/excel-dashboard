@@ -32,6 +32,7 @@ export const GUEST_PAGES = [
   "digest",
   "materials",
   "supplier_suggest",
+  "po_approvals",
 ];
 
 const PAGE_PATHS = {
@@ -55,6 +56,7 @@ const PAGE_PATHS = {
   digest: "/digest",
   materials: "/materials",
   supplier_suggest: "/supplier-suggest",
+  po_approvals: "/approvals",
 };
 
 export function firstPath(user) {

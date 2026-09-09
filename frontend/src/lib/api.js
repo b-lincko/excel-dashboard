@@ -137,11 +137,14 @@ export const api = {
   del: (path, opts) => request(path, { method: "DELETE", ...opts }),
   upload: (path, formData) => request(path, { method: "POST", body: formData, raw: true, timeoutMs: 15 * 60 * 1000 }),
   uploadWithProgress,
-  download: async (path, filename) => {
+  blob: async (path) => {
     const token = getToken();
     const res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     if (!res.ok) throw new Error("Download failed");
-    const blob = await res.blob();
+    return res.blob();
+  },
+  download: async (path, filename) => {
+    const blob = await api.blob(path);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

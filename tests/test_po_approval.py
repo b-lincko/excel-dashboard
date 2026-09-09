@@ -88,3 +88,45 @@ def test_po_assign_submit_approve_lock(tmp_path, monkeypatch):
     assert sent["state"] == "sent_to_accounts"
     pdf = po_approval_pdf(rec, approvals.approval_for(rec))
     assert pdf[:4] == b"%PDF"
+
+
+def test_inbox_lanes_and_resubmit(tmp_path, monkeypatch):
+    db = tmp_path / "po-inbox.db"
+    monkeypatch.setattr(database, "DB_PATH", db)
+    database.init_db()
+    rec = {
+        "record_id": "TEST:PO-INBOX",
+        "work_order_id": "482000",
+        "po_number": "PO-IN",
+        "status": "PLACED",
+        "supplier": "AAGE",
+        "assigned_to": "",
+    }
+    database.upsert_wo_record(rec)
+    abu = database.get_user_by_username("abubacar")
+    nesar = database.get_user_by_username("nesar")
+    manager = database.get_user_by_username("manager")
+    incoming = approvals.inbox(abu)
+    assert any(i["record_id"] == rec["record_id"] for i in incoming["lanes"]["incoming"])
+    hidden = approvals.inbox(nesar)
+    assert not any(i["record_id"] == rec["record_id"] for lane in hidden["lanes"].values() for i in lane)
+    approvals.assign(rec, abu, "Nesar")
+    rec = database.get_wo_record(rec["record_id"])
+    mine = approvals.inbox(nesar)
+    assert any(i["record_id"] == rec["record_id"] for i in mine["lanes"]["assigned"])
+    approvals.submit(rec, nesar)
+    rec = database.get_wo_record(rec["record_id"])
+    waiting = approvals.inbox(manager)
+    assert any(i["record_id"] == rec["record_id"] for i in waiting["lanes"]["to_sign"])
+    denied = approvals.decide(rec, manager, approve=False, comment="Fix qty")
+    assert denied["state"] == "changes_requested"
+    try:
+        approvals.decide(rec, manager, approve=True, signature_png="data:image/png;base64,aaaa")
+        raise AssertionError("approve without resubmit should fail")
+    except ValueError:
+        pass
+    approvals.submit(rec, nesar)
+    signed = approvals.decide(rec, manager, approve=True, signature_png="data:image/png;base64,aaaa")
+    assert signed["state"] == "approved"
+    ready = approvals.inbox(abu)
+    assert any(i["record_id"] == rec["record_id"] for i in ready["lanes"]["ready"])

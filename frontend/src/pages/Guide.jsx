@@ -13,7 +13,7 @@ const DAY = [
 const KEYS = [
   ["/", "Focus search from any page"],
   ["Ctrl/⌘ + K", "Command palette — jump to a page, WO, supplier or person"],
-  ["g then q / w / d / c", "Go to Queue, Work orders, Dashboard, Chat"],
+  ["g then q / w / d / c / p", "Go to Queue, Work orders, Dashboard, Chat, PO signatures"],
   ["n", "New material request"],
   ["j / k", "Move down / up the work-order list"],
   ["Enter", "Open the highlighted list row"],
@@ -89,12 +89,14 @@ export default function Guide() {
       </div>
 
       <div className="card p-5 space-y-2">
-        <div className="font-semibold">PO digital signature</div>
+        <div className="font-semibold">PO signatures (Daily → PO signatures, or g then p)</div>
         <p className="text-sm text-slate-500">
-          On a work order, open PO approval. Abubacar (or anyone granted “Assign POs”) assigns the PO to a technician
-          (Arun, Nesar, Yousuf, or a new User-role login — not admins or managers). That technician updates suppliers
-          and items, then Send to manager. The operational manager opens the PDF, draws a signature to approve, or
-          writes the changes and returns it. After a signature the PO is locked. Abubacar then Send to Accounts.
+          Dedicated desk at /approvals. Inbox notifications open it. Lanes: New POs → With technician → Changes
+          requested → Waiting for signature → Signed · send to Accounts → Sent to Accounts. Abubacar (or anyone
+          granted “Assign POs”) assigns the PO to a technician (Arun, Nesar, Yousuf, or a new User-role login — not
+          admins or managers). That technician updates suppliers and items on the MR, then Send PDF to manager. The
+          operational manager reviews the PDF in the page, draws a signature to approve, or writes the changes and
+          returns it. After a signature the PO is locked and cannot be customised. Abubacar then Send to Accounts.
         </p>
         <p className="text-sm text-slate-500">
           Assign to on the MR is the same technician list. If Purchase type is empty, pick the due date yourself
@@ -111,6 +113,7 @@ export default function Guide() {
           <Item k="Dashboard" v="Live counts. The mind map is a 2D animated graph of those same counts — click a node, then Open list. Click a KPI to open the matching rows." />
           <Item k="Work orders" v="Every MR. Compact columns by default — add more under Columns. Bulk assign, status, remarks. Back or closing the tab asks if the MR is unsaved." />
           <Item k="Action queue" v="First item in Daily on the left. What to work now, grouped by urgency." />
+          <Item k="PO signatures" v="Digital-sign POs. Role inboxes, PDF in the page, sign or return, lock, then send to Accounts." />
           <Item k="Morning digest" v="Overdue / NTP / due soon by site then assignee." />
           <Item k="Suppliers / PO" v="RFQ → PO → ETA board and on-time rate." />
           <Item k="Materials" v="Who supplied an item before. Catalog tab adds and removes vendors. Aliases group spellings." />

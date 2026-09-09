@@ -29,6 +29,7 @@ import {
   MessageSquare,
   FolderKanban,
   Keyboard,
+  PenLine,
   UserCheck,
   ClipboardCheck,
   FileWarning,
@@ -48,6 +49,7 @@ const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, group: "Daily", page: "dashboard" },
   { to: "/queue", label: "Action queue", icon: ListTodo, group: "Daily", page: "queue" },
   { to: "/work-orders", label: "Work orders", icon: ClipboardList, group: "Daily", page: "work_orders" },
+  { to: "/approvals", label: "PO signatures", icon: PenLine, group: "Daily", page: "po_approvals" },
   { to: "/open", label: "Open", icon: FolderOpen, group: "Daily", page: "open" },
   { to: "/overdue", label: "Overdue", icon: AlertTriangle, group: "Daily", page: "overdue" },
   { to: "/chat", label: "Chat", icon: MessageSquare, group: "Daily", page: "chat" },
@@ -91,6 +93,7 @@ const TITLES = {
   "/overdue": "Overdue",
   "/closed": "Closed orders",
   "/queue": "Action queue",
+  "/approvals": "PO signatures",
   "/digest": "Morning digest",
   "/alerts": "SLA alerts",
   "/handover": "Handover",
@@ -192,7 +195,7 @@ export default function Layout() {
       if (chord === "g") {
         chord = "";
         window.clearTimeout(chordTimer);
-        const map = { q: "/queue", w: "/work-orders", d: "/", c: "/chat", g: "/guide" };
+        const map = { q: "/queue", w: "/work-orders", d: "/", c: "/chat", g: "/guide", p: "/approvals" };
         const to = map[e.key.toLowerCase()];
         if (to) {
           e.preventDefault();
@@ -613,7 +616,9 @@ export default function Layout() {
                         onClick={async () => {
                           await api.post("/api/notifications/read", { ids: [n.id] });
                           loadInbox();
-                          if (n.record_id) nav(`/work-orders/${encodeURIComponent(n.record_id)}`);
+                          if (n.record_id && (n.kind === "po" || n.kind === "accounts"))
+                            nav(`/approvals?id=${encodeURIComponent(n.record_id)}`);
+                          else if (n.record_id) nav(`/work-orders/${encodeURIComponent(n.record_id)}`);
                           else if (n.thread_id) nav(`/chat?thread=${encodeURIComponent(n.thread_id)}`);
                           else nav("/chat");
                           setInboxOpen(false);

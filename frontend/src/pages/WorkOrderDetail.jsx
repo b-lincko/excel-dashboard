@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, qs } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 import MentionBox from "../components/MentionBox.jsx";
 import TypeAhead from "../components/TypeAhead.jsx";
-import PoApproval from "../components/PoApproval.jsx";
+
 
 const EXTRA_KEYS = ["delay_kind", "delay_source", "delay_justification", "unit_price", "price", "total_price", "final_price"];
 const DELAY_OPEN = new Set(["open"]);
@@ -153,6 +153,7 @@ export default function WorkOrderDetail() {
   const dueDays = dueOffsets[String(form.work_type || "").trim().toLowerCase()];
   const readOnly = isNew ? !can("create") : !can("edit");
   const canSave = isNew ? can("create") : can("edit");
+  const poLocked = !!(form.po_approval?.locked || form.po_approval?.state === "approved" || form.po_approval?.state === "sent_to_accounts");
   function fieldLocked(key, lock) {
     if (lock || readOnly) return true;
     if (isNew) return false;
@@ -733,6 +734,11 @@ export default function WorkOrderDetail() {
             Activity{chat.length || files.length ? ` · ${chat.length + files.length}` : ""}
           </button>
         )}
+        {!isNew && (
+          <Link className="tab-btn" to={`/approvals?id=${encodeURIComponent(form.record_id || id)}`}>
+            PO signatures
+          </Link>
+        )}
       </div>
 
       {tab === "details" && (
@@ -809,20 +815,6 @@ export default function WorkOrderDetail() {
           options={options}
           readOnly={readOnly || poLocked}
           supplierLocked={fieldLocked("supplier")}
-        />
-      )}
-
-      {tab === "approval" && !isNew && (
-        <PoApproval
-          woId={form.record_id || id}
-          onNotice={(msg) => {
-            toast(msg, "success");
-            api.get(`/api/work-orders/${encodeURIComponent(id)}`).then((d) => {
-              setForm(d.item);
-              setOriginal(d.item);
-              setMeta(d.item);
-            });
-          }}
         />
       )}
 

@@ -276,8 +276,8 @@ def decide(
     if not has_perm(actor, "po_approve"):
         raise PermissionError("Only an operational manager can sign or return this PO.")
     current = approval_for(rec)
-    if current.get("state") not in {"submitted", "changes_requested"}:
-        raise ValueError("There is no PO waiting for the manager.")
+    if current.get("state") != "submitted":
+        raise ValueError("There is no PO waiting for the manager. The technician must send it first.")
     if current.get("state") in LOCKED_STATES:
         raise ValueError("This PO is already approved and locked.")
     note = str(comment or "").strip()
@@ -384,4 +384,166 @@ def capabilities(user: dict[str, Any], rec: dict[str, Any], approval: dict[str, 
             {"username": u["username"], "full_name": u.get("full_name") or ""}
             for u in users_with_perm("po_dispatch")
         ],
+    }
+
+
+LANE_BY_STATE = {
+    "none": "incoming",
+    "": "incoming",
+    "assigned": "assigned",
+    "changes_requested": "changes",
+    "submitted": "to_sign",
+    "approved": "ready",
+    "sent_to_accounts": "accounts",
+}
+
+LANES = ("incoming", "assigned", "changes", "to_sign", "ready", "accounts")
+
+
+def lane_for(state: Any) -> str:
+    return LANE_BY_STATE.get(str(state or "none").strip().lower(), "incoming")
+
+
+def is_mine(user: Optional[dict[str, Any]], approval: dict[str, Any]) -> bool:
+    if not user:
+        return False
+    assignee = str(approval.get("assignee") or "")
+    if not assignee:
+        return False
+    if _norm(user.get("username")) in {_norm(assignee), _norm(user.get("full_name"))}:
+        return True
+    if _norm(user.get("full_name")) == _norm(assignee):
+        return True
+    return _resolve_login(assignee) == user.get("username")
+
+
+def _slim_rec(rec: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "record_id": rec.get("record_id") or "",
+        "work_order_id": rec.get("work_order_id") or rec.get("record_id") or "",
+        "po_number": rec.get("po_number") or "",
+        "supplier": rec.get("supplier") or "",
+        "status": rec.get("status") or "",
+        "department": rec.get("department") or rec.get("_site") or "",
+        "assigned_to": rec.get("assigned_to") or "",
+        "description": str(rec.get("description") or "")[:240],
+        "unit_price": rec.get("unit_price") or "",
+        "price": rec.get("price") or "",
+        "total_price": rec.get("total_price") or "",
+        "final_price": rec.get("final_price") or "",
+        "closed_date": rec.get("closed_date") or "",
+        "scheduled_date": rec.get("scheduled_date") or "",
+    }
+
+
+def _visible(user: dict[str, Any], lane: str, mine: bool) -> bool:
+    if str(user.get("role") or "").lower() == "admin":
+        return True
+    if has_perm(user, "po_dispatch"):
+        return True
+    if has_perm(user, "po_approve") and lane in {"to_sign", "ready", "accounts", "changes"}:
+        return True
+    if has_perm(user, "accounts") and lane in {"ready", "accounts"}:
+        return True
+    return mine
+
+
+def default_lane(user: dict[str, Any], counts: dict[str, int]) -> str:
+    if has_perm(user, "po_dispatch") and counts.get("incoming"):
+        return "incoming"
+    if has_perm(user, "po_approve") and counts.get("to_sign"):
+        return "to_sign"
+    if has_perm(user, "po_dispatch") and counts.get("ready"):
+        return "ready"
+    if counts.get("changes"):
+        return "changes"
+    if counts.get("assigned"):
+        return "assigned"
+    if has_perm(user, "accounts") and counts.get("accounts"):
+        return "accounts"
+    if has_perm(user, "po_approve"):
+        return "to_sign"
+    if has_perm(user, "po_dispatch"):
+        return "incoming"
+    return "assigned"
+
+
+def inbox(user: dict[str, Any], q: str = "") -> dict[str, Any]:
+    recs = database.load_wo_cache()
+    by_rid = {str(r.get("record_id") or ""): r for r in recs if r.get("record_id")}
+    rows = {str(r.get("record_id") or ""): r for r in database.list_po_approvals() if r.get("record_id")}
+    packed: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    needle = _norm(q)
+
+    def pack(rec: dict[str, Any], appr: dict[str, Any]) -> Optional[dict[str, Any]]:
+        rid = str(rec.get("record_id") or appr.get("record_id") or "")
+        if not rid or rid in seen:
+            return None
+        state = str(appr.get("state") or "none")
+        po = str(rec.get("po_number") or "").strip()
+        if state in {"none", ""} and not po:
+            return None
+        lane = lane_for(state)
+        mine = is_mine(user, appr)
+        if not _visible(user, lane, mine):
+            return None
+        item = _slim_rec(rec)
+        item["record_id"] = rid
+        item["approval"] = public_approval({**empty_approval(rec), **appr, "events": []})
+        item["lane"] = lane
+        item["mine"] = mine
+        if needle:
+            hay = " ".join(
+                str(item.get(k) or "")
+                for k in ("work_order_id", "po_number", "supplier", "assigned_to", "description", "department")
+            ).lower()
+            hay += " " + str(appr.get("assignee") or "").lower()
+            if needle not in hay:
+                return None
+        seen.add(rid)
+        return item
+
+    for rid, appr in rows.items():
+        rec = by_rid.get(rid) or database.get_wo_record(rid) or {
+            "record_id": rid,
+            "work_order_id": appr.get("work_order_id"),
+        }
+        rec = {**rec, "record_id": rid}
+        item = pack(rec, appr)
+        if item:
+            packed.append(item)
+    for rec in recs:
+        rid = str(rec.get("record_id") or "")
+        if not rid or rid in seen:
+            continue
+        if not str(rec.get("po_number") or "").strip():
+            continue
+        item = pack(rec, empty_approval(rec))
+        if item:
+            packed.append(item)
+
+    packed.sort(
+        key=lambda it: (
+            str((it.get("approval") or {}).get("updated_at") or ""),
+            str(it.get("work_order_id") or ""),
+        ),
+        reverse=True,
+    )
+    lanes: dict[str, list[dict[str, Any]]] = {key: [] for key in LANES}
+    for item in packed:
+        lanes.setdefault(item["lane"], []).append(item)
+    counts = {key: len(lanes.get(key) or []) for key in LANES}
+    return {
+        "lanes": lanes,
+        "counts": counts,
+        "total": len(packed),
+        "default_lane": default_lane(user, counts),
+        "technicians": technician_users(),
+        "caps": {
+            "can_dispatch": has_perm(user, "po_dispatch"),
+            "can_approve": has_perm(user, "po_approve"),
+            "can_accounts": has_perm(user, "po_dispatch") or has_perm(user, "accounts"),
+            "is_technician": str(user.get("role") or "").lower() == "user",
+        },
     }

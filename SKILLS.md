@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (ops-desk: Linkco logo, technician Assign to, all sites, empty-type due date, close prices, PO digital signature, PLACED overdue via ETA).
+Last updated: 2026-09-09 (PO signatures desk at `/approvals`, role inboxes, PDF iframe, resubmit-before-sign).
 
 ---
 
@@ -182,13 +182,15 @@ Due offsets (purchase type, days): Direct Cash 3, Local PO 5, International/Serv
 
 **PO digital signature** (`backend/app/approvals.py`, tables `po_approvals` / `po_approval_events`):
 
-1. Dispatcher (`po_dispatch`; Abubacar seeded if extras empty) assigns a technician.
-2. Technician updates the PO and **Send to manager** (PDF via `GET /api/work-orders/{id}/approval/pdf` → `reports.po_approval_pdf`).
-3. Operational manager (`po_approve`, manager role) **signs** (PNG data-URL) or **returns with a comment**.
-4. Approve **locks** PO fields (`po_number`, supplier, lines, dates, prices, description). Notify dispatcher + technician.
+Dedicated page **`/approvals`** (Daily nav **PO signatures**, `g then p`, command palette, Guide). Guest page key `po_approvals`. Inbox notifications `kind=po` / `accounts` open `/approvals?id=`.
+
+1. Dispatcher (`po_dispatch`; Abubacar seeded if extras empty) sees **New POs** when `po_number` is recorded and assigns a technician.
+2. Technician (Arun, Nesar, Yousuf, or any `role=user`) updates suppliers/items on the MR, then **Send PDF to manager**.
+3. Operational manager (`po_approve`) reviews the PDF **in the page** (auth blob iframe, not download-only), **signs** (PNG data-URL) or **returns with a comment**.
+4. Approve only from state `submitted` — after a return the technician must send again. Approve **locks** PO fields (`po_number`, supplier, lines, dates, prices, description). Notify dispatcher + technician.
 5. Dispatcher (or `accounts`) **Send to Accounts**.
 
-States: `none | assigned | submitted | changes_requested | approved | sent_to_accounts`. Extra grants: `po_dispatch`, `po_approve`, `accounts`.
+Inbox API: `GET /api/po-approvals?q=` → lanes `incoming | assigned | changes | to_sign | ready | accounts`. Per-WO actions stay on `GET/POST /api/work-orders/{id}/approval*`. States: `none | assigned | submitted | changes_requested | approved | sent_to_accounts`. Extra grants: `po_dispatch`, `po_approve`, `accounts`.
 
 **Logo:** `frontend/public/linkco-logo.png` + `favicon.png` (local mark; the public Linkco URL is unreachable). Sidebar, login, and favicon use it.
 
@@ -348,6 +350,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | ------ | ------- |
 | `/api/health` | Liveness + record count |
 | `/api/auth` | login, me, logout, password, profile, layout |
+| `/api/po-approvals` | Role inbox for the PO signatures desk (`lanes`, `counts`, `default_lane`) |
 | `/api/work-orders` | list, suggest, CRUD, bulk, claim, close, watch, presence, chat, timeline, seen, PDF sheet, PO approval (`/{id}/approval` get/assign/submit/decide/send-accounts + `/approval/pdf`) |
 | `/api/dashboard` | KPIs / charts from live records |
 | `/api/ops` | queue, digest, alerts, handover, health scan |
@@ -386,7 +389,7 @@ cd frontend && npm run build
 | `tests/test_audit_fixes.py` | Logout revoke, password invalidates token, upload needs settings, folder jail, write-backup prune |
 | `tests/test_priority_blockades.py` | Priority case-fold, blockades exclude OPEN/PLACED, flag=blockade |
 | `tests/test_business_flow.py` | Dummy multi-line MR, delete WO, mentions, chat clear/delete, supplier add/remove, backup pair |
-| `tests/test_po_approval.py` | Technician-only assign, empty-type due date, PLACED overdue via ETA, PO assign → submit → sign → lock → Accounts |
+| `tests/test_po_approval.py` | Technician-only assign, empty-type due date, PLACED overdue via ETA, PO assign → submit → sign → lock → Accounts, inbox lanes, manager must wait for resubmit |
 
 Pitfalls (do not repeat):
 
@@ -520,3 +523,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-09** Seed technician logins Abubacar, Arun, Nesar, Yousuf (`TEAM_USERS`). Assign-to save/bulk/create pings that user in the inbox when the name matches username or full_name.
 - **2026-09-09** Mind map is 2D SVG with animation (not WebGL orbit). Labels stay readable; motion pauses on hover / reduced-motion.
 - **2026-09-09** Backup must not fail: durable Excel copy with retry/fsync, SQLite snapshot retries, still snapshot `.db` if Excel copy fails. Excel upload reads the temp workbook (header-row scan, fuzzy sheet names) before replacing live files; refuse empty / &lt; 50% so `wo_cache` is not wiped.
+- **2026-09-09** PO signatures live on `/approvals` (not only the MR tab). `GET /api/po-approvals` is the role inbox. Manager `decide()` only from `submitted`.

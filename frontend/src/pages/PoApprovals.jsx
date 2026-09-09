@@ -1,0 +1,401 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { FileText, PenLine, Send, Stamp } from "lucide-react";
+import { api } from "../lib/api.js";
+import { useAuth } from "../context/AuthContext.jsx";
+import { useUi } from "../context/UiContext.jsx";
+import { useLiveReload } from "../lib/live.js";
+import SignaturePad from "../components/SignaturePad.jsx";
+
+const LANES = [
+  { id: "incoming", label: "New POs", hint: "Abubacar assigns a technician" },
+  { id: "assigned", label: "With technician", hint: "Update suppliers, then send PDF" },
+  { id: "changes", label: "Changes requested", hint: "Fix what the manager wrote, send again" },
+  { id: "to_sign", label: "Waiting for signature", hint: "Operational manager reviews the PDF" },
+  { id: "ready", label: "Signed · send to Accounts", hint: "Locked. Dispatcher sends it on." },
+  { id: "accounts", label: "Sent to Accounts", hint: "Done" },
+];
+
+const STATE_LABEL = {
+  none: "New PO",
+  assigned: "Assigned",
+  changes_requested: "Changes requested",
+  submitted: "Waiting for signature",
+  approved: "Signed · locked",
+  sent_to_accounts: "In Accounts",
+};
+
+export default function PoApprovals() {
+  const { user } = useAuth();
+  const { toast, ask } = useUi();
+  const tick = useLiveReload();
+  const [params, setParams] = useSearchParams();
+  const [data, setData] = useState(null);
+  const [q, setQ] = useState("");
+  const [lane, setLane] = useState("");
+  const [selected, setSelected] = useState(params.get("id") || "");
+  const [detail, setDetail] = useState(null);
+  const [pdfUrl, setPdfUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [assignee, setAssignee] = useState("");
+  const [comment, setComment] = useState("");
+  const [signature, setSignature] = useState("");
+
+  function loadInbox() {
+    api
+      .get(`/api/po-approvals${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`)
+      .then((d) => {
+        setData(d);
+        setLane((prev) => prev || d.default_lane || "incoming");
+      })
+      .catch((e) => setError(e.message));
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(loadInbox, q ? 220 : 0);
+    return () => window.clearTimeout(timer);
+  }, [q, tick]);
+
+  useEffect(() => {
+    const id = params.get("id");
+    if (id) setSelected(id);
+  }, [params]);
+
+  useEffect(() => {
+    if (!data || !selected) return;
+    for (const l of LANES) {
+      if ((data.lanes?.[l.id] || []).some((row) => row.record_id === selected)) {
+        setLane(l.id);
+        return;
+      }
+    }
+  }, [selected, data]);
+
+  useEffect(() => {
+    if (!selected) {
+      setDetail(null);
+      return undefined;
+    }
+    let cancelled = false;
+    api
+      .get(`/api/work-orders/${encodeURIComponent(selected)}/approval`)
+      .then((d) => {
+        if (cancelled) return;
+        setDetail(d);
+        setAssignee(d.approval?.assignee || d.caps?.technicians?.[0]?.label || "");
+        setComment(d.approval?.state === "changes_requested" ? "" : d.approval?.comment || "");
+        setSignature("");
+        setError("");
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, tick]);
+
+  useEffect(() => {
+    if (!selected) {
+      setPdfUrl("");
+      return undefined;
+    }
+    let url = "";
+    api
+      .blob(`/api/work-orders/${encodeURIComponent(selected)}/approval/pdf`)
+      .then((blob) => {
+        url = URL.createObjectURL(blob);
+        setPdfUrl(url);
+      })
+      .catch(() => setPdfUrl(""));
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [selected, detail?.approval?.state, detail?.approval?.updated_at]);
+
+  const rows = useMemo(() => data?.lanes?.[lane] || [], [data, lane]);
+
+  function openItem(id, itemLane) {
+    setSelected(id);
+    if (itemLane) setLane(itemLane);
+    setParams({ id }, { replace: true });
+  }
+
+  async function run(path, body, { confirm, confirmLabel } = {}) {
+    if (confirm) {
+      const ok = await ask({ title: confirm, confirmLabel: confirmLabel || "Continue" });
+      if (!ok) return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const d = await api.post(`/api/work-orders/${encodeURIComponent(selected)}${path}`, body || {});
+      setDetail((prev) => ({ ...prev, approval: d.approval, caps: d.caps }));
+      toast(d.approval?.state === "approved" ? "PO signed and locked" : "PO updated", "success");
+      if (path.includes("decide") && body?.approve) setSignature("");
+      loadInbox();
+    } catch (e) {
+      setError(typeof e.detail === "string" ? e.detail : e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const a = detail?.approval || {};
+  const caps = detail?.caps || {};
+  const item = detail?.item || {};
+  const techs = caps.technicians || data?.technicians || [];
+  const who = user?.full_name || user?.username || "";
+
+  return (
+    <div className="space-y-5">
+      <div className="page-head">
+        <div>
+          <div className="page-kicker">Digital signature</div>
+          <h1 className="text-2xl font-bold tracking-tight">PO signatures</h1>
+          <p className="text-sm text-slate-500">
+            Abubacar receives a PO, assigns a technician (Arun, Nesar, Yousuf, or a new User). That person updates the
+            order and sends a PDF to the operational manager. The manager signs, or writes the changes and returns it.
+            After a signature the PO is locked. Abubacar then sends it to Accounts.
+          </p>
+        </div>
+      </div>
+
+      <ol className="grid sm:grid-cols-5 gap-2 text-xs">
+        {[
+          ["1. Receive", "PO number lands here"],
+          ["2. Assign", "Dispatcher picks a technician"],
+          ["3. Work", "Tech updates suppliers / items"],
+          ["4. Sign", "Manager signs the PDF — or returns it"],
+          ["5. Accounts", "Dispatcher sends the locked PO"],
+        ].map(([t, h]) => (
+          <li key={t} className="card px-3 py-2">
+            <div className="font-semibold">{t}</div>
+            <div className="text-slate-500">{h}</div>
+          </li>
+        ))}
+      </ol>
+
+      <div className="flex flex-wrap gap-2">
+        {LANES.map((l) => {
+          const n = data?.counts?.[l.id] || 0;
+          return (
+            <button
+              key={l.id}
+              type="button"
+              className={`tab-btn ${lane === l.id ? "is-on" : ""}`}
+              onClick={() => setLane(l.id)}
+            >
+              {l.label}
+              <span className="ml-1 text-slate-400">{n}</span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-slate-500">{LANES.find((l) => l.id === lane)?.hint}</p>
+
+      <div className="grid lg:grid-cols-[minmax(280px,380px)_1fr] gap-4 items-start">
+        <div className="space-y-3">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search WO, PO, supplier, technician…"
+            aria-label="Search POs"
+          />
+          <div className="card overflow-hidden max-h-[70vh] overflow-y-auto">
+            {rows.map((row) => (
+              <button
+                key={row.record_id}
+                type="button"
+                className={`w-full text-left px-4 py-3 border-b border-slate-100 dark:border-white/5 ${
+                  selected === row.record_id ? "bg-sky-50/80 dark:bg-sky-500/10" : "hover:bg-slate-50 dark:hover:bg-white/5"
+                }`}
+                onClick={() => openItem(row.record_id, row.lane)}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-semibold truncate">{row.work_order_id || row.record_id}</div>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 shrink-0">
+                    {STATE_LABEL[row.approval?.state] || row.approval?.state}
+                  </span>
+                </div>
+                <div className="text-sm text-slate-600 dark:text-slate-300 truncate">
+                  {row.po_number ? `PO ${row.po_number}` : "No PO #"} · {row.supplier || "No supplier"}
+                </div>
+                <div className="text-xs text-slate-500 truncate">
+                  {row.approval?.assignee || row.assigned_to || "Unassigned"} · {row.department || "—"}
+                </div>
+              </button>
+            ))}
+            {!rows.length && (
+              <div className="px-4 py-10 text-sm text-slate-500 text-center">
+                {data ? "Nothing in this step." : "Loading POs…"}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4 min-w-0">
+          {!selected || !detail ? (
+            <div className="card p-8 text-sm text-slate-500">Pick a PO on the left. Hello {who}.</div>
+          ) : (
+            <>
+              <div className="card p-5 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs uppercase tracking-wider text-slate-400">IM WO {item.work_order_id}</div>
+                    <div className="text-lg font-semibold">PO {item.po_number || "—"}</div>
+                    <div className="text-sm text-slate-500">
+                      {item.supplier || "No supplier"} · {item.department || "—"} · {item.status || "—"}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Link className="btn-outline" to={`/work-orders/${encodeURIComponent(selected)}`}>
+                      Open material request
+                    </Link>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 text-sm">
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-white/10">
+                    {STATE_LABEL[a.state] || a.state}
+                  </span>
+                  {a.assignee ? <span className="text-slate-500">Technician {a.assignee}</span> : null}
+                  {a.locked ? <span className="text-emerald-700 font-medium">Locked — cannot be changed</span> : null}
+                </div>
+                {a.comment && a.state === "changes_requested" ? (
+                  <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+                    Manager asked for: {a.comment}
+                  </div>
+                ) : null}
+                {error && <div className="text-sm text-rose-600">{error}</div>}
+
+                {caps.can_assign && (
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <div className="flex-1 min-w-[12rem]">
+                      <label className="lbl">Assign technician</label>
+                      <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+                        <option value="">—</option>
+                        {techs.map((t) => (
+                          <option key={t.username} value={t.label}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      className="btn-primary"
+                      disabled={busy || !assignee}
+                      onClick={() => run("/approval/assign", { assignee })}
+                    >
+                      <Send size={14} /> Assign PO
+                    </button>
+                  </div>
+                )}
+
+                {caps.can_submit && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-slate-500">
+                      Update suppliers and items on the material request first, then send this PDF to the operational
+                      manager.
+                    </p>
+                    <button className="btn-primary" disabled={busy} onClick={() => run("/approval/submit")}>
+                      <FileText size={14} /> Send PDF to manager
+                    </button>
+                  </div>
+                )}
+
+                {caps.can_decide && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-slate-500">
+                      Review the PDF. Draw a signature to approve (this locks the PO), or write the changes and return it
+                      to {a.assignee || "the technician"}.
+                    </p>
+                    <div>
+                      <label className="lbl">Digital signature</label>
+                      <SignaturePad value={signature} onChange={setSignature} />
+                    </div>
+                    <div>
+                      <label className="lbl">Changes (required to return)</label>
+                      <textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        className="btn-primary"
+                        disabled={busy || !signature}
+                        onClick={() =>
+                          run(
+                            "/approval/decide",
+                            { approve: true, signature_png: signature, comment },
+                            {
+                              confirm: "Sign and lock this PO? After this, suppliers, items and prices cannot be changed.",
+                              confirmLabel: "Sign & lock",
+                            }
+                          )
+                        }
+                      >
+                        <Stamp size={14} /> Sign &amp; approve
+                      </button>
+                      <button
+                        className="btn-outline"
+                        disabled={busy || !comment.trim()}
+                        onClick={() => run("/approval/decide", { approve: false, comment })}
+                      >
+                        Return with changes
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {caps.can_send_accounts && (
+                  <button
+                    className="btn-primary"
+                    disabled={busy}
+                    onClick={() =>
+                      run("/approval/send-accounts", {}, { confirm: "Send this signed PO to Accounts?", confirmLabel: "Send" })
+                    }
+                  >
+                    <PenLine size={14} /> Send to Accounts
+                  </button>
+                )}
+              </div>
+
+              <div className="card overflow-hidden min-h-[28rem]">
+                <div className="px-4 py-2 text-xs font-medium text-slate-500 border-b border-slate-100 dark:border-white/5 flex justify-between">
+                  <span>PDF for signature</span>
+                  <button
+                    type="button"
+                    className="text-brand-700 dark:text-cyan-300"
+                    onClick={() =>
+                      api.download(`/api/work-orders/${encodeURIComponent(selected)}/approval/pdf`, `PO_${item.work_order_id || selected}.pdf`)
+                    }
+                  >
+                    Download
+                  </button>
+                </div>
+                {pdfUrl ? (
+                  <iframe title="PO PDF" src={pdfUrl} className="w-full h-[32rem] bg-slate-100" />
+                ) : (
+                  <div className="p-8 text-sm text-slate-500">Preparing PDF…</div>
+                )}
+              </div>
+
+              {(a.events || []).length > 0 && (
+                <div className="card p-4">
+                  <div className="font-semibold text-sm mb-2">History</div>
+                  <ul className="text-xs text-slate-500 space-y-1">
+                    {a.events.map((ev) => (
+                      <li key={ev.id}>
+                        {ev.created_at} · {ev.username} · {ev.action}
+                        {ev.comment ? ` — ${ev.comment}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

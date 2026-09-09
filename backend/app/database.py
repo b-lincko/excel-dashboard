@@ -2122,6 +2122,14 @@ def get_po_approval(record_id: str) -> Optional[dict[str, Any]]:
         return dict(row) if row else None
 
 
+def list_po_approvals() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM po_approvals ORDER BY COALESCE(updated_at, '') DESC, record_id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def list_po_approval_events(record_id: str) -> list[dict[str, Any]]:
     rid = str(record_id or "").strip()
     if not rid:

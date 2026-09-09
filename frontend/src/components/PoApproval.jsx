@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api.js";
 import SignaturePad from "./SignaturePad.jsx";
 
@@ -56,12 +57,21 @@ export default function PoApproval({ woId, onNotice }) {
   return (
     <div className="card p-5 space-y-4">
       <div>
-        <div className="font-semibold">PO approval</div>
-        <p className="text-xs text-slate-500">
-          Abubacar (or anyone granted PO dispatch) assigns a technician. That person updates the PO, sends a PDF to
-          the operational manager, who signs or returns written changes. After a signature the PO is locked. Dispatch
-          then sends it to Accounts.
-        </p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-semibold">PO approval</div>
+            <p className="text-xs text-slate-500">
+              Abubacar (or anyone granted PO dispatch) assigns a technician. That person updates the PO, sends a PDF to
+              the operational manager, who signs or returns written changes. After a signature the PO is locked. Dispatch
+              then sends it to Accounts.
+            </p>
+          </div>
+          {woId ? (
+            <Link className="btn-outline shrink-0" to={`/approvals?id=${encodeURIComponent(woId)}`}>
+              Open signatures desk
+            </Link>
+          ) : null}
+        </div>
       </div>
       <div className="flex flex-wrap gap-2 text-sm">
         <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-white/10">{LABELS[a.state] || a.state || "Not started"}</span>

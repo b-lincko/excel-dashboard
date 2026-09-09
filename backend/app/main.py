@@ -15,7 +15,7 @@ from . import database
 from .backup import start_scheduler, stop_scheduler
 from .config import DATA_DIR
 from .excel.service import excel_service
-from .routers import audit, auth, catalog, collab, dashboard, files, ops, reports, settings, sync, users, work_orders
+from .routers import audit, auth, catalog, collab, dashboard, files, ops, po_approvals, reports, settings, sync, users, work_orders
 
 
 def _boot() -> None:
@@ -84,6 +84,7 @@ async def security_headers(request: Request, call_next):
 
 app.include_router(auth.router)
 app.include_router(work_orders.router)
+app.include_router(po_approvals.router)
 app.include_router(catalog.router)
 app.include_router(dashboard.router)
 app.include_router(ops.router)

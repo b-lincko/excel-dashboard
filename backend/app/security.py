@@ -38,6 +38,7 @@ GUEST_PAGES = [
     "digest",
     "materials",
     "supplier_suggest",
+    "po_approvals",
 ]
 ALL_PERMS = [
     "view",
