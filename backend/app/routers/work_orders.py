@@ -302,6 +302,12 @@ def options(user=Depends(require_permission("view"))):
     opts["issue"] = merge_choices(opts.get("issue") or [], delivery)
     opts["delay_reason"] = merge_choices(opts.get("delay_reason") or [], delivery)
     opts["mention_users"] = mention_users
+    assignee_names = [
+        str(u.get("full_name") or u.get("username") or "").strip()
+        for u in database.list_users()
+        if u.get("is_active") and (u.get("full_name") or u.get("username"))
+    ]
+    opts["assigned_to"] = merge_choices(opts.get("assigned_to") or [], assignee_names)
     opts["supplier_items"] = supplier_items
     sites = site_choices(cfg)
     camps = camp_site_catalog(cfg)
@@ -388,6 +394,12 @@ def bulk_update(body: BulkUpdate, user=Depends(require_permission("edit"))):
                 status_code=422,
                 detail=f"Changing status to {body.status} requires a remark ({len(need_remark)} selected).",
             )
+    prev_assigned: dict[str, str] = {}
+    if body.assigned_to is not None:
+        for wo_id in body.ids:
+            old = database.get_wo_record(str(wo_id))
+            if old:
+                prev_assigned[str(old.get("record_id") or wo_id)] = str(old.get("assigned_to") or "")
     try:
         result = excel_service.update_records(
             body.ids,
@@ -416,6 +428,15 @@ def bulk_update(body: BulkUpdate, user=Depends(require_permission("edit"))):
             record_id=str(rec.get("record_id") or ""),
             work_order_id=str(rec.get("work_order_id") or ""),
         ) if remark else []
+        if body.assigned_to is not None:
+            pinged.extend(
+                notify.notify_assignment(
+                    actor,
+                    rec,
+                    previous=prev_assigned.get(str(rec.get("record_id") or ""), ""),
+                    skip=set(pinged),
+                )
+            )
         notify.notify_watchers(
             actor,
             rec,
@@ -513,6 +534,15 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
         if remark
         else []
     )
+    if "assigned_to" in excel_changes:
+        pinged.extend(
+            notify.notify_assignment(
+                actor,
+                updated,
+                previous=str(rec.get("assigned_to") or ""),
+                skip=set(pinged),
+            )
+        )
     if excel_changes or extra_changes or lines is not None:
         bits = [k for k in {**excel_changes, **extra_changes} if k != "remarks"]
         if remark:
@@ -558,6 +588,8 @@ def create_work_order(body: WorkOrderCreate, user=Depends(require_permission("cr
             lines,
             user["username"],
         )
+    if created.get("assigned_to"):
+        notify.notify_assignment(user["username"], created, previous="")
     return {
         "item": annotate(_with_extras(created)),
         "sync_token": excel_service.sync_token(),

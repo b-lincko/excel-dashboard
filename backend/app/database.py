@@ -239,6 +239,38 @@ DEFAULT_USERS = [
     },
 ]
 
+# Technicians shown on Assign to. full_name must match the Excel cell so assignment pings them.
+TEAM_USERS = [
+    {
+        "username": "abubacar",
+        "full_name": "Abubacar",
+        "email": "abubacar@woms.local",
+        "password": "abubacar1234",
+        "role": "user",
+    },
+    {
+        "username": "arun",
+        "full_name": "Arun",
+        "email": "arun@woms.local",
+        "password": "arun1234",
+        "role": "user",
+    },
+    {
+        "username": "nesar",
+        "full_name": "Nesar",
+        "email": "nesar@woms.local",
+        "password": "nesar1234",
+        "role": "user",
+    },
+    {
+        "username": "yousuf",
+        "full_name": "Yousuf",
+        "email": "yousuf@woms.local",
+        "password": "yousuf1234",
+        "role": "user",
+    },
+]
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -329,6 +361,22 @@ def init_db() -> None:
                         now_iso(),
                     ),
                 )
+        for u in TEAM_USERS:
+            row = conn.execute("SELECT id FROM users WHERE username = ?", (u["username"],)).fetchone()
+            if row:
+                continue
+            conn.execute(
+                """INSERT INTO users (username, full_name, email, password_hash, role, is_active, created_at, must_change_password)
+                   VALUES (?, ?, ?, ?, ?, 1, ?, 1)""",
+                (
+                    u["username"],
+                    u["full_name"],
+                    u["email"],
+                    hash_password(u["password"]),
+                    u["role"],
+                    now_iso(),
+                ),
+            )
         for u in DEFAULT_USERS:
             row = conn.execute(
                 "SELECT id, password_hash, must_change_password FROM users WHERE username = ?",

@@ -31,6 +31,53 @@ def resolve_usernames(raw: list[str]) -> list[str]:
     return out
 
 
+def resolve_assignee(name: Any) -> Optional[str]:
+    """Map an Assign-to cell (full name or username) to an active login."""
+    needle = str(name or "").strip().lower()
+    if not needle:
+        return None
+    for user in database.list_users():
+        if not user.get("is_active"):
+            continue
+        username = str(user.get("username") or "").strip()
+        full_name = str(user.get("full_name") or "").strip()
+        if needle in {username.lower(), full_name.lower()}:
+            return username
+    return None
+
+
+def notify_assignment(
+    actor: str,
+    rec: dict[str, Any],
+    previous: str = "",
+    skip: Optional[set[str]] = None,
+) -> list[str]:
+    """Inbox ping when Assign to changes to a user (by username or full name)."""
+    current = str((rec or {}).get("assigned_to") or "").strip()
+    if not current:
+        return []
+    if str(previous or "").strip().lower() == current.lower():
+        return []
+    username = resolve_assignee(current)
+    if not username or username == actor:
+        return []
+    ignored = set(skip or set())
+    if username in ignored:
+        return []
+    prev_user = resolve_assignee(previous)
+    if prev_user and prev_user == username:
+        return []
+    wo = str(rec.get("work_order_id") or rec.get("record_id") or "")
+    notify(
+        username,
+        "assign",
+        f"{actor} assigned {wo} to you",
+        record_id=str(rec.get("record_id") or ""),
+        work_order_id=str(rec.get("work_order_id") or ""),
+    )
+    return [username]
+
+
 def notify(
     username: str,
     kind: str,

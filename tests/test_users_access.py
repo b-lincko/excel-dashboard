@@ -90,6 +90,57 @@ def test_user_crud_access_profile_and_last_admin():
     assert missing.status_code == 404
 
 
+def test_team_users_get_assignment_notification():
+    from app.excel.service import excel_service
+
+    database.init_db()
+    excel_service.invalidate()
+    names = {u["username"] for u in database.list_users()}
+    assert {"abubacar", "arun", "nesar", "yousuf"} <= names
+    client, headers = _admin()
+    created = client.post(
+        "/api/work-orders",
+        headers=headers,
+        json={
+            "data": {
+                "description": "Assign ping test",
+                "status": "OPEN",
+                "assigned_to": "Arun",
+                "department": "F5",
+                "work_type": "Local PO",
+            }
+        },
+    )
+    assert created.status_code == 200, created.text
+    rid = created.json()["item"]["record_id"]
+    arun = client.post("/api/auth/login", json={"username": "arun", "password": "arun1234"})
+    assert arun.status_code == 200, arun.text
+    inbox = client.get(
+        "/api/notifications",
+        headers={"Authorization": f"Bearer {arun.json()['access_token']}"},
+    )
+    assert inbox.status_code == 200, inbox.text
+    assert any("assigned" in (n.get("body") or "").lower() for n in inbox.json()["items"])
+    again = client.put(
+        f"/api/work-orders/{rid}",
+        headers=headers,
+        json={"changes": {"assigned_to": "Nesar"}, "force": True},
+    )
+    assert again.status_code == 200, again.text
+    nesar = client.post("/api/auth/login", json={"username": "nesar", "password": "nesar1234"})
+    assert nesar.status_code == 200
+    nbox = client.get(
+        "/api/notifications",
+        headers={"Authorization": f"Bearer {nesar.json()['access_token']}"},
+    )
+    assert any("assigned" in (n.get("body") or "").lower() for n in nbox.json()["items"])
+    still_arun = client.get(
+        "/api/notifications",
+        headers={"Authorization": f"Bearer {arun.json()['access_token']}"},
+    )
+    assert still_arun.status_code == 200
+
+
 def test_invalid_username_rejected():
     client, headers = _admin()
     bad = client.post(

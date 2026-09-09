@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (SQLite-only live CRUD; midnight Excel dump + archive; Close order; 3D mind map).
+Last updated: 2026-09-09 (Technician logins Abubacar/Arun/Nesar/Yousuf; assignment inbox ping).
 
 ---
 
@@ -99,6 +99,17 @@ Midnight / Backup now → export DB → file.xlsx  +  snapshot SQLite
   | admin    | admin123    | admin   |
   | manager  | manager123  | manager |
   | user     | user123     | user    |
+
+  Technicians (seeded by `TEAM_USERS` on every `init_db` if missing; survive admin reset). Temporary passwords must be changed:
+
+  | Username | Password      | Assign to name |
+  | -------- | ------------- | -------------- |
+  | abubacar | abubacar1234  | Abubacar       |
+  | arun     | arun1234      | Arun           |
+  | nesar    | nesar1234     | Nesar          |
+  | yousuf   | yousuf1234    | Yousuf         |
+
+  **Assign to** matches `full_name` or username. Create / save / bulk that changes Assign to sends an inbox ping (`kind=assign`) to that login.
 
 ### Product rules
 
@@ -475,3 +486,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-08** Excel upload/seed and backup apply run off the event loop (thread + job). UI shows upload bar, applying-backup bar, then an applied notification. `/api/auth/me` timeout must not log the user out.
 - **2026-09-08** Three.js mind map (live counts, click → Open list) plus a decorative login network. No invented statistics. Reduced-motion / no-WebGL falls back to the 2D tree.
 - **2026-09-09** User reversed per-save Excel. SQLite is the only live store. Midnight (default 00:00) exports all DB rows into `file.xlsx` and snapshots SQLite. Archive pairs after 30 days; delete archives after 180. Close order button. 3D mind map fingerprints the graph so dashboard polls do not remount WebGL; sprite labels + min-height.
+- **2026-09-09** Seed technician logins Abubacar, Arun, Nesar, Yousuf (`TEAM_USERS`). Assign-to save/bulk/create pings that user in the inbox when the name matches username or full_name.
