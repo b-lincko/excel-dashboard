@@ -38,6 +38,9 @@ const ACTION_LABELS = {
   audit: "Audit log",
   backup: "Backup / restore",
   import: "Import files",
+  po_dispatch: "Assign POs / send to Accounts",
+  po_approve: "Sign / return POs",
+  accounts: "Accounts inbox",
 };
 
 const ROLE_LABELS = {

@@ -40,6 +40,7 @@ import { useUi } from "../context/UiContext.jsx";
 import { api } from "../lib/api.js";
 import { clearDashCache } from "../lib/widgets.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
+import BrandLogo from "./BrandLogo.jsx";
 import CommandPalette from "./CommandPalette.jsx";
 import { useTour } from "../context/TourContext.jsx";
 
@@ -379,9 +380,7 @@ export default function Layout() {
   const sidebar = (
     <>
       <div className="px-5 py-5 flex items-center gap-3">
-        <div className="h-10 w-10 rounded-xl bg-brand-600 grid place-items-center font-extrabold text-white">
-          WO
-        </div>
+        <BrandLogo className="h-10 w-auto max-w-[140px] object-contain" />
         <div className="min-w-0">
           <div className="font-bold tracking-tight text-slate-900 dark:text-white leading-tight">Linkco MR</div>
           <div className="text-[11px] text-slate-400 truncate">Work orders · Material requests</div>

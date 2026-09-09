@@ -215,6 +215,31 @@ CREATE TABLE IF NOT EXISTS wo_presence (
     PRIMARY KEY (record_id, username)
 );
 CREATE INDEX IF NOT EXISTS idx_presence_seen ON wo_presence(seen_at);
+CREATE TABLE IF NOT EXISTS po_approvals (
+    record_id TEXT PRIMARY KEY,
+    work_order_id TEXT,
+    state TEXT NOT NULL DEFAULT 'none',
+    coordinator TEXT,
+    assignee TEXT,
+    manager TEXT,
+    accounts_by TEXT,
+    comment TEXT,
+    signature_png TEXT,
+    signed_at TEXT,
+    signed_by TEXT,
+    locked INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT,
+    updated_by TEXT
+);
+CREATE TABLE IF NOT EXISTS po_approval_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    record_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    username TEXT,
+    comment TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_po_events_record ON po_approval_events(record_id, id);
 """
 
 DEFAULT_USERS = [
@@ -333,6 +358,37 @@ def init_db() -> None:
         line_cols = {r[1] for r in conn.execute("PRAGMA table_info(mr_lines)")}
         if "needed_date" not in line_cols:
             conn.execute("ALTER TABLE mr_lines ADD COLUMN needed_date TEXT")
+        if "unit_price" not in line_cols:
+            conn.execute("ALTER TABLE mr_lines ADD COLUMN unit_price TEXT")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS po_approvals (
+                record_id TEXT PRIMARY KEY,
+                work_order_id TEXT,
+                state TEXT NOT NULL DEFAULT 'none',
+                coordinator TEXT,
+                assignee TEXT,
+                manager TEXT,
+                accounts_by TEXT,
+                comment TEXT,
+                signature_png TEXT,
+                signed_at TEXT,
+                signed_by TEXT,
+                locked INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT,
+                updated_by TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS po_approval_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                username TEXT,
+                comment TEXT,
+                created_at TEXT NOT NULL
+            )"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_po_events_record ON po_approval_events(record_id, id)")
         sup_cols = {r[1] for r in conn.execute("PRAGMA table_info(suppliers)")}
         for col, spec in (
             ("phone", "TEXT"),
@@ -390,6 +446,12 @@ def init_db() -> None:
                 and verify_password(u["password"], row["password_hash"])
             ):
                 conn.execute("UPDATE users SET must_change_password = 1 WHERE id = ?", (row["id"],))
+        abu = conn.execute("SELECT extra_permissions FROM users WHERE username = 'abubacar'").fetchone()
+        if abu and not str(abu["extra_permissions"] or "").strip():
+            conn.execute(
+                "UPDATE users SET extra_permissions = ? WHERE username = 'abubacar'",
+                ('["po_dispatch"]',),
+            )
 
 
 def row_to_dict(row: Optional[sqlite3.Row]) -> Optional[dict[str, Any]]:
@@ -825,6 +887,8 @@ def delete_wo_record(wo_id: str) -> bool:
         conn.execute("DELETE FROM wo_cache WHERE record_id = ?", (rid,))
         conn.execute("DELETE FROM mr_lines WHERE record_id = ?", (rid,))
         conn.execute("DELETE FROM record_extras WHERE record_id = ?", (rid,))
+        conn.execute("DELETE FROM po_approvals WHERE record_id = ?", (rid,))
+        conn.execute("DELETE FROM po_approval_events WHERE record_id = ?", (rid,))
     return True
 
 
@@ -1681,6 +1745,7 @@ def replace_mr_lines(
                 "unit": " ".join(str(row.get("unit") or "").split()),
                 "notes": " ".join(str(row.get("notes") or "").split()),
                 "needed_date": " ".join(str(row.get("needed_date") or "").split())[:10],
+                "unit_price": " ".join(str(row.get("unit_price") or "").split()),
             }
         )
     ts = now_iso()
@@ -1689,8 +1754,8 @@ def replace_mr_lines(
         for idx, row in enumerate(cleaned):
             conn.execute(
                 """INSERT INTO mr_lines
-                   (record_id, work_order_id, supplier, material, qty, unit, notes, needed_date, sort_order, created_at, created_by)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (record_id, work_order_id, supplier, material, qty, unit, notes, needed_date, unit_price, sort_order, created_at, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     rid,
                     wo,
@@ -1700,6 +1765,7 @@ def replace_mr_lines(
                     row["unit"],
                     row["notes"],
                     row.get("needed_date") or "",
+                    row.get("unit_price") or "",
                     idx,
                     ts,
                     created_by,
@@ -2044,6 +2110,106 @@ def list_presence(record_id: str, exclude: str = "") -> list[dict[str, Any]]:
             continue
         out.append({"username": row["username"], "full_name": row["full_name"] or "", "seen_at": row["seen_at"]})
     return out
+
+
+
+def get_po_approval(record_id: str) -> Optional[dict[str, Any]]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        return None
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM po_approvals WHERE record_id = ?", (rid,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_po_approval_events(record_id: str) -> list[dict[str, Any]]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        return []
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM po_approval_events WHERE record_id = ? ORDER BY id",
+            (rid,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def add_po_approval_event(record_id: str, action: str, username: str, comment: str = "") -> dict[str, Any]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        raise ValueError("record_id is required")
+    with connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO po_approval_events (record_id, action, username, comment, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (rid, action, username, comment or "", now_iso()),
+        )
+        eid = int(cur.lastrowid)
+        row = conn.execute("SELECT * FROM po_approval_events WHERE id = ?", (eid,)).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def upsert_po_approval(
+    record_id: str,
+    *,
+    work_order_id: str = "",
+    state: str = "none",
+    coordinator: str = "",
+    assignee: str = "",
+    manager: str = "",
+    accounts_by: str = "",
+    comment: str = "",
+    signature_png: str = "",
+    signed_at: str = "",
+    signed_by: str = "",
+    locked: int = 0,
+    updated_by: str = "",
+) -> dict[str, Any]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        raise ValueError("record_id is required")
+    ts = now_iso()
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO po_approvals
+               (record_id, work_order_id, state, coordinator, assignee, manager, accounts_by, comment,
+                signature_png, signed_at, signed_by, locked, updated_at, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(record_id) DO UPDATE SET
+                 work_order_id = excluded.work_order_id,
+                 state = excluded.state,
+                 coordinator = excluded.coordinator,
+                 assignee = excluded.assignee,
+                 manager = excluded.manager,
+                 accounts_by = excluded.accounts_by,
+                 comment = excluded.comment,
+                 signature_png = excluded.signature_png,
+                 signed_at = excluded.signed_at,
+                 signed_by = excluded.signed_by,
+                 locked = excluded.locked,
+                 updated_at = excluded.updated_at,
+                 updated_by = excluded.updated_by""",
+            (
+                rid,
+                work_order_id or "",
+                state or "none",
+                coordinator or "",
+                assignee or "",
+                manager or "",
+                accounts_by or "",
+                comment or "",
+                signature_png or "",
+                signed_at or "",
+                signed_by or "",
+                1 if locked else 0,
+                ts,
+                updated_by or "",
+            ),
+        )
+    item = get_po_approval(rid)
+    assert item is not None
+    return item
 
 
 # Ensure schema exists for scripts/tests that never hit FastAPI startup.

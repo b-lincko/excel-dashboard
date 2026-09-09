@@ -325,6 +325,10 @@ def is_delayed(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optiona
 
 
 def is_overdue(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optional[date] = None) -> bool:
+    """OPEN past purchase-type due date (or PENDING). PLACED past ETA (closed_date)."""
+    cfg = cfg or load_config()
+    if is_placed(rec, cfg):
+        return is_eta_late(rec, cfg, on=on)
     return is_delayed(rec, cfg, on=on)
 
 
@@ -782,16 +786,16 @@ def annotate(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> dict[str, 
     out["is_status_open"] = is_status_open(rec, cfg)
     out["is_placed"] = is_placed(rec, cfg)
     out["is_overdue"] = is_overdue(rec, cfg)
-    out["is_delayed"] = out["is_overdue"]
+    out["is_delayed"] = is_delayed(rec, cfg)
     out["is_pending"] = is_pending(rec, cfg)
     out["is_in_progress"] = is_in_progress(rec, cfg)
     out["aging_days"] = aging_days(rec)
     out["closing_days"] = closing_days(rec)
     out["days_overdue"] = None
     if out["is_overdue"]:
-        due = to_date(rec.get("due_date"))
-        if due:
-            out["days_overdue"] = (today() - due).days
+        clock = eta_date(rec) if out.get("is_placed") else to_date(rec.get("due_date"))
+        if clock:
+            out["days_overdue"] = (today() - clock).days
     out["open_reason"] = reason_for_open(rec) if out["is_open"] else ""
     out["is_ntp"] = is_ntp(rec, cfg)
     out["is_on_hold"] = is_on_hold(rec, cfg)

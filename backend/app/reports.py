@@ -13,7 +13,8 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import HRFlowable, SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import HRFlowable, Image, SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether
 
 from .dates import to_date, week_bounds
 from .domain import annotate, is_closed, is_open, is_overdue, matches_filters, today
@@ -293,6 +294,143 @@ def wo_sheet_pdf(rec: dict[str, Any], attachments: Optional[list[dict[str, Any]]
         )
     )
     doc.build([KeepTogether(story)])
+    return buf.getvalue()
+
+
+def _signature_image(data_url: Any):
+    raw = str(data_url or "").strip()
+    if not raw:
+        return None
+    if "," in raw:
+        raw = raw.split(",", 1)[1]
+    try:
+        import base64
+
+        blob = base64.b64decode(raw)
+        if not blob:
+            return None
+        return Image(ImageReader(io.BytesIO(blob)), width=55 * mm, height=22 * mm)
+    except Exception:
+        return None
+
+
+def po_approval_pdf(rec: dict[str, Any], approval: Optional[dict[str, Any]] = None) -> bytes:
+    """PDF the operational manager signs: PO, items, prices, signature."""
+    approval = approval or {}
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=14 * mm,
+        rightMargin=14 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+        title=f"PO {rec.get('po_number') or rec.get('work_order_id')}",
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "POTitle", parent=styles["Title"], fontSize=16, textColor=colors.HexColor("#0F3D5E"), spaceAfter=4, alignment=0
+    )
+    meta = ParagraphStyle("POMeta", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#64748B"), spaceAfter=2)
+    label = ParagraphStyle("POLabel", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#64748B"), leading=11)
+    value = ParagraphStyle("POValue", parent=styles["Normal"], fontSize=10, leading=13, textColor=colors.HexColor("#0F172A"))
+    wo = _esc(rec.get("work_order_id") or rec.get("record_id"))
+    story: list[Any] = [
+        Paragraph(f"Purchase order · IM WO {wo}", title_style),
+        Paragraph(
+            f"Printed {datetime.now().strftime('%Y-%m-%d %H:%M')} · Linkco MR · state { _esc(approval.get('state') or 'none') }",
+            meta,
+        ),
+        Spacer(1, 4),
+        HRFlowable(width="100%", thickness=1, color=colors.HexColor("#0F3D5E"), spaceAfter=8),
+    ]
+    rows = [
+        ["Site", rec.get("site_display") or rec.get("department") or "—", "Status", rec.get("status") or "—"],
+        ["Assigned to", rec.get("assigned_to") or "—", "PO technician", approval.get("assignee") or "—"],
+        ["Supplier", rec.get("supplier") or "—", "PO No", rec.get("po_number") or "—"],
+        ["Purchase type", rec.get("work_type") or "—", "Due date", str(rec.get("due_date") or "—")[:10]],
+        ["ETA", str(rec.get("closed_date") or "—")[:16], "RFQ / PO date", str(rec.get("scheduled_date") or "—")[:16]],
+        ["Unit price", rec.get("unit_price") or "—", "Price", rec.get("price") or "—"],
+        ["Total price", rec.get("total_price") or "—", "Final price", rec.get("final_price") or "—"],
+    ]
+    table_data = []
+    for a_l, a_v, b_l, b_v in rows:
+        table_data.append(
+            [
+                Paragraph(_esc(a_l), label),
+                Paragraph(_esc(a_v), value),
+                Paragraph(_esc(b_l), label),
+                Paragraph(_esc(b_v), value),
+            ]
+        )
+    grid = Table(table_data, colWidths=[28 * mm, 63 * mm, 28 * mm, 63 * mm])
+    grid.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F8FAFC")),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#E2E8F0")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+    story.append(grid)
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("Items", label))
+    lines = [ln for ln in (rec.get("lines") or []) if ln.get("supplier") or ln.get("material")]
+    if lines:
+        data = [["Supplier", "Item", "Qty", "Unit", "Unit price"]]
+        for ln in lines[:40]:
+            data.append(
+                [
+                    Paragraph(_esc(ln.get("supplier")), value),
+                    Paragraph(_esc(ln.get("material")), value),
+                    Paragraph(_esc(ln.get("qty")), value),
+                    Paragraph(_esc(ln.get("unit")), value),
+                    Paragraph(_esc(ln.get("unit_price")), value),
+                ]
+            )
+        tbl = Table(data, colWidths=[40 * mm, 70 * mm, 18 * mm, 18 * mm, 36 * mm], repeatRows=1)
+        tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F3D5E")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 8),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
+        )
+        story.append(tbl)
+    else:
+        story.append(Paragraph(_esc(rec.get("description") or "—")[:1200], value))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("Manager decision", label))
+    story.append(
+        Paragraph(
+            f"State: {_esc(approval.get('state') or 'none')} · signed by {_esc(approval.get('signed_by') or '—')} "
+            f"{_esc(str(approval.get('signed_at') or '')[:16])}",
+            value,
+        )
+    )
+    if approval.get("comment"):
+        story.append(Paragraph(_esc(approval.get("comment"))[:800], value))
+    sig = _signature_image(approval.get("signature_png"))
+    if sig:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("Digital signature", label))
+        story.append(sig)
+    else:
+        story.append(Paragraph("No signature on file yet.", meta))
+    doc.build(story)
     return buf.getvalue()
 
 

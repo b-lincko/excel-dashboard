@@ -51,6 +51,9 @@ ALL_PERMS = [
     "audit",
     "backup",
     "import",
+    "po_dispatch",
+    "po_approve",
+    "accounts",
     *GUEST_PAGES,
 ]
 ADMIN_ONLY_PERMS = {"users", "settings", "backup"}

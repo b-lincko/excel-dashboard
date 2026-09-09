@@ -6,8 +6,9 @@ import { useUi } from "../context/UiContext.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
 import MentionBox from "../components/MentionBox.jsx";
 import TypeAhead from "../components/TypeAhead.jsx";
+import PoApproval from "../components/PoApproval.jsx";
 
-const EXTRA_KEYS = ["delay_kind", "delay_source", "delay_justification"];
+const EXTRA_KEYS = ["delay_kind", "delay_source", "delay_justification", "unit_price", "price", "total_price", "final_price"];
 const DELAY_OPEN = new Set(["open"]);
 const DELAY_PENDING = new Set(["pending"]);
 const DELAY_NEVER = new Set(["closed", "close", "placed", "estimation price", "delivered material inspection"]);
@@ -66,7 +67,7 @@ const FIELDS = [
   ["work_type", "Purchase Type", "work_type"],
   ["location", "WO Asset Name", "text"],
   ["created_date", "MR Received Date", "datetime"],
-  ["due_date", "Due date (computed from purchase type)", "datetime", true],
+  ["due_date", "Due date", "due"],
   ["completion_date", "IM WO Completion", "datetime"],
   ["scheduled_date", "Date of PO / Expected PO / RFQ Sent", "datetime"],
   ["closed_date", "ETA / Expected RFQ Response", "datetime"],
@@ -138,6 +139,8 @@ export default function WorkOrderDetail() {
   const [remarkRules, setRemarkRules] = useState(["*->ON HOLD", "*->CLOSED"]);
   const [tab, setTab] = useState("details");
   const [others, setOthers] = useState([]);
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closeForm, setCloseForm] = useState({ remark: "", unit_price: "", price: "", total_price: "", final_price: "" });
   const attachRef = useRef(null);
 
   const dirty = useMemo(() => {
@@ -302,7 +305,6 @@ export default function WorkOrderDetail() {
           "days_overdue",
           "open_reason",
           "record_id",
-          "due_date",
           "lines",
           "camp_site_label",
           "site_group",
@@ -379,40 +381,40 @@ export default function WorkOrderDetail() {
     }
   }
 
+  function openClose() {
+    setError("");
+    setCloseForm({
+      remark: "",
+      unit_price: form.unit_price || "",
+      price: form.price || "",
+      total_price: form.total_price || "",
+      final_price: form.final_price || "",
+    });
+    setCloseOpen(true);
+  }
+
   async function closeOrder() {
     setError("");
     const needsRemark = (remarkRules || []).some((rule) => String(rule || "").toUpperCase().includes("CLOSED"));
-    let remark = "";
-    if (needsRemark) {
-      const typed = await ask({
-        title: "Close this material request?",
-        body: "Status becomes CLOSED. A remark is required.",
-        confirmLabel: "Close order",
-        input: true,
-        inputPlaceholder: "Why is this closed?",
-      });
-      if (typed === false) return;
-      remark = String(typed || "").trim();
-      if (!remark) {
-        setError("A remark is required to close.");
-        setTab("details");
-        return;
-      }
-    } else {
-      const ok = await ask({
-        title: "Close this material request?",
-        body: "Status becomes CLOSED.",
-        confirmLabel: "Close order",
-      });
-      if (!ok) return;
+    const remark = String(closeForm.remark || "").trim();
+    if (needsRemark && !remark) {
+      setError("A remark is required to close.");
+      return;
     }
     setBusy(true);
     try {
-      const d = await api.post(`/api/work-orders/${encodeURIComponent(form.record_id || id)}/close`, { remark });
+      const d = await api.post(`/api/work-orders/${encodeURIComponent(form.record_id || id)}/close`, {
+        remark,
+        unit_price: closeForm.unit_price,
+        price: closeForm.price,
+        total_price: closeForm.total_price,
+        final_price: closeForm.final_price,
+      });
       setForm(d.item);
       setOriginal(d.item);
       setMeta(d.item);
       setSyncToken(d.sync_token || syncToken);
+      setCloseOpen(false);
       setSuccess(d.already ? "Already closed." : "Closed.");
       toast(d.already ? "Already closed" : "Closed", "success");
     } catch (e) {
@@ -484,28 +486,19 @@ export default function WorkOrderDetail() {
               }
             }}
           >
-            {(isNew || form.department === "SH5-SH1" || form.camp_site) && (
-              <>
-                <option value="SH5-SH1">SH5-SH1 (unspecified)</option>
-                {["SH5", "SH1"].map((g) => (
-                  <optgroup key={g} label={g}>
-                    {(options.camp_sites?.length ? options.camp_sites : FALLBACK_CAMPS)
-                      .filter((c) => c.group === g)
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.label}
-                        </option>
-                      ))}
-                  </optgroup>
-                ))}
-              </>
-            )}
-            {(isNew
-              ? SHEET_SITES.filter((s) => s !== "SH5-SH1")
-              : form.department && form.department !== "SH5-SH1"
-                ? [form.department]
-                : []
-            ).map((o) => (
+            <option value="SH5-SH1">SH5-SH1 (unspecified)</option>
+            {["SH5", "SH1"].map((g) => (
+              <optgroup key={g} label={g}>
+                {(options.camp_sites?.length ? options.camp_sites : FALLBACK_CAMPS)
+                  .filter((c) => c.group === g)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+              </optgroup>
+            ))}
+            {SHEET_SITES.filter((s) => s !== "SH5-SH1").map((o) => (
               <option key={o} value={o}>
                 {o}
               </option>
@@ -515,9 +508,13 @@ export default function WorkOrderDetail() {
           <TypeAhead
             value={form[key] || ""}
             disabled={fieldLocked(key)}
-            options={options.assigned_to || []}
-            allowCustom
-            placeholder="Type a technician name"
+            options={
+              form.assigned_to && !(options.assigned_to || []).includes(form.assigned_to)
+                ? [form.assigned_to, ...(options.assigned_to || [])]
+                : options.assigned_to || []
+            }
+            allowCustom={false}
+            placeholder="Pick a technician"
             onChange={(v) => setField(key, v)}
           />
         ) : ["status", "priority", "work_type", "issue"].includes(type) ? (
@@ -530,6 +527,17 @@ export default function WorkOrderDetail() {
               </option>
             ))}
           </select>
+        ) : type === "due" ? (
+          String(form.work_type || "").trim() ? (
+            <input type="date" disabled value={(form.due_date || "").slice(0, 10)} />
+          ) : (
+            <input
+              type="date"
+              disabled={fieldLocked(key)}
+              value={(form.due_date || "").slice(0, 10)}
+              onChange={(e) => setField(key, e.target.value)}
+            />
+          )
         ) : type === "datetime" ? (
           <input
             type="datetime-local"
@@ -547,9 +555,11 @@ export default function WorkOrderDetail() {
         )}
         {key === "due_date" && (
           <p className="text-[11px] text-slate-500 mt-1">
-            {dueDays != null
-              ? `From “${form.work_type || "—"}”: +${dueDays} day${dueDays === 1 ? "" : "s"} after MR received.`
-              : "Due date follows purchase type and is not overwritten."}
+            {String(form.work_type || "").trim()
+              ? dueDays != null
+                ? `From “${form.work_type}”: +${dueDays} day${dueDays === 1 ? "" : "s"} after MR received.`
+                : "Due date follows this purchase type."
+              : "Purchase type is empty — pick the due date yourself (date only)."}
           </p>
         )}
       </div>
@@ -634,7 +644,7 @@ export default function WorkOrderDetail() {
             </button>
           )}
           {!isNew && can("edit") && !form.is_closed && (
-            <button className="btn-outline" disabled={busy} onClick={closeOrder}>
+            <button className="btn-outline" disabled={busy} onClick={openClose}>
               Close order
             </button>
           )}
@@ -797,8 +807,22 @@ export default function WorkOrderDetail() {
           form={form}
           setForm={setForm}
           options={options}
-          readOnly={readOnly}
+          readOnly={readOnly || poLocked}
           supplierLocked={fieldLocked("supplier")}
+        />
+      )}
+
+      {tab === "approval" && !isNew && (
+        <PoApproval
+          woId={form.record_id || id}
+          onNotice={(msg) => {
+            toast(msg, "success");
+            api.get(`/api/work-orders/${encodeURIComponent(id)}`).then((d) => {
+              setForm(d.item);
+              setOriginal(d.item);
+              setMeta(d.item);
+            });
+          }}
         />
       )}
 
@@ -973,6 +997,35 @@ export default function WorkOrderDetail() {
         </div>
       )}
 
+      {closeOpen && (
+        <div className="fixed inset-0 z-40 bg-black/40 grid place-items-center p-4">
+          <div className="card p-5 w-full max-w-lg space-y-3">
+            <div className="font-semibold">Close this material request?</div>
+            <p className="text-sm text-slate-500">Status becomes CLOSED. Capture prices now — they stay in the database, not Excel.</p>
+            <div>
+              <label className="lbl">Remark</label>
+              <textarea rows={2} value={closeForm.remark} onChange={(e) => setCloseForm((f) => ({ ...f, remark: e.target.value }))} placeholder="Why is this closed?" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {["unit_price", "price", "total_price", "final_price"].map((key) => (
+                <div key={key}>
+                  <label className="lbl">{key.replace("_", " ")}</label>
+                  <input value={closeForm[key]} onChange={(e) => setCloseForm((f) => ({ ...f, [key]: e.target.value }))} />
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button className="btn-outline" type="button" onClick={() => setCloseOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn-primary" type="button" disabled={busy} onClick={closeOrder}>
+                {busy ? "Closing…" : "Close order"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {canSave && (
         <div className="sticky-save flex items-center justify-between gap-3" data-tour="wo-save">
           <div className="text-sm text-slate-500">
@@ -996,7 +1049,7 @@ export default function WorkOrderDetail() {
 
 
 function emptyLine() {
-  return { supplier: "", material: "", qty: "", unit: "", notes: "", needed_date: "" };
+  return { supplier: "", material: "", qty: "", unit: "", notes: "", needed_date: "", unit_price: "" };
 }
 
 function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {

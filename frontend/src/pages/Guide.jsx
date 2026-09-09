@@ -89,6 +89,21 @@ export default function Guide() {
       </div>
 
       <div className="card p-5 space-y-2">
+        <div className="font-semibold">PO digital signature</div>
+        <p className="text-sm text-slate-500">
+          On a work order, open PO approval. Abubacar (or anyone granted “Assign POs”) assigns the PO to a technician
+          (Arun, Nesar, Yousuf, or a new User-role login — not admins or managers). That technician updates suppliers
+          and items, then Send to manager. The operational manager opens the PDF, draws a signature to approve, or
+          writes the changes and returns it. After a signature the PO is locked. Abubacar then Send to Accounts.
+        </p>
+        <p className="text-sm text-slate-500">
+          Assign to on the MR is the same technician list. If Purchase type is empty, pick the due date yourself
+          (date only). OPEN overdue uses that due date; PLACED overdue uses ETA. Close order captures unit / price /
+          total / final prices in the database.
+        </p>
+      </div>
+
+      <div className="card p-5 space-y-2">
         <div className="flex items-center gap-2 font-semibold">
           <CircleHelp size={16} /> What the pages are for
         </div>

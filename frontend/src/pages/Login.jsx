@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { firstPath, useAuth } from "../context/AuthContext.jsx";
 import LoginScene from "../components/LoginScene.jsx";
+import BrandLogo from "../components/BrandLogo.jsx";
 
 export default function Login() {
   const { login } = useAuth();
@@ -44,8 +45,8 @@ export default function Login() {
         <LoginScene />
         <div className="relative z-10">
           <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-2xl bg-white text-brand-700 grid place-items-center font-extrabold">
-              WO
+            <div className="h-12 px-2 rounded-2xl bg-white grid place-items-center">
+              <BrandLogo className="h-8 w-auto max-w-[140px] object-contain" />
             </div>
             <div>
               <div className="text-xl font-bold">Linkco MR</div>

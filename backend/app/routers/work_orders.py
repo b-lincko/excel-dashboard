@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from .. import database, notify, reports
+from .. import approvals, database, notify, reports
 from ..config import load_config
 from ..dates import to_date
 from ..domain import (
@@ -129,6 +129,20 @@ class BulkUpdate(BaseModel):
 
 class CloseBody(BaseModel):
     remark: str = ""
+    unit_price: str = ""
+    price: str = ""
+    total_price: str = ""
+    final_price: str = ""
+
+
+class AssignPoBody(BaseModel):
+    assignee: str = ""
+
+
+class DecidePoBody(BaseModel):
+    approve: bool
+    comment: str = ""
+    signature_png: str = ""
 
 
 def _raise_excel(exc: Exception):
@@ -216,8 +230,8 @@ def list_work_orders(
         if sort == "days_overdue":
             if not is_overdue(r, cfg):
                 return -1
-            due = to_date(r.get("due_date"))
-            return (t - due).days if due else -1
+            clock = to_date(r.get("closed_date")) if str(r.get("status") or "").strip().upper() == "PLACED" else to_date(r.get("due_date"))
+            return (t - clock).days if clock else -1
         v = r.get(sort)
         if v is None:
             return -10**12 if reverse else 10**12
@@ -302,12 +316,7 @@ def options(user=Depends(require_permission("view"))):
     opts["issue"] = merge_choices(opts.get("issue") or [], delivery)
     opts["delay_reason"] = merge_choices(opts.get("delay_reason") or [], delivery)
     opts["mention_users"] = mention_users
-    assignee_names = [
-        str(u.get("full_name") or u.get("username") or "").strip()
-        for u in database.list_users()
-        if u.get("is_active") and (u.get("full_name") or u.get("username"))
-    ]
-    opts["assigned_to"] = merge_choices(opts.get("assigned_to") or [], assignee_names)
+    opts["assigned_to"] = approvals.technician_names()
     opts["supplier_items"] = supplier_items
     sites = site_choices(cfg)
     camps = camp_site_catalog(cfg)
@@ -361,6 +370,8 @@ def suggest_work_orders(
 def bulk_update(body: BulkUpdate, user=Depends(require_permission("edit"))):
     changes: dict[str, Any] = {}
     if body.assigned_to is not None:
+        if not approvals.assignee_allowed(body.assigned_to):
+            raise HTTPException(status_code=400, detail="Assign to is technicians only (not admins or managers).")
         changes["assigned_to"] = body.assigned_to
     if body.status is not None:
         changes["status"] = body.status
@@ -463,7 +474,9 @@ def get_work_order(wo_id: str, user=Depends(require_permission("view"))):
         _raise_excel(exc)
     if not rec:
         raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
-    return {"item": annotate(_with_extras(rec)), "sync_token": excel_service.sync_token()}
+    item = annotate(_with_extras(rec))
+    item["po_approval"] = approvals.public_approval(approvals.approval_for(item))
+    return {"item": item, "sync_token": excel_service.sync_token()}
 
 
 @router.put("/{wo_id}")
@@ -472,6 +485,13 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
     if not rec:
         raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
     excel_changes, extra_changes, lines = _split_changes(body.changes)
+    if "assigned_to" in excel_changes and not approvals.assignee_allowed(
+        excel_changes.get("assigned_to"), rec.get("assigned_to")
+    ):
+        raise HTTPException(status_code=400, detail="Assign to is technicians only (not admins or managers).")
+    locked = approvals.locked_fields({**excel_changes, **extra_changes, **({"lines": lines} if lines is not None else {})}, rec)
+    if locked:
+        raise HTTPException(status_code=409, detail=f"This PO is approved and locked. Cannot change: {', '.join(locked)}.")
     if lines is not None:
         seed = {
             "supplier": excel_changes.get("supplier", rec.get("supplier")),
@@ -543,6 +563,8 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
                 skip=set(pinged),
             )
         )
+    if excel_changes.get("po_number"):
+        approvals.notify_po_created(actor, updated, previous_po=str(rec.get("po_number") or ""))
     if excel_changes or extra_changes or lines is not None:
         bits = [k for k in {**excel_changes, **extra_changes} if k != "remarks"]
         if remark:
@@ -556,6 +578,7 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
             skip=set(pinged),
         )
     item = annotate(_with_extras(updated))
+    item["po_approval"] = approvals.public_approval(approvals.approval_for(item))
     return {
         "item": item,
         "sync_token": excel_service.sync_token(),
@@ -568,6 +591,8 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
 @router.post("")
 def create_work_order(body: WorkOrderCreate, user=Depends(require_permission("create"))):
     excel_data, extra_changes, lines = _split_changes(body.data)
+    if "assigned_to" in excel_data and not approvals.assignee_allowed(excel_data.get("assigned_to")):
+        raise HTTPException(status_code=400, detail="Assign to is technicians only (not admins or managers).")
     if lines is not None:
         apply_lines_to_excel_fields(excel_data, lines)
     errors = validate_work_order(excel_data, partial=False)
@@ -590,8 +615,12 @@ def create_work_order(body: WorkOrderCreate, user=Depends(require_permission("cr
         )
     if created.get("assigned_to"):
         notify.notify_assignment(user["username"], created, previous="")
+    if created.get("po_number"):
+        approvals.notify_po_created(user["username"], created)
+    item = annotate(_with_extras(created))
+    item["po_approval"] = approvals.public_approval(approvals.approval_for(item))
     return {
-        "item": annotate(_with_extras(created)),
+        "item": item,
         "sync_token": excel_service.sync_token(),
         "saved": True,
         "excel_backup_ok": created.get("_excel_backup_ok", True),
@@ -760,6 +789,8 @@ def claim_work_order(wo_id: str, force: bool = False, user=Depends(require_permi
     name = str(user.get("full_name") or user.get("username") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Your account has no name to claim with.")
+    if not approvals.assignee_allowed(name):
+        raise HTTPException(status_code=400, detail="Only technicians can claim Assign to.")
     current = str(rec.get("assigned_to") or "").strip()
     mine = current.lower() in {name.lower(), str(user.get("username") or "").strip().lower()}
     if current and not mine and not force:
@@ -811,6 +842,10 @@ def close_work_order(wo_id: str, body: CloseBody, user=Depends(require_permissio
         changes["remarks"] = f"{prev}\n{remark}".strip() if prev else remark
     if not str(rec.get("completion_date") or "").strip():
         changes["completion_date"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    for key in ("unit_price", "price", "total_price", "final_price"):
+        val = str(getattr(body, key, "") or "").strip()
+        if val:
+            changes[key] = val
     try:
         updated = excel_service.update_record(wo_id, changes, username=user["username"], force=True)
     except (ExcelUnavailable, ExcelLocked, SyncConflict, KeyError, ValueError) as exc:
@@ -826,6 +861,91 @@ def close_work_order(wo_id: str, body: CloseBody, user=Depends(require_permissio
         "sync_token": excel_service.sync_token(),
         "saved": True,
     }
+
+
+
+
+def _wo_or_404(wo_id: str) -> dict[str, Any]:
+    rec = excel_service.get_by_id(wo_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Work order {wo_id} not found")
+    return rec
+
+
+def _raise_approval(exc: Exception):
+    if isinstance(exc, PermissionError):
+        raise HTTPException(status_code=403, detail=str(exc))
+    if isinstance(exc, ValueError):
+        raise HTTPException(status_code=400, detail=str(exc))
+    raise exc
+
+
+@router.get("/{wo_id}/approval")
+def get_po_approval(wo_id: str, user=Depends(require_permission("view"))):
+    rec = _wo_or_404(wo_id)
+    item = annotate(_with_extras(rec))
+    approval = approvals.approval_for(item)
+    return {
+        "item": item,
+        "approval": approvals.public_approval(approval),
+        "caps": approvals.capabilities(user, item, approval),
+    }
+
+
+@router.post("/{wo_id}/approval/assign")
+def assign_po(wo_id: str, body: AssignPoBody, user=Depends(require_permission("edit"))):
+    rec = _wo_or_404(wo_id)
+    try:
+        approval = approvals.assign(rec, user, body.assignee)
+    except (PermissionError, ValueError) as exc:
+        _raise_approval(exc)
+    return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}
+
+
+@router.post("/{wo_id}/approval/submit")
+def submit_po(wo_id: str, user=Depends(require_permission("edit"))):
+    rec = _wo_or_404(wo_id)
+    try:
+        approval = approvals.submit(rec, user)
+    except (PermissionError, ValueError) as exc:
+        _raise_approval(exc)
+    return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}
+
+
+@router.post("/{wo_id}/approval/decide")
+def decide_po(wo_id: str, body: DecidePoBody, user=Depends(require_permission("edit"))):
+    rec = _wo_or_404(wo_id)
+    try:
+        approval = approvals.decide(
+            rec, user, approve=bool(body.approve), comment=body.comment, signature_png=body.signature_png
+        )
+    except (PermissionError, ValueError) as exc:
+        _raise_approval(exc)
+    return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}
+
+
+@router.post("/{wo_id}/approval/send-accounts")
+def send_po_accounts(wo_id: str, user=Depends(require_permission("edit"))):
+    rec = _wo_or_404(wo_id)
+    try:
+        approval = approvals.send_accounts(rec, user)
+    except (PermissionError, ValueError) as exc:
+        _raise_approval(exc)
+    return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}
+
+
+@router.get("/{wo_id}/approval/pdf")
+def po_approval_pdf(wo_id: str, user=Depends(require_permission("view"))):
+    rec = _wo_or_404(wo_id)
+    item = annotate(_with_extras(rec))
+    approval = approvals.approval_for(item)
+    pdf = reports.po_approval_pdf(item, approval)
+    name = str(item.get("work_order_id") or wo_id).replace("/", "-")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="PO_{name}.pdf"'},
+    )
 
 
 @router.delete("/{wo_id}")

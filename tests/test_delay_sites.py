@@ -50,9 +50,15 @@ def test_delay_excludes_close_placed_estimation_inspection():
         "ESTIMATION PRICE",
         "Delivered Material Inspection",
     ):
-        assert is_overdue({**past, "status": status}, cfg) is False
         assert is_delayed({**past, "status": status}, cfg) is False
-        assert matches_filters({**past, "status": status}, {"flag": "overdue"}, cfg) is False
+        if status.upper() != "PLACED":
+            assert is_overdue({**past, "status": status}, cfg) is False
+            assert matches_filters({**past, "status": status}, {"flag": "overdue"}, cfg) is False
+    # PLACED with a past due date is not overdue — overdue for PLACED is ETA (closed_date).
+    assert is_overdue({**past, "status": "PLACED"}, cfg) is False
+    assert is_overdue({"status": "PLACED", "closed_date": "2000-01-01"}, cfg) is True
+    assert is_overdue({"status": "PLACED", "closed_date": "2099-12-31"}, cfg) is False
+    assert matches_filters({"status": "PLACED", "closed_date": "2000-01-01"}, {"flag": "overdue"}, cfg) is True
 
 
 def test_camp_sites_are_filter_chips_not_worksheet_names():

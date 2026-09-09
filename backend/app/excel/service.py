@@ -334,16 +334,20 @@ class ExcelService:
         created = parse_date(rec.get("created_date"))
         ptype = str(rec.get("work_type") or "").strip().lower()
         offsets = self._due_offsets()
-        default_days = int(getattr(self.cfg(), "due_offset_default_days", 14) or 14)
-        if ptype in offsets:
-            days = offsets[ptype]
-        else:
-            days = default_days
-        rec["_due_offset_days"] = days
         rec["_due_purchase_type"] = ptype
+        if not ptype:
+            stored = parse_date(rec.get("due_date"))
+            rec["due_date"] = format_date(stored, with_time=False) if stored else ""
+            rec["_due_offset_days"] = None
+            rec["_due_computed"] = False
+            return
+        default_days = int(getattr(self.cfg(), "due_offset_default_days", 14) or 14)
+        days = offsets[ptype] if ptype in offsets else default_days
+        rec["_due_offset_days"] = days
         if not created:
             stored = parse_date(rec.get("due_date"))
             rec["due_date"] = format_date(stored, with_time=False) if stored else ""
+            rec["_due_computed"] = False
             return
         rec["due_date"] = (created + timedelta(days=days)).strftime("%Y-%m-%d")
         rec["_due_computed"] = True
@@ -552,6 +556,7 @@ class ExcelService:
         target = dict(current)
         allowed = set(self.cfg().mapping.model_dump().keys())
         allowed.add("camp_site")
+        allowed.update(("unit_price", "price", "total_price", "final_price"))
         for k, v in (changes or {}).items():
             if str(k).startswith("_") or k in {"record_id", "department"}:
                 continue

@@ -148,6 +148,7 @@ def normalize_lines(raw: Any) -> list[dict[str, str]]:
                 "unit": clean_name(row.get("unit")),
                 "notes": clean_name(row.get("notes")),
                 "needed_date": clean_name(row.get("needed_date"))[:10],
+                "unit_price": clean_name(row.get("unit_price")),
             }
         )
     return items

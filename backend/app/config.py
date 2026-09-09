@@ -232,7 +232,7 @@ class AppConfig(BaseModel):
                 "audit",
                 "backup",
             ],
-            "manager": ["view", "edit", "create", "reports", "analytics", "audit"],
+            "manager": ["view", "edit", "create", "reports", "analytics", "audit", "po_approve"],
             "user": ["view", "edit", "reports"],
             "readonly": ["view", "reports", "analytics"],
             "guest": ["view"],

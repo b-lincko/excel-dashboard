@@ -5,7 +5,7 @@ const AuthContext = createContext(null);
 
 const ROLE_PERMS = {
   admin: ["view", "edit", "create", "delete", "reports", "analytics", "settings", "users", "audit", "backup"],
-  manager: ["view", "edit", "create", "reports", "analytics", "audit"],
+  manager: ["view", "edit", "create", "reports", "analytics", "audit", "po_approve"],
   user: ["view", "edit", "reports"],
   readonly: ["view", "reports", "analytics"],
   guest: ["view"],

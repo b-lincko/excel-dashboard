@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (bulletproof backup + Excel upload parse-before-replace).
+Last updated: 2026-09-09 (ops-desk: Linkco logo, technician Assign to, all sites, empty-type due date, close prices, PO digital signature, PLACED overdue via ETA).
 
 ---
 
@@ -109,7 +109,7 @@ Midnight / Backup now → export DB → file.xlsx  +  snapshot SQLite
   | nesar    | nesar1234     | Nesar          |
   | yousuf   | yousuf1234    | Yousuf         |
 
-  **Assign to** matches `full_name` or username. Create / save / bulk that changes Assign to sends an inbox ping (`kind=assign`) to that login.
+  **Assign to** is technicians only: active users with `role=user` (Abubacar, Arun, Nesar, Yousuf, plus any new User-role login). **Not** admin or manager. The current name stays visible if it is already on the MR. Create / save / bulk that changes Assign to sends an inbox ping (`kind=assign`) to that login. Claim is also technicians-only.
 
 ### Product rules
 
@@ -174,7 +174,25 @@ Default mapping (Excel header → internal field):
 | PO NO # | `po_number` | |
 | Delay Type / Source / Justification | `delay_kind` / `delay_source` / `delay_justification` | appended if missing |
 
-Due offsets (purchase type, days): Direct Cash 3, Local PO 5, International/Service/Warranty/Alternative 10, Consumable 2, Emergency 0, else `due_offset_default_days` (14).
+Due offsets (purchase type, days): Direct Cash 3, Local PO 5, International/Service/Warranty/Alternative 10, Consumable 2, Emergency 0, else `due_offset_default_days` (14). **If Purchase type is empty**, do **not** apply the 14-day default — the operator picks a **date-only** due date and save must send `due_date`. `_apply_due_date` skips empty `work_type`.
+
+**Overdue:** OPEN / PENDING still use purchase-type due date (`is_delayed`). **PLACED overdue uses ETA (`closed_date`)**, not due date. Do not treat PLACED past due_date as overdue. `is_delayed` stays the delay-notes flag (OPEN past due / PENDING) and is **not** aliased to `is_overdue`.
+
+**Close order prices** (`unit_price`, `price`, `total_price`, `final_price`) live in SQLite (`wo_cache` payload + `mr_lines.unit_price`). They are **not** Excel columns. `_merge_mapped` allow-lists them; midnight Excel dump does not write them.
+
+**PO digital signature** (`backend/app/approvals.py`, tables `po_approvals` / `po_approval_events`):
+
+1. Dispatcher (`po_dispatch`; Abubacar seeded if extras empty) assigns a technician.
+2. Technician updates the PO and **Send to manager** (PDF via `GET /api/work-orders/{id}/approval/pdf` → `reports.po_approval_pdf`).
+3. Operational manager (`po_approve`, manager role) **signs** (PNG data-URL) or **returns with a comment**.
+4. Approve **locks** PO fields (`po_number`, supplier, lines, dates, prices, description). Notify dispatcher + technician.
+5. Dispatcher (or `accounts`) **Send to Accounts**.
+
+States: `none | assigned | submitted | changes_requested | approved | sent_to_accounts`. Extra grants: `po_dispatch`, `po_approve`, `accounts`.
+
+**Logo:** `frontend/public/linkco-logo.png` + `favicon.png` (local mark; the public Linkco URL is unreachable). Sidebar, login, and favicon use it.
+
+**Sites on create/edit:** camp sites plus F5 / Office / Accommodations — not SH5-only.
 
 ---
 
@@ -264,14 +282,14 @@ Scheduler: `backend/app/backup.py`, 20s loop, `backup_auto_enabled`, `backup_tim
 
 ## 9. Auth, roles, pages
 
-Permissions: `view`, `edit`, `create`, `delete`, `reports`, `analytics`, `settings`, `users`, `audit`, `backup`, plus page keys (`queue`, `materials`, …).
+Permissions: `view`, `edit`, `create`, `delete`, `reports`, `analytics`, `settings`, `users`, `audit`, `backup`, `po_dispatch`, `po_approve`, `accounts`, plus page keys (`queue`, `materials`, …).
 
 Default role grants (`config.permissions` / frontend `ROLE_PERMS`):
 
 | Role | Can |
 | ---- | --- |
 | admin | everything |
-| manager | view, edit, create, reports, analytics, audit |
+| manager | view, edit, create, reports, analytics, audit, po_approve |
 | user | view, edit, reports |
 | readonly | view, reports, analytics |
 | guest | view + explicitly granted pages |
@@ -290,7 +308,7 @@ User management (`/users`, permission `users`):
 
 Status-change remarks (default): `*->ON HOLD`, `*->CLOSED`.
 
-**Close order:** `POST /api/work-orders/{id}/close` with `{ remark }`. Sets the first `closed_statuses` value (CLOSED), requires a remark when `status_change_remarks` includes `*->CLOSED`, and fills `completion_date` if empty. Header button on the MR page.
+**Close order:** `POST /api/work-orders/{id}/close` with `{ remark, unit_price, price, total_price, final_price }`. Sets the first `closed_statuses` value (CLOSED), requires a remark when `status_change_remarks` includes `*->CLOSED`, fills `completion_date` if empty, and stores the four prices in SQLite. Header button on the MR page opens a price form.
 
 PLACED requires `po_number` by default (`status_required_fields`).
 
@@ -330,7 +348,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 | ------ | ------- |
 | `/api/health` | Liveness + record count |
 | `/api/auth` | login, me, logout, password, profile, layout |
-| `/api/work-orders` | list, suggest, CRUD, bulk, claim, close, watch, presence, chat, timeline, seen, PDF sheet |
+| `/api/work-orders` | list, suggest, CRUD, bulk, claim, close, watch, presence, chat, timeline, seen, PDF sheet, PO approval (`/{id}/approval` get/assign/submit/decide/send-accounts + `/approval/pdf`) |
 | `/api/dashboard` | KPIs / charts from live records |
 | `/api/ops` | queue, digest, alerts, handover, health scan |
 | `/api/catalog` | suppliers, materials, aliases, MR lines |
@@ -368,6 +386,7 @@ cd frontend && npm run build
 | `tests/test_audit_fixes.py` | Logout revoke, password invalidates token, upload needs settings, folder jail, write-backup prune |
 | `tests/test_priority_blockades.py` | Priority case-fold, blockades exclude OPEN/PLACED, flag=blockade |
 | `tests/test_business_flow.py` | Dummy multi-line MR, delete WO, mentions, chat clear/delete, supplier add/remove, backup pair |
+| `tests/test_po_approval.py` | Technician-only assign, empty-type due date, PLACED overdue via ETA, PO assign → submit → sign → lock → Accounts |
 
 Pitfalls (do not repeat):
 
@@ -464,6 +483,13 @@ Must remain true:
 - [x] Camp sites: SH5 Site - 1/2/3/4A/5/7 and SH1 L1, L2, L3, L4, L5, L7, LS1, LS2 (filters + create), no new Excel sheets
 - [x] Chat: Clear / Delete buttons; no conversation until the user sends; delete own message; catalog add/remove suppliers
 - [x] Ops-desk polish: Daily nav, compact list columns, unsaved-change guard, abort in-flight list fetches
+- [x] Linkco logo + favicon (local PNG)
+- [x] Assign to = technicians (`role=user`) only; keep current name if already assigned
+- [x] All sites on WO create/edit (camps + F5/Office/Accommodations)
+- [x] Empty purchase type → operator picks due date (date only); skip 14-day default
+- [x] Close order captures unit / price / total / final in SQLite (not Excel)
+- [x] PO digital signature: dispatcher assigns tech → PDF to manager → sign or return → lock → Accounts
+- [x] Overdue: OPEN/PENDING = due date; PLACED = ETA (`closed_date`); `is_delayed` unchanged
 
 When you complete or change a requirement, tick/retarget it here.
 
