@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api.js";
+import { useTour } from "../context/TourContext.jsx";
 import SignaturePad from "./SignaturePad.jsx";
+import SignSuccess from "./SignSuccess.jsx";
 
 const LABELS = {
   none: "Not started",
@@ -13,12 +15,14 @@ const LABELS = {
 };
 
 export default function PoApproval({ woId, onNotice }) {
+  const { startSigning } = useTour();
   const [data, setData] = useState(null);
   const [assignee, setAssignee] = useState("");
   const [comment, setComment] = useState("");
   const [signature, setSignature] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [celebrate, setCelebrate] = useState(false);
 
   function load() {
     api
@@ -41,7 +45,10 @@ export default function PoApproval({ woId, onNotice }) {
       const d = await api.post(`/api/work-orders/${encodeURIComponent(woId)}${path}`, body || {});
       setData((prev) => ({ ...prev, approval: d.approval, caps: d.caps }));
       onNotice?.(d.approval?.state === "approved" ? "PO signed and locked" : "PO updated");
-      if (path.includes("decide") && body?.approve) setSignature("");
+      if (path.includes("decide") && body?.approve) {
+        setSignature("");
+        setCelebrate(true);
+      }
     } catch (e) {
       setError(typeof e.detail === "string" ? e.detail : e.message);
     } finally {
@@ -67,9 +74,14 @@ export default function PoApproval({ woId, onNotice }) {
             </p>
           </div>
           {woId ? (
-            <Link className="btn-outline shrink-0" to={`/approvals?id=${encodeURIComponent(woId)}`}>
-              Open signatures desk
-            </Link>
+            <div className="flex flex-col gap-2 shrink-0">
+              <Link className="btn-outline" to={`/approvals?id=${encodeURIComponent(woId)}`}>
+                Open signatures desk
+              </Link>
+              <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={startSigning}>
+                How signing works
+              </button>
+            </div>
           ) : null}
         </div>
       </div>
@@ -163,6 +175,7 @@ export default function PoApproval({ woId, onNotice }) {
           ))}
         </ul>
       )}
+      {celebrate && <SignSuccess onDone={() => setCelebrate(false)} />}
     </div>
   );
 }

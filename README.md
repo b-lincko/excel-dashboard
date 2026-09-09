@@ -22,7 +22,7 @@ React dashboard  ⇄  FastAPI  ⇄  SQLite (history)
 
 **Data loss / Docker down:** [`docs/RECOVERY.md`](docs/RECOVERY.md) — find the database, restore snapshots, reset admin. Quick check: `./scripts/recover.sh`.
 
-**Train operators:** open [`docs/training/index.html`](docs/training/index.html) (arrows / space to present). Go-live list: [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
+**Train operators:** open [`docs/training/index.html`](docs/training/index.html) (arrows / space to present) — includes a "What's new" section on the approvals desk, digital signing, and email. Go-live list: [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
 
 ## Quick start
 
@@ -135,6 +135,8 @@ Open the UI, then sign in:
 - **Reports** — daily/weekly/monthly/yearly, open/overdue/closed/delay/department/technician as Excel, CSV or PDF
 - **Auth** — admin / manager / user with configurable permissions
 - **Dark / light** theme
+- **Guided tours** — first-run app tour, plus a dedicated manager signing tour on Purchase Approval (auto-plays once, replay from Guide or "How signing works")
+- **Motion** — animated sign-in screen, ink-style signature pad with a self-drawing hint, and a "Signed & locked" stamp when a manager signs (all respect reduced-motion)
 
 ## Database and Excel
 

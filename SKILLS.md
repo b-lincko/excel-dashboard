@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-09 (Purchase Approval: pick 1–3 managers, corporate PDF signature, route after sign, unassign, working Resend).
+Last updated: 2026-09-09 (Login entrance + sign-in button animation, ink signature pad with self-drawing hint, Signed & locked stamp, manager signing tour on /approvals, training deck "What's new" slides).
 
 ---
 
@@ -219,10 +219,11 @@ backend/app/                 FastAPI app
   routers/                   auth, work_orders, dashboard, ops, catalog, collab, settings, …
 frontend/src/
   pages/                     Dashboard, WorkOrders, WorkOrderDetail, Queue, Settings, Guide, …
-  components/Tour.jsx        First-run tour overlay
+  components/Tour.jsx        Deck-agnostic tour overlay (main + signing decks)
+  components/SignSuccess.jsx "Signed & locked" stamp overlay after a manager signs
   components/MindMap3D.jsx   2D animated live mind map
   components/LoginScene.jsx  Three.js sign-in network
-  lib/tour.js                TOUR_STEPS v1
+  lib/tour.js                TOUR_STEPS v1 + SIGNING_TOUR_STEPS v1
   lib/webgl.js               WebGL / reduced-motion helpers
   context/                   Auth, Ui (ask/toast), Tour, Theme
 data/                        woms.db, app_config.json, attachments/  (gitignored except examples)
@@ -327,6 +328,7 @@ PLACED requires `po_number` by default (`status_required_fields`).
 - React + Vite + Tailwind. Dev: `0.0.0.0:5173`, proxy `/api` → `127.0.0.1:8000`.
 - UI look: light canvas, teal brand (`#0D9F8A`), white sidebar, compact KPI tiles with a left accent (UpKeep-style CMMS). Sidebar is **Daily / Lists / Ops / Admin** — Daily stays open (Queue, Work orders, Open, Overdue, Chat); other groups collapse. Work-order list defaults to a compact column set (`woms.columns`). Back and closing the tab prompt on unsaved MRs. Do not invent dashboard numbers to match a mock.
 - **Mind map** (`MindMap3D.jsx`): Dashboard graph is **2D SVG** of **live** `/api/dashboard` counts — radial layout, always-on labels, flowing links, gentle node drift, root pulse. Rebuilds only when the graph **fingerprint** (id/value/label) changes so dashboard polling does not remount. Pause drift on hover. Skip motion when `prefers-reduced-motion`. Click a node still filters real records. List view remains as a toggle. Sign-in left panel still uses Three.js (`LoginScene.jsx`) — no fake KPIs.
+- **Animations** (all skip when `prefers-reduced-motion`, CSS classes in `index.css`): login page staggers its entrance (`login-anim` / `brand-sweep`) and the sign-in button runs spinner → checkmark → navigate; the signature pad (`SignaturePad.jsx`) draws variable-width quadratic "ink" strokes, shows a looping self-drawing demo hint while empty, and a "Signature captured" tick on save; `SignSuccess.jsx` plays an ink flourish + "Signed & locked" stamp after an approving `decide` (on `/approvals` and the MR PO-approval panel).
 - Production: `npm run build` → FastAPI serves `frontend/dist` when present.
 - Confirmations: `UiContext.ask()` (restore, seed, reset, retry). Toasts for success/errors.
 - Header: Search (completes WO / supplier / item / person / camp site), command palette (`Ctrl/⌘+K`), Refresh, Live|Offline. `?` opens `/guide` unless a tour is active.
@@ -340,13 +342,21 @@ PLACED requires `po_number` by default (`status_required_fields`).
 
 ### Tour / Guide
 
-- `TOUR_VERSION = "v1"`. Key: `localStorage["woms.tour.v1:"+username] = "done"`.
+- Main tour: `TOUR_VERSION = "v1"`. Key: `localStorage["woms.tour.v1:"+username] = "done"`.
 - **Do not bump `TOUR_VERSION`** just to add a step. Replay from Guide / Account / header help shows new steps.
 - First-run auto-start (~800ms) re-checks `tourSeen` so Skip does not restart.
 - `measureTarget` must pick a **visible** `[data-tour]` (desktop vs mobile sidebar).
 - Overlay click does **not** skip. Esc skips.
-- Current `data-tour` ids: `nav-work`, `search`, `live`, `dashboard`, `wo-list`, `filters`, `wo-new`, `wo-tabs`, `wo-save`, `queue`, `backup`, `command`, `shortcuts`, `presence`.
+- Current main-tour `data-tour` ids: `nav-work`, `search`, `live`, `dashboard`, `wo-list`, `filters`, `wo-new`, `wo-tabs`, `wo-save`, `queue`, `backup`, `command`, `shortcuts`, `presence`.
 - Admin backup step: `need: "backup"`, `page: "settings"`, target `backup`. Title/body must say every backup pairs Excel + SQLite (saves, Backup now, schedule) — not “snapshots, not every save”.
+
+**Manager signing tour** (separate deck, `SIGNING_TOUR_VERSION = "v1"`):
+
+- Steps in `SIGNING_TOUR_STEPS` (same file `lib/tour.js`). Storage: `localStorage["woms.signingTour.v1:"+username] = "done"`.
+- Deck choice lives in `TourContext` (`deck` = `main` | `signing`; `start()` = main, `startSigning()` = signing, `startDeck(name)` generic). `Tour.jsx` is deck-agnostic — it renders `steps` from context and navigates to each step's `path` (`/approvals`).
+- Auto-starts **once** on the user's first visit to `/approvals` when the filtered steps are non-empty (`po_approve` / `po_dispatch` / `accounts` grants; frontend `can()` already treats admin as all-perms). Replay via Guide (manager card) or the **How signing works** button on `/approvals` and the MR PO-approval panel.
+- Signing-desk `data-tour` ids (on `PoApprovals.jsx` / `SignaturePad.jsx`): `appr-head`, `appr-steps`, `appr-lanes`, `appr-list`, `appr-pdf`, `sign-pad` (signature canvas), `sign-return-to`, `sign-send`, `sign-return`, `appr-accounts`.
+- Do not bump `SIGNING_TOUR_VERSION` when adding steps either; replay shows them.
 
 ---
 
@@ -410,8 +420,8 @@ Pitfalls (do not repeat):
 
 ## 13. Git / GitHub
 
-- Session branch only: `arena/01a07168-excel-dashboard`. Do not switch, rename, or push other branches.
-- Push: `git push origin arena/01a07168-excel-dashboard`. Never force-push.
+- Session branch only: `arena/01a0863b-excel-dashboard`. Do not switch, rename, or push other branches.
+- Push: `git push origin arena/01a0863b-excel-dashboard`. Never force-push.
 - Do not commit: `data/woms.db`, `data/app_config.json`, `data/.jwt_secret`, `data/attachments/`, `backups/`, `frontend/dist`, `node_modules`, `.venv`.
 - `file.xlsx` is in the repo; do not rewrite it as a side effect of tests or mapping experiments.
 
@@ -480,6 +490,7 @@ Must remain true:
 - [x] Admin seed / upload-then-seed / reset (`DELETE`), keep mapping
 - [x] Backup now + autobackup snapshot SQLite + Excel
 - [x] First-run tour + in-app Guide
+- [x] Manager signing tour on the Purchase Approval desk (auto once + replay)
 - [x] Default users recreated after reset
 - [x] Download / upload / restore snapshots (xlsx, db, zip)
 - [x] Recovery commands (`docs/RECOVERY.md`)
@@ -533,3 +544,4 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-09** Backup must not fail: durable Excel copy with retry/fsync, SQLite snapshot retries, still snapshot `.db` if Excel copy fails. Excel upload reads the temp workbook (header-row scan, fuzzy sheet names) before replacing live files; refuse empty / &lt; 50% so `wo_cache` is not wiped.
 - **2026-09-09** PO signatures live on `/approvals` (not only the MR tab). `GET /api/po-approvals` is the role inbox. Manager `decide()` only from `submitted`.
 - **2026-09-09** Email is optional. Admin picks SMTP or Resend. Verification and reset go through email; PO/request pings also email verified addresses. Inbox stays in-app.
+- **2026-09-09 (this session)** Motion + onboarding pass: login entrance animation and spinner→checkmark sign-in button; signature pad gets ink-weight strokes, self-drawing demo hint, "captured" tick; `SignSuccess` stamp overlay after an approving decide; dedicated manager signing tour (`SIGNING_TOUR_STEPS v1`, separate storage key, auto-starts once on first `/approvals` visit for people who can sign; replay from Guide / "How signing works"). `TourContext` now hosts two decks (`main`, `signing`); `Tour.jsx` is deck-agnostic. Training deck gained a "What's new — September 2026" section and its save/backup slides were corrected to DB-first (saves write SQLite only; Excel updates at midnight / Backup now). All new motion respects `prefers-reduced-motion`.

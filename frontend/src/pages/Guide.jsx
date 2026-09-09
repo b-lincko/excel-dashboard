@@ -26,7 +26,7 @@ const KEYS = [
 ];
 
 export default function Guide() {
-  const { start, steps } = useTour();
+  const { start, startSigning, steps } = useTour();
   const { can } = useAuth();
   const nav = useNavigate();
 
@@ -105,6 +105,24 @@ export default function Guide() {
           to the sender or someone else. That person can send it to Accounts or another person. After a signature the
           slip is locked.
         </p>
+        {can("po_approve") && (
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() => {
+                startSigning();
+                nav("/approvals");
+              }}
+            >
+              <Sparkles size={14} /> How signing works — manager tour
+            </button>
+            <span className="text-xs text-slate-500">
+              A guided walk of the signatures desk: open the PDF, draw your signature, sign &amp; send or return with
+              changes. It plays once automatically the first time you open Purchase Approval.
+            </span>
+          </div>
+        )}
         <p className="text-sm text-slate-500">
           Assign to on the MR is the same technician list. If Purchase type is empty, pick the due date yourself
           (date only). OPEN overdue uses that due date; PLACED overdue uses ETA. Close order captures unit / price /

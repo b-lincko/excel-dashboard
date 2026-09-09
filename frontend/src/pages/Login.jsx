@@ -14,6 +14,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
   const [forgot, setForgot] = useState(false);
   const [forgotId, setForgotId] = useState("");
   const [forgotMsg, setForgotMsg] = useState("");
@@ -28,8 +29,10 @@ export default function Login() {
     setBusy(true);
     setError("");
     try {
-      const signedIn = await login(username.trim(), password);
-      nav(signedIn?.must_change_password ? "/account" : firstPath(signedIn));
+      const me = await login(username.trim(), password);
+      setSignedIn(true);
+      // Let the checkmark animation play before the workspace takes over.
+      window.setTimeout(() => nav(me?.must_change_password ? "/account" : firstPath(me)), 650);
     } catch (err) {
       const timedOut = err?.timeout || String(err.message || "").toLowerCase().includes("timed out");
       setError(
@@ -37,7 +40,6 @@ export default function Login() {
           ? "Sign-in timed out. If you just uploaded Excel, wait until that finishes, then try again."
           : err.message || "Sign in failed"
       );
-    } finally {
       setBusy(false);
     }
   }
@@ -47,7 +49,7 @@ export default function Login() {
       <div className="hidden lg:flex flex-col justify-between bg-brand-700 text-white p-12 relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.12),transparent_40%),radial-gradient(circle_at_80%_80%,rgba(8,94,82,0.45),transparent_40%)]" />
         <LoginScene />
-        <div className="relative z-10">
+        <div className="relative z-10 login-anim d1">
           <div className="flex items-center gap-3">
             <BrandLogo className="h-12 w-auto max-w-[200px] object-contain rounded-md" />
             <div>
@@ -57,18 +59,19 @@ export default function Login() {
           </div>
         </div>
         <div className="relative z-10 max-w-lg">
-          <h1 className="text-4xl font-extrabold leading-tight tracking-tight">
+          <h1 className="text-4xl font-extrabold leading-tight tracking-tight login-anim d2">
             Material requests in one place.
             <span className="block text-white/90">Act on what is late, blocked, or due.</span>
           </h1>
-          <p className="mt-5 text-white/75 text-sm leading-relaxed">
+          <div className="mt-4 h-1 w-24 rounded-full bg-white/50 brand-sweep" />
+          <p className="mt-5 text-white/75 text-sm leading-relaxed login-anim d3">
             The database is the live history. Excel is a midnight replica. Claim, follow, and close MRs without hunting through the workbook.
           </p>
         </div>
-        <div className="relative z-10 text-xs text-white/50">Linkco MR · Work order management</div>
+        <div className="relative z-10 text-xs text-white/50 login-anim d4">Linkco MR · Work order management</div>
       </div>
       <div className="grid place-items-center p-8 bg-slate-50 dark:bg-ink-900">
-        <form onSubmit={submit} className="w-full max-w-sm card p-8">
+        <form onSubmit={submit} className="w-full max-w-sm card p-8 login-anim d2">
           <h2 className="text-xl font-bold">Sign in</h2>
           <p className="text-sm text-slate-500 mt-1 mb-6">Use your WOMS account. First sign-in starts a short tour.</p>
           {expired && !error && (
@@ -117,8 +120,21 @@ export default function Login() {
               {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
-          <button className="btn-primary w-full" disabled={busy}>
-            {busy ? "Signing in…" : "Sign in"}
+          <button className="btn-primary w-full flex items-center justify-center gap-2" disabled={busy}>
+            {signedIn ? (
+              <>
+                <svg className="btn-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M2.5 8.5l3.5 3.5 7-8" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Signed in
+              </>
+            ) : busy ? (
+              <>
+                <span className="btn-spinner" aria-hidden="true" /> Signing in…
+              </>
+            ) : (
+              "Sign in"
+            )}
           </button>
           <button
             type="button"

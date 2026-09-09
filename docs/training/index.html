@@ -126,6 +126,7 @@
             <li>Several people, several suppliers</li>
             <li>Search, keys, reports</li>
             <li>Backup, restore, what never to do</li>
+            <li><strong>What's new</strong> — approvals desk, digital signing, email</li>
           </ul>
         </div>
       </div>
@@ -149,7 +150,7 @@
           <h3 class="ok">Ready for the team</h3>
           <ul>
             <li>DB-first saves, Excel replica, conflict 409</li>
-            <li>Paired backups on every save</li>
+            <li>Paired backups on Backup now + the night schedule</li>
             <li>Roles, audit, JWT, login lockout</li>
             <li>Tour + Guide + recovery commands</li>
           </ul>
@@ -188,7 +189,7 @@
       <table>
         <tr><th>Action</th><th>What happens</th></tr>
         <tr><td>List, KPIs, search</td><td>Read SQLite. Not Excel.</td></tr>
-        <tr><td>Save / create / delete</td><td>Write SQLite first, then copy the row into Excel.</td></tr>
+        <tr><td>Save / create / delete</td><td>Write SQLite only. Excel is updated at midnight and on Backup now.</td></tr>
         <tr><td>Excel locked or missing</td><td>Your save stays. You get a warning to retry the replica.</td></tr>
         <tr><td>Seed / Upload-then-seed</td><td>Admin only. Copies Excel into the database when asked.</td></tr>
         <tr><td>Ordinary Refresh</td><td>Reloads the database. Does not overwrite it from Excel.</td></tr>
@@ -197,15 +198,14 @@
 
     <section class="slide">
       <p class="kicker">Save path</p>
-      <h2>One save, in order</h2>
+      <h2>One save, one write</h2>
       <div class="flow">
         <div class="step"><b>1</b><span>You click Save<br>or Ctrl/⌘+S</span></div><div class="chev">→</div>
-        <div class="step"><b>2</b><span>SQLite commits<br>the MR</span></div><div class="chev">→</div>
-        <div class="step"><b>3</b><span>Paired backup<br>.xlsx + .db</span></div><div class="chev">→</div>
-        <div class="step"><b>4</b><span>Excel lock, temp<br>file, validate</span></div><div class="chev">→</div>
-        <div class="step"><b>5</b><span>Replace file.xlsx<br>if Excel is free</span></div>
+        <div class="step"><b>2</b><span>SQLite commits<br>the MR — done</span></div><div class="chev">→</div>
+        <div class="step"><b>3</b><span>Midnight / Backup now:<br>all rows → file.xlsx</span></div><div class="chev">→</div>
+        <div class="step"><b>4</b><span>Snapshot pair<br>.xlsx + .db</span></div>
       </div>
-      <p style="margin-top:28px">If step 4 or 5 fails, <strong>step 2 is kept</strong>. Never roll the database back because Excel was open.</p>
+      <p style="margin-top:28px">Your save never waits on Excel. If the workbook is locked or missing, <strong>step 2 is still kept</strong> and the midnight dump records the problem.</p>
     </section>
 
     <section class="slide">
@@ -324,10 +324,11 @@
       <p class="kicker">Backup</p>
       <h2>Excel and the database together</h2>
       <ul>
-        <li>Every backup copies <strong>SQLite + Excel</strong> — each save, Backup now, and the night schedule.</li>
+        <li>Every backup copies <strong>SQLite + Excel</strong> — Backup now and the night schedule.</li>
+        <li>Backup first dumps every database row into <code>file.xlsx</code>, then snapshots the pair.</li>
         <li>Files live in <strong>backups/YYYY-MM-DD/</strong> as a matching <code>.xlsx</code> and <code>.db</code>.</li>
         <li>Download is a zip of that pair. Upload accepts .xlsx, .db, or a zip — then confirm Restore.</li>
-        <li>Write-safety copies are not pruned. Auto/manual keep the last 14 by default.</li>
+        <li>Pairs older than 30 days move to <strong>backups/archive/</strong>; archives are deleted after 6 months.</li>
       </ul>
     </section>
 
@@ -360,6 +361,68 @@
     </section>
 
     <section class="slide">
+      <p class="kicker">What's new · September 2026</p>
+      <h2>Four things changed</h2>
+      <div class="row four">
+        <div class="card"><h3 class="ok">Purchase Approval desk</h3><p>A dedicated screen — <strong>/approvals</strong> — for the whole signature flow: assign, send to managers, sign, route, Accounts.</p></div>
+        <div class="card"><h3 class="ok">Digital signatures</h3><p>Managers draw a signature once per slip. It prints on the PDF at <strong>corporate size</strong> (~80×28&nbsp;mm). Signing locks the slip.</p></div>
+        <div class="card"><h3 class="ok">Manager signing tour</h3><p>An in-app tour walks managers through signing, step by step. Button: <strong>How signing works</strong> on the approvals desk.</p></div>
+        <div class="card"><h3 class="ok">Email out</h3><p>SMTP or Resend. Verification, password reset, PO requests and @mentions reach verified addresses. In-app inbox still works without mail.</p></div>
+      </div>
+      <p style="margin-top:22px">Also new: an animated sign-in screen, an animated signature pad with a self-drawing hint, and a <strong>Signed &amp; locked</strong> stamp the moment a manager signs.</p>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">What's new · the flow</p>
+      <h2>Purchase Approval, end to end</h2>
+      <div class="flow">
+        <div class="step"><b>1 · Dispatch</b><span>Pick 1–3 managers<br>and a technician</span></div><div class="chev">→</div>
+        <div class="step"><b>2 · Technician</b><span>Updates suppliers,<br>sends the PDF</span></div><div class="chev">→</div>
+        <div class="step"><b>3 · Manager</b><span>Signs — or returns<br>with written changes</span></div><div class="chev">→</div>
+        <div class="step"><b>4 · Route</b><span>Signed slip goes back<br>to sender — or anyone</span></div><div class="chev">→</div>
+        <div class="step"><b>5 · Accounts</b><span>Holder or dispatch<br>files it</span></div>
+      </div>
+      <ul style="margin-top:22px">
+        <li>Open it from <strong>Daily → Purchase Approval</strong>, or press <kbd>g</kbd> then <kbd>p</kbd>.</li>
+        <li><strong>Unassign</strong> hands the slip back if the wrong technician has it.</li>
+        <li>Approve <strong>locks</strong> suppliers, items and prices — changes need a fresh slip.</li>
+      </ul>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">What's new · for managers</p>
+      <h2>How you sign a document</h2>
+      <div class="row two">
+        <div class="card">
+          <h3>On screen</h3>
+          <ul>
+            <li>Open the slip from <strong>Waiting for signature</strong>.</li>
+            <li>Read the PDF on the right — download a copy anytime.</li>
+            <li>Draw your signature — the line varies like ink, with a self-drawing hint.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Then decide</h3>
+          <ul>
+            <li><strong class="ok">Sign &amp; send</strong> — approve, pick the recipient, done. A stamp confirms it.</li>
+            <li><strong class="warn">Return with changes</strong> — write what to fix; no signature needed.</li>
+            <li>Learn it once: <strong>How signing works</strong> tour on the desk (plays automatically the first time).</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <p class="kicker">What's new · email</p>
+      <h2>Mail is optional — and useful</h2>
+      <div class="row three">
+        <div class="card"><h3>Admin sets it once</h3><p>Settings → Email. Pick <strong>SMTP</strong> or <strong>Resend</strong>, set From and the public URL used in links. Send a test.</p></div>
+        <div class="card"><h3>Accounts get real mail</h3><p>Address verification, password reset, PO signature requests, Accounts hand-offs, assign-to pings and @mentions — to <strong>verified</strong> addresses only.</p></div>
+        <div class="card"><h3>Nothing depends on it</h3><p>Seed logins at <code>@woms.local</code> are never mailed. Mail off? The in-app inbox still carries every ping.</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
       <p class="kicker">Do not</p>
       <h2 class="bad">Never do this</h2>
       <ul>
@@ -386,10 +449,14 @@
     <section class="slide">
       <p class="kicker">Practice</p>
       <h2>Try this now</h2>
-      <div class="row two">
+      <div class="row three">
         <div class="card">
           <h3>Operators</h3>
           <p>Sign in → Queue → open one MR → add a supplier×item row → Save. Type @ in remarks. Press ? for the guide.</p>
+        </div>
+        <div class="card">
+          <h3>Managers</h3>
+          <p>Approvals desk → <strong>How signing works</strong> tour → open a Waiting-for-signature slip → draw a signature → Sign &amp; send to the sender.</p>
         </div>
         <div class="card">
           <h3>Admins</h3>

@@ -5,7 +5,9 @@ import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 import { useLiveReload } from "../lib/live.js";
+import { useTour } from "../context/TourContext.jsx";
 import SignaturePad from "../components/SignaturePad.jsx";
+import SignSuccess from "../components/SignSuccess.jsx";
 
 const LANES = [
   { id: "incoming", label: "New slips", hint: "Assign a technician" },
@@ -28,6 +30,7 @@ const STATE_LABEL = {
 export default function PoApprovals() {
   const { user } = useAuth();
   const { toast, ask } = useUi();
+  const { startSigning, active: tourActive } = useTour();
   const tick = useLiveReload();
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState(null);
@@ -45,6 +48,7 @@ export default function PoApprovals() {
   const [returnTo, setReturnTo] = useState("");
   const [routeTo, setRouteTo] = useState("");
   const [accountsTo, setAccountsTo] = useState("");
+  const [celebrate, setCelebrate] = useState(false);
 
   function loadInbox() {
     api
@@ -137,7 +141,10 @@ export default function PoApprovals() {
       const d = await api.post(`/api/work-orders/${encodeURIComponent(selected)}${path}`, body || {});
       setDetail((prev) => ({ ...prev, approval: d.approval, caps: d.caps }));
       toast(d.approval?.state === "approved" ? "PO signed and locked" : "PO updated", "success");
-      if (path.includes("decide") && body?.approve) setSignature("");
+      if (path.includes("decide") && body?.approve) {
+        setSignature("");
+        setCelebrate(true);
+      }
       loadInbox();
     } catch (e) {
       setError(typeof e.detail === "string" ? e.detail : e.message);
@@ -154,7 +161,7 @@ export default function PoApprovals() {
 
   return (
     <div className="space-y-5">
-      <div className="page-head">
+      <div className="page-head" data-tour="appr-head">
         <div>
           <div className="page-kicker">Digital signature</div>
           <h1 className="text-2xl font-bold tracking-tight">Purchase Approval</h1>
@@ -164,9 +171,19 @@ export default function PoApprovals() {
             else. That person can send it to Accounts or another person. Unassign if it was given to the wrong technician.
           </p>
         </div>
+        {!tourActive && (
+          <button
+            type="button"
+            className="btn-outline shrink-0 self-start"
+            title="Walk me through signing a purchase slip"
+            onClick={startSigning}
+          >
+            <PenLine size={14} /> How signing works
+          </button>
+        )}
       </div>
 
-      <ol className="grid sm:grid-cols-5 gap-2 text-xs">
+      <ol className="grid sm:grid-cols-5 gap-2 text-xs" data-tour="appr-steps">
         {[
           ["1. Receive", "PO number lands here"],
           ["2. Assign", "Dispatcher picks a technician"],
@@ -181,7 +198,7 @@ export default function PoApprovals() {
         ))}
       </ol>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2" data-tour="appr-lanes">
         {LANES.map((l) => {
           const n = data?.counts?.[l.id] || 0;
           return (
@@ -200,7 +217,7 @@ export default function PoApprovals() {
       <p className="text-xs text-slate-500">{LANES.find((l) => l.id === lane)?.hint}</p>
 
       <div className="grid lg:grid-cols-[minmax(280px,380px)_1fr] gap-4 items-start">
-        <div className="space-y-3">
+        <div className="space-y-3" data-tour="appr-list">
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -366,7 +383,11 @@ export default function PoApprovals() {
                     </div>
                     <div>
                       <label className="lbl">Send signed slip to</label>
-                      <select value={returnTo} onChange={(e) => setReturnTo(e.target.value)}>
+                      <select
+                        value={returnTo}
+                        onChange={(e) => setReturnTo(e.target.value)}
+                        data-tour="sign-return-to"
+                      >
                         <option value={a.assignee || ""}>{a.assignee ? `Sender · ${a.assignee}` : "Sender"}</option>
                         {(caps.people || []).map((p) => (
                           <option key={p.username} value={p.username}>
@@ -383,6 +404,7 @@ export default function PoApprovals() {
                       <button
                         className="btn-primary"
                         disabled={busy || !signature}
+                        data-tour="sign-send"
                         onClick={() =>
                           run(
                             "/approval/decide",
@@ -399,6 +421,7 @@ export default function PoApprovals() {
                       <button
                         className="btn-outline"
                         disabled={busy || !comment.trim()}
+                        data-tour="sign-return"
                         onClick={() => run("/approval/decide", { approve: false, comment })}
                       >
                         Return with changes
@@ -431,7 +454,7 @@ export default function PoApprovals() {
                 )}
 
                 {caps.can_send_accounts && (
-                  <div className="flex flex-wrap gap-2 items-end">
+                  <div className="flex flex-wrap gap-2 items-end" data-tour="appr-accounts">
                     <div className="flex-1 min-w-[12rem]">
                       <label className="lbl">Accounts (optional person)</label>
                       <select value={accountsTo} onChange={(e) => setAccountsTo(e.target.value)}>
@@ -460,7 +483,7 @@ export default function PoApprovals() {
                 )}
               </div>
 
-              <div className="card overflow-hidden min-h-[28rem]">
+              <div className="card overflow-hidden min-h-[28rem]" data-tour="appr-pdf">
                 <div className="px-4 py-2 text-xs font-medium text-slate-500 border-b border-slate-100 dark:border-white/5 flex justify-between">
                   <span>PDF for signature</span>
                   <button
@@ -497,6 +520,12 @@ export default function PoApprovals() {
           )}
         </div>
       </div>
+      {celebrate && (
+        <SignSuccess
+          note={`PO ${item.po_number || item.work_order_id || ""} · sent to ${returnTo || a.assignee || "the sender"}`}
+          onDone={() => setCelebrate(false)}
+        />
+      )}
     </div>
   );
 }
