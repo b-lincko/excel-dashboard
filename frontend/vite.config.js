@@ -10,7 +10,9 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        // backend binds 127.0.0.1:8001 in production (nginx proxies :8000);
+        // override with WOMS_PORT if you move it
+        target: `http://127.0.0.1:${process.env.WOMS_PORT || 8001}`,
         changeOrigin: true,
       },
     },

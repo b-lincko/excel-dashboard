@@ -61,10 +61,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS: same-origin only by default — nginx serves the app and proxies /api
+# from the same origin the browser uses, so no cross-origin is needed. Set
+# WOMS_CORS_ORIGINS to a comma-separated list (or "*") only when the UI is
+# hosted on a different origin than the API.
+_cors_env = os.environ.get("WOMS_CORS_ORIGINS", "").strip()
+if _cors_env == "*":
+    _cors_origins: list[str] = ["*"]
+elif _cors_env:
+    _cors_origins = [item.strip() for item in _cors_env.split(",") if item.strip()]
+else:
+    _cors_origins = []
+
 app.add_middleware(GZipMiddleware, minimum_size=400)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

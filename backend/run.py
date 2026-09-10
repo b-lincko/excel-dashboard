@@ -12,9 +12,21 @@ if str(BACKEND) not in sys.path:
 
 import uvicorn
 
+# Production topology: the backend binds loopback only and nginx is the public
+# entry (deploy/nginx.conf). Override with WOMS_HOST / WOMS_PORT for dev.
+HOST = (os.environ.get("WOMS_HOST", "") or "127.0.0.1").strip()
+PORT = int(os.environ.get("WOMS_PORT", "") or 8001)
+
 if __name__ == "__main__":
     excel = ROOT / "file.xlsx"
     print(f"Project: {ROOT}")
     print(f"Excel:   {excel}  exists={excel.exists()}")
-    print("API:     http://127.0.0.1:8000")
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)
+    print(f"API:     http://{HOST}:{PORT}  (public entry: nginx :8000 -> here)")
+    uvicorn.run(
+        "app.main:app",
+        host=HOST,
+        port=PORT,
+        reload=False,
+        proxy_headers=True,
+        forwarded_allow_ips="127.0.0.1",  # trust X-Forwarded-* from our nginx only
+    )
