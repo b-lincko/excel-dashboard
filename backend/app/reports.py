@@ -327,7 +327,8 @@ def _signature_image(data_url: Any):
         if height > max_h:
             height = max_h
             width = height * aspect
-        return Image(reader, width=width, height=height)
+        # reportlab 5.x wants a file-like here, not an ImageReader.
+        return Image(io.BytesIO(blob), width=width, height=height)
     except Exception:
         return None
 
@@ -447,7 +448,7 @@ def po_approval_pdf(rec: dict[str, Any], approval: Optional[dict[str, Any]] = No
         block = Table(
             [
                 [sig],
-                [HRFlowable(width="80mm", thickness=0.6, color=colors.HexColor("#0F172A"), spaceBefore=2, spaceAfter=2)],
+                [HRFlowable(width=80 * mm, thickness=0.6, color=colors.HexColor("#0F172A"), spaceBefore=2, spaceAfter=2)],
                 [
                     Paragraph(
                         f"{_esc(approval.get('signed_by') or 'Authorized signatory')}<br/>"

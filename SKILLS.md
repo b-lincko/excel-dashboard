@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-10 (render() fixed for ALL report kinds; PDF/XLSX report charts; on-screen notification popups; Resend owner-parse fix for mailto errors + From-optional; Settings Email save button).
+Last updated: 2026-09-10 (PO PDF signature embed FIXED: reportlab 5.x needs BytesIO not ImageReader, HRFlowable mm width; drawn signature now actually prints on signed slips).
 
 ---
 
@@ -181,6 +181,8 @@ Due offsets (purchase type, days): Direct Cash 3, Local PO 5, International/Serv
 **Close order prices** (`unit_price`, `price`, `total_price`, `final_price`) live in SQLite (`wo_cache` payload + `mr_lines.unit_price`). They are **not** Excel columns. `_merge_mapped` allow-lists them; midnight Excel dump does not write them.
 
 **PO digital signature** (`backend/app/approvals.py`, tables `po_approvals` / `po_approval_events`):
+
+**PDF signature embed:** `_signature_image` in `reports.py` decodes the base64 PNG and prints it at corporate size (max 80×28 mm, aspect kept) above a signature line + signer + timestamp. **reportlab 5.x gotchas (both fixed 2026-09-10, regression-tested):** `platypus.Image` must receive a `BytesIO`, not an `ImageReader` (TypeError was swallowed by the silent except → signed slips printed "No signature on file yet"), and `HRFlowable` widths inside table cells must be numeric mm (`80 * mm`), not the string `"80mm"`.
 
 Dedicated page **`/approvals`** (Daily nav **Purchase Approval**, `g then p`). Guest page key `po_approvals`.
 
@@ -554,6 +556,7 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 - **2026-09-09** PO signatures live on `/approvals` (not only the MR tab). `GET /api/po-approvals` is the role inbox. Manager `decide()` only from `submitted`.
 - **2026-09-09** Email is optional. Admin picks SMTP or Resend. Verification and reset go through email; PO/request pings also email verified addresses. Inbox stays in-app.
 - **2026-09-09 (this session)** Logo made transparent: black background removed from `linkco-logo.png`/`favicon.png` (unpremultiply-from-black keeps antialiased edges), new light-surface variant `linkco-logo-dark.png` (ink Link), `BrandLogo.jsx` switches variants by theme, `bg-black` patches dropped.
+- **2026-09-10** PO PDF signature embed was silently broken under reportlab 5.x (ImageReader rejection + "80mm" string width) — signed slips printed no signature. Fixed both, regression test asserts the image XObject exists only on signed PDFs.
 - **2026-09-10** Audit fixes: `render()` now handles every report kind (list exports were all None → downloads 500/broken); delay report filters delayed+blockade+issue; Resend owner parse handles markdown mailto links and From is optional for Resend; notification popups in-app; Settings Email has its own Save button.
 - **2026-09-09 (this session)** Approvals desk UX rebuild + fixes: registered the missing `POST /{id}/approval/unassign` route (405 reported in the field), submit now passes the picked managers through (`SubmitPoBody`) and dispatchers/admins can submit (`can_submit`), desk shows a five-stage stepper with status captions and a Next-step card, and signing moved into a two-step `SignWindow` modal (view the request → sign/return) shared with the MR approval panel; signing tour auto-opens the window on hands-on steps.
 

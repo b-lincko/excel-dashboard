@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import sys
 from pathlib import Path
 
@@ -210,3 +211,31 @@ def test_unassign_route_and_dispatcher_submit(tmp_path, monkeypatch):
     unassigned = client.post(f"{base}/unassign", headers=headers)
     assert unassigned.status_code == 200, unassigned.text
     assert unassigned.json()["approval"]["state"] == "none"
+
+def test_approval_pdf_embeds_drawn_signature():
+    """Regression: reportlab 5.x rejected the ImageReader passed to platypus
+    Image (silent except -> 'No signature on file yet' on a signed slip), and
+    the signature-line HRFlowable used an unparsable "80mm" width. A signed
+    slip must embed the drawn signature as an image; an unsigned one must not."""
+    import base64
+
+    from PIL import Image, ImageDraw
+
+    from app.reports import _signature_image, po_approval_pdf
+
+    img = Image.new("RGB", (400, 140), "white")
+    ImageDraw.Draw(img).line([(20, 70), (120, 30), (220, 100), (380, 50)], fill=(15, 23, 42), width=4, joint="curve")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    assert _signature_image(data_url) is not None
+    assert _signature_image("") is None
+    assert _signature_image("data:image/png;base64,!!!not-png!!!") is None
+
+    rec = {"record_id": "TEST:SIGPDF", "work_order_id": "485000", "po_number": "PO-SIG"}
+    signed = po_approval_pdf(rec, {"state": "approved", "signed_by": "manager", "signed_at": "2026-09-10 10:00:00", "signature_png": data_url})
+    unsigned = po_approval_pdf(rec, {"state": "submitted"})
+    assert signed[:4] == b"%PDF" and unsigned[:4] == b"%PDF"
+    assert b"/Subtype /Image" in signed or b"/Subtype/Image" in signed, "drawn signature missing from signed PDF"
+    assert b"/Subtype /Image" not in unsigned and b"/Subtype/Image" not in unsigned
