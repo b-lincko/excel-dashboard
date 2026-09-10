@@ -519,8 +519,8 @@ function EmailPanel({ cfg, setCfg, toast, onSave }) {
         <p className="text-xs text-slate-500">
           The app is preset for the <strong>Resend API</strong>: paste your key and a From address on a domain verified in
           Resend, then Save and send a test. SMTP stays available. Emails cover verification, password resets, PO / approval
-          requests, follow-ups, assignment pings and @mentions. The in-app inbox still works if mail is off. Secrets are
-          never returned after save.
+          requests, follow-ups, assignment pings and @mentions. Gmail works with a Google App password. The in-app inbox
+          still works if mail is off. Secrets are never returned after save.
         </p>
       </div>
       <div className="grid md:grid-cols-2 gap-3">
@@ -528,6 +528,7 @@ function EmailPanel({ cfg, setCfg, toast, onSave }) {
           <label className="lbl">Provider</label>
           <select value={provider} onChange={(e) => setCfg({ ...cfg, email_provider: e.target.value })}>
             <option value="resend">Resend API (preset)</option>
+            <option value="gmail">Gmail / Google Workspace</option>
             <option value="smtp">SMTP</option>
             <option value="off">Off</option>
           </select>
@@ -592,6 +593,35 @@ function EmailPanel({ cfg, setCfg, toast, onSave }) {
           Chat / follow
         </label>
       </div>
+      {provider === "gmail" && (
+        <div className="grid md:grid-cols-2 gap-3">
+          <div>
+            <label className="lbl">Your Gmail address</label>
+            <input
+              type="email"
+              value={cfg.smtp_username || ""}
+              onChange={(e) => setCfg({ ...cfg, smtp_username: e.target.value })}
+              placeholder="you@gmail.com"
+            />
+          </div>
+          <div>
+            <label className="lbl">Gmail App password {cfg.smtp_password_set ? "· saved" : ""}</label>
+            <input
+              type="password"
+              value={cfg.smtp_password || ""}
+              onChange={(e) => setCfg({ ...cfg, smtp_password: e.target.value })}
+              placeholder={cfg.smtp_password_set ? "Leave blank to keep the saved password" : "16 letters, e.g. abcd efgh ijkl mnop"}
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="md:col-span-2 text-[11px] text-slate-500">
+            Emails are sent from the address above (recipients see the From name above it). The password must be a
+            <strong> Google App password</strong>, not your normal login: enable 2-Step Verification, then open
+            myaccount.google.com &rarr; Security &rarr; 2-Step Verification &rarr; <strong>App passwords</strong> and
+            create one (16 letters). Paste it here with or without spaces, then Save settings and send a test.
+          </div>
+        </div>
+      )}
       {provider === "smtp" && (
         <div className="grid md:grid-cols-2 gap-3">
           <div>

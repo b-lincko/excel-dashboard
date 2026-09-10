@@ -34,9 +34,42 @@ def provider_name(cfg=None) -> str:
     name = str(getattr(cfg, "email_provider", "") or "off").strip().lower()
     if name in {"", "none", "off", "disabled"}:
         return "off"
-    if name in {"smtp", "resend"}:
+    if name == "google":
+        name = "gmail"
+    if name in {"smtp", "resend", "gmail"}:
         return name
     return "off"
+
+
+# Gmail SMTP preset: STARTTLS on 587. Login is the full Gmail address and the
+# password MUST be a 16-character Google App password (regular passwords are
+# rejected; Google Account → Security → 2-Step Verification → App passwords).
+GMAIL_SMTP_HOST = "smtp.gmail.com"
+GMAIL_SMTP_PORT = 587
+GMAIL_SMTP_SECURITY = "starttls"
+
+
+def gmail_address(cfg) -> str:
+    return str(getattr(cfg, "smtp_username", "") or getattr(cfg, "email_from_address", "") or "").strip().lower()
+
+
+def _smtp_settings(cfg) -> tuple[str, int, str, str, str]:
+    """Resolve (host, port, security, username, password); Gmail fills its preset."""
+    if provider_name(cfg) == "gmail":
+        return (
+            GMAIL_SMTP_HOST,
+            GMAIL_SMTP_PORT,
+            GMAIL_SMTP_SECURITY,
+            gmail_address(cfg),
+            str(getattr(cfg, "smtp_password", "") or ""),
+        )
+    return (
+        str(getattr(cfg, "smtp_host", "") or "").strip(),
+        int(getattr(cfg, "smtp_port", 587) or 587),
+        str(getattr(cfg, "smtp_security", "starttls") or "starttls").strip().lower(),
+        str(getattr(cfg, "smtp_username", "") or "").strip(),
+        str(getattr(cfg, "smtp_password", "") or ""),
+    )
 
 
 def is_configured(cfg=None) -> bool:
@@ -44,6 +77,8 @@ def is_configured(cfg=None) -> bool:
     provider = provider_name(cfg)
     if provider == "resend":
         return bool(str(getattr(cfg, "resend_api_key", "") or "").strip())
+    if provider == "gmail":
+        return bool(gmail_address(cfg)) and bool(str(getattr(cfg, "smtp_password", "") or "").strip())
     if provider == "smtp":
         return bool(str(getattr(cfg, "smtp_host", "") or "").strip())
     return False
@@ -72,6 +107,9 @@ def looks_real_email(address: str) -> bool:
 
 def _from_header(cfg) -> str:
     addr = str(getattr(cfg, "email_from_address", "") or "").strip()
+    if not addr and provider_name(cfg) == "gmail":
+        # Gmail sends from the authenticated account; mirror it in the header.
+        addr = gmail_address(cfg)
     name = str(getattr(cfg, "email_from_name", "") or "").strip() or "Linkco MR"
     if not addr:
         raise ValueError("Set a From email address in Settings.")
@@ -129,6 +167,10 @@ def send_mail(
         return {"ok": False, "skipped": True, "reason": "SMTP host is missing"}
     if provider == "smtp" and not str(getattr(cfg, "email_from_address", "") or "").strip():
         return {"ok": False, "skipped": True, "reason": "From email is missing"}
+    if provider == "gmail" and not gmail_address(cfg):
+        return {"ok": False, "skipped": True, "reason": "Gmail address is missing"}
+    if provider == "gmail" and not str(getattr(cfg, "smtp_password", "") or "").strip():
+        return {"ok": False, "skipped": True, "reason": "Gmail app password is missing"}
     # Resend without a From address is fine: test mode sends from the sandbox sender.
     heading = title or subject
     payload = {
@@ -154,13 +196,16 @@ def send_mail(
 
 
 def _send_smtp(cfg, payload: dict[str, Any]) -> None:
-    host = str(getattr(cfg, "smtp_host", "") or "").strip()
+    host, port, security, username, password = _smtp_settings(cfg)
     if not host:
         raise ValueError("SMTP host is required.")
-    port = int(getattr(cfg, "smtp_port", 587) or 587)
-    security = str(getattr(cfg, "smtp_security", "starttls") or "starttls").strip().lower()
-    username = str(getattr(cfg, "smtp_username", "") or "").strip()
-    password = str(getattr(cfg, "smtp_password", "") or "")
+    if provider_name(cfg) == "gmail":
+        if len(password.replace(" ", "")) != 16:
+            raise ValueError(
+                "Gmail needs a 16-character App password (not your login password): "
+                "Google Account > Security > 2-Step Verification > App passwords."
+            )
+        password = password.replace(" ", "")
     msg = EmailMessage()
     msg["Subject"] = payload["subject"]
     msg["From"] = _from_header(cfg)

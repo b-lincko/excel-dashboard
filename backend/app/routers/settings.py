@@ -45,13 +45,23 @@ def _merge_settings(current: dict[str, Any], incoming: dict[str, Any]) -> dict[s
             continue
         merged[key] = value
     provider = str(merged.get("email_provider") or "off").strip().lower()
-    if provider not in {"off", "smtp", "resend", "none", "disabled"}:
-        raise HTTPException(status_code=422, detail="Email provider must be off, smtp, or resend.")
+    if provider == "google":
+        provider = "gmail"
+    if provider not in {"off", "smtp", "resend", "gmail", "none", "disabled"}:
+        raise HTTPException(status_code=422, detail="Email provider must be off, gmail, smtp, or resend.")
     if provider in {"none", "disabled"}:
         merged["email_provider"] = "off"
         provider = "off"
     else:
         merged["email_provider"] = provider
+    if provider == "gmail":
+        # Fill the Gmail preset so the generic SMTP sender just works. Login is
+        # the Gmail address; the password must be a Google App password.
+        merged["smtp_host"] = mailer.GMAIL_SMTP_HOST
+        merged["smtp_port"] = mailer.GMAIL_SMTP_PORT
+        merged["smtp_security"] = mailer.GMAIL_SMTP_SECURITY
+        if not str(merged.get("smtp_username") or "").strip():
+            merged["smtp_username"] = str(merged.get("email_from_address") or "").strip()
     # Only validate the mail setup when this save actually changes an email
     # value. The preset provider (Resend) without a key yet must not block
     # unrelated settings saves; sends simply skip until key + From exist.
@@ -80,6 +90,14 @@ def _merge_settings(current: dict[str, Any], incoming: dict[str, Any]) -> dict[s
                 raise HTTPException(status_code=422, detail="SMTP host is required.")
         if provider == "resend" and not str(merged.get("resend_api_key") or "").strip():
             raise HTTPException(status_code=422, detail="Resend API key is required.")
+        if provider == "gmail":
+            if not str(merged.get("smtp_username") or "").strip():
+                raise HTTPException(status_code=422, detail="Your Gmail address is required.")
+            if not str(merged.get("smtp_password") or "").strip():
+                raise HTTPException(
+                    status_code=422,
+                    detail="A Google App password is required (Google Account > Security > 2-Step Verification > App passwords).",
+                )
     return merged
 
 

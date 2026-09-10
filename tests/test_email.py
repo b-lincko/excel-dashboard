@@ -5,6 +5,8 @@ import sys
 import urllib.error
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -324,3 +326,98 @@ def test_resend_test_mode_uses_known_inbox(monkeypatch):
     assert "onboarding@resend.dev" in body
     # Recipient was already the owner - delivered as addressed.
     assert '"to": ["owner@spotmodapk.pro"]' in body
+
+
+def test_gmail_provider_preset_and_send(tmp_path, monkeypatch):
+    """Gmail is a first-class provider: smtp.gmail.com:587 preset, login = the
+    Gmail address, password must be a 16-char App password (spaces ignored)."""
+    path = tmp_path / "app_config.json"
+    monkeypatch.setattr(config_mod, "CONFIG_PATH", path)
+    invalidate_config_cache()
+    cfg = load_config()
+    cfg.email_provider = "gmail"
+    cfg.email_from_name = "Linkco MR"
+    cfg.smtp_username = "ops@gmail.com"
+    cfg.smtp_password = "abcd efgh ijkl mnop"
+    save_config(cfg)
+
+    assert mailer.provider_name(cfg) == "gmail"
+    host, port, security, user, pw = mailer._smtp_settings(cfg)
+    assert (host, port, security) == ("smtp.gmail.com", 587, "starttls")
+    assert user == "ops@gmail.com"
+    assert mailer.is_configured(cfg) is True
+
+    # no app password -> not configured, send skips with a clear reason
+    cfg2 = load_config()
+    cfg2.email_provider = "gmail"
+    cfg2.smtp_username = "ops@gmail.com"
+    cfg2.smtp_password = ""
+    assert mailer.is_configured(cfg2) is False
+    mailer.OUTBOX.clear()
+    res = mailer.send_mail("someone@example.com", "t", "b")
+    assert res["skipped"] and "app password" in res["reason"]
+
+    # too-short password raises a helpful error (real SMTP would reject it)
+    cfg3 = load_config()
+    cfg3.smtp_password = "short"
+    with pytest.raises(ValueError, match="App password"):
+        mailer._send_smtp(cfg3, {"subject": "s", "to": "x@y.z", "text": "t", "html": "<p>t</p>"})
+
+    # the real send path: preset host/port, login with the address, From header
+    class FakeSMTP:
+        calls = []
+
+        def __init__(self, host, port=None, timeout=None):
+            self.host, self.port = host, port
+            FakeSMTP.calls.append(("connect", host, port))
+
+        def ehlo(self):
+            FakeSMTP.calls.append(("ehlo",))
+
+        def starttls(self, context=None):
+            FakeSMTP.calls.append(("starttls",))
+
+        def login(self, u, p):
+            FakeSMTP.calls.append(("login", u, p))
+
+        def send_message(self, msg):
+            FakeSMTP.calls.append(("send", msg["From"], msg["To"], str(msg["Subject"])))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(mailer.smtplib, "SMTP", FakeSMTP)
+    FakeSMTP.calls = []
+    mailer._send_smtp(cfg, {"subject": "Hello", "to": "site@example.com", "text": "hi", "html": "<p>hi</p>"})
+    kinds = [c[0] for c in FakeSMTP.calls]
+    assert ("connect", "smtp.gmail.com", 587) in FakeSMTP.calls
+    assert "starttls" in kinds and "login" in kinds
+    login = next(c for c in FakeSMTP.calls if c[0] == "login")
+    assert login[1] == "ops@gmail.com" and login[2] == "abcdefghijklmnop"
+    sent = next(c for c in FakeSMTP.calls if c[0] == "send")
+    assert sent[1] == "Linkco MR <ops@gmail.com>" and sent[2] == "site@example.com"
+
+
+def test_gmail_settings_save_validation(tmp_path, monkeypatch):
+    """Settings API: provider gmail needs address + App password, fills the
+    SMTP preset, and 'google' is accepted as an alias."""
+    path = tmp_path / "app_config.json"
+    monkeypatch.setattr(config_mod, "CONFIG_PATH", path)
+    invalidate_config_cache()
+    from app.routers.settings import _merge_settings
+
+    base = AppConfig().model_dump()
+    # switching to gmail without an app password is rejected with guidance
+    try:
+        _merge_settings(base, {"email_provider": "gmail", "smtp_username": "ops@gmail.com"})
+        raise AssertionError("gmail without app password should fail")
+    except HTTPException as exc:
+        assert "App password" in exc.detail
+    # with a password: preset filled, username defaults from the From address
+    merged = _merge_settings(base, {"email_provider": "google", "email_from_address": "ops@gmail.com", "smtp_password": "abcd efgh ijkl mnop"})
+    assert merged["email_provider"] == "gmail"
+    assert merged["smtp_host"] == "smtp.gmail.com" and merged["smtp_port"] == 587
+    assert merged["smtp_username"] == "ops@gmail.com"
