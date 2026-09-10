@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 900" font-family="Segoe UI, Arial, sans-serif">
+  <rect x="0" y="0" width="1240" height="900" rx="18" fill="#0f172a"/>
+  <text x="620" y="52" text-anchor="middle" font-size="26" font-weight="700" fill="#e8f4f8">Linkco MR — production architecture</text>
+  <text x="620" y="78" text-anchor="middle" font-size="13" fill="#93b0bd">nginx is the only public door · the API never touches the network directly · updated 2026-09-10</text>
+
+  <!-- People -->
+  <rect x="330" y="102" width="580" height="84" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="620" y="134" text-anchor="middle" font-size="17" font-weight="700" fill="#e8f4f8">People · browser</text>
+  <text x="620" y="158" text-anchor="middle" font-size="13" fill="#94a3b8">admin · manager · technician · accounts — pop-in notifications, tours, audit</text>
+
+  <!-- arrow users -> nginx -->
+  <line x1="620" y1="186" x2="620" y2="216" stroke="#0D9F8A" stroke-width="2.5"/>
+  <polygon points="614,214 626,214 620,226" fill="#0D9F8A"/>
+  <text x="636" y="206" font-size="13" fill="#5eead4">HTTP(S) · port 8000</text>
+
+  <!-- nginx -->
+  <rect x="310" y="230" width="620" height="158" rx="14" fill="#0F3D5E" stroke="#0D9F8A" stroke-width="2"/>
+  <text x="620" y="260" text-anchor="middle" font-size="18" font-weight="700" fill="#ffffff">nginx — public entry · :8000</text>
+  <text x="340" y="288" font-size="13" fill="#cbd5e1">• Serves the built UI — hashed /assets cached 1 year, pre-compressed (gzip_static)</text>
+  <text x="340" y="310" font-size="13" fill="#cbd5e1">• Proxies /api to the backend · 25 MB uploads · 300 s report downloads</text>
+  <text x="340" y="332" font-size="13" fill="#cbd5e1">• Login rate-limit 20/min · JSON 502 while the API restarts · security headers</text>
+  <text x="340" y="354" font-size="13" fill="#cbd5e1">• TLS terminates here on a real server · forwards real client IPs (X-Forwarded-*)</text>
+  <text x="340" y="376" font-size="12" fill="#93b0bd">config: deploy/nginx.conf (host) · deploy/nginx-docker.conf (container)</text>
+
+  <!-- arrow nginx -> api -->
+  <line x1="620" y1="388" x2="620" y2="418" stroke="#E11D48" stroke-width="2.5"/>
+  <polygon points="614,416 626,416 620,428" fill="#E11D48"/>
+  <text x="636" y="408" font-size="13" fill="#f87171">loopback only — never exposed</text>
+
+  <!-- API -->
+  <rect x="310" y="432" width="620" height="158" rx="14" fill="#0b3530" stroke="#0D9F8A" stroke-width="2"/>
+  <text x="620" y="462" text-anchor="middle" font-size="18" font-weight="700" fill="#ffffff">FastAPI · uvicorn 127.0.0.1:8001</text>
+  <text x="340" y="490" font-size="13" fill="#cbd5e1">• JWT auth + roles · audit log · login lockout · CORS same-origin by default</text>
+  <text x="340" y="512" font-size="13" fill="#cbd5e1">• MR desk · Purchase Approval with digital signatures printed on the PDF</text>
+  <text x="340" y="534" font-size="13" fill="#cbd5e1">• Reports — daily/weekly briefings + 10 kinds × PDF/XLSX/CSV, with charts</text>
+  <text x="340" y="556" font-size="13" fill="#cbd5e1">• Notifications: on-screen pop-ups + emails via Gmail / Resend / SMTP</text>
+  <text x="340" y="578" font-size="12" fill="#93b0bd">backend binds WOMS_HOST=127.0.0.1 WOMS_PORT=8001 (backend/run.py)</text>
+
+  <!-- connector to stores -->
+  <line x1="620" y1="590" x2="620" y2="610" stroke="#64748b" stroke-width="2"/>
+  <line x1="203" y1="610" x2="1037" y2="610" stroke="#64748b" stroke-width="2"/>
+  <line x1="203" y1="610" x2="203" y2="630" stroke="#64748b" stroke-width="2"/>
+  <polygon points="197,628 209,628 203,640" fill="#64748b"/>
+  <line x1="481" y1="610" x2="481" y2="630" stroke="#64748b" stroke-width="2"/>
+  <polygon points="475,628 487,628 481,640" fill="#64748b"/>
+  <line x1="759" y1="610" x2="759" y2="630" stroke="#64748b" stroke-width="2"/>
+  <polygon points="753,628 765,628 759,640" fill="#64748b"/>
+  <line x1="1037" y1="610" x2="1037" y2="630" stroke="#64748b" stroke-width="2"/>
+  <polygon points="1031,628 1043,628 1037,640" fill="#64748b"/>
+
+  <!-- stores row -->
+  <rect x="72" y="644" width="262" height="92" rx="12" fill="#1e293b" stroke="#64748b" stroke-width="1.5"/>
+  <text x="203" y="674" text-anchor="middle" font-size="15" font-weight="700" fill="#e8f4f8">SQLite · data/woms.db</text>
+  <text x="203" y="696" text-anchor="middle" font-size="12.5" fill="#94a3b8">the live history — MRs, users,</text>
+  <text x="203" y="714" text-anchor="middle" font-size="12.5" fill="#94a3b8">approvals, chat, audit</text>
+
+  <rect x="350" y="644" width="262" height="92" rx="12" fill="#1e293b" stroke="#64748b" stroke-width="1.5"/>
+  <text x="481" y="674" text-anchor="middle" font-size="15" font-weight="700" fill="#e8f4f8">file.xlsx</text>
+  <text x="481" y="696" text-anchor="middle" font-size="12.5" fill="#94a3b8">Excel replica — midnight dump</text>
+  <text x="481" y="714" text-anchor="middle" font-size="12.5" fill="#94a3b8">+ Backup now · mounted, never baked in</text>
+
+  <rect x="628" y="644" width="262" height="92" rx="12" fill="#1e293b" stroke="#64748b" stroke-width="1.5"/>
+  <text x="759" y="674" text-anchor="middle" font-size="15" font-weight="700" fill="#e8f4f8">backups/</text>
+  <text x="759" y="696" text-anchor="middle" font-size="12.5" fill="#94a3b8">paired .xlsx + .db snapshots</text>
+  <text x="759" y="714" text-anchor="middle" font-size="12.5" fill="#94a3b8">auto-archived · restore rolls both</text>
+
+  <rect x="906" y="644" width="262" height="92" rx="12" fill="#1e293b" stroke="#64748b" stroke-width="1.5"/>
+  <text x="1037" y="674" text-anchor="middle" font-size="15" font-weight="700" fill="#e8f4f8">data/</text>
+  <text x="1037" y="696" text-anchor="middle" font-size="12.5" fill="#94a3b8">attachments, config, JWT secret,</text>
+  <text x="1037" y="714" text-anchor="middle" font-size="12.5" fill="#94a3b8">nginx + backend logs</text>
+
+  <!-- dev + docker strips -->
+  <rect x="72" y="768" width="548" height="96" rx="12" fill="#111c2e" stroke="#334155" stroke-width="1.5"/>
+  <text x="346" y="796" text-anchor="middle" font-size="15" font-weight="700" fill="#5eead4">Development — run.bat / run.sh</text>
+  <text x="346" y="820" text-anchor="middle" font-size="12.5" fill="#94a3b8">Vite :5173 is the entry and proxies /api to the API on 127.0.0.1:8001</text>
+  <text x="346" y="840" text-anchor="middle" font-size="12.5" fill="#94a3b8">same code, no nginx needed</text>
+
+  <rect x="636" y="768" width="532" height="96" rx="12" fill="#111c2e" stroke="#334155" stroke-width="1.5"/>
+  <text x="902" y="796" text-anchor="middle" font-size="15" font-weight="700" fill="#5eead4">Docker — docker-run.bat (one go)</text>
+  <text x="902" y="820" text-anchor="middle" font-size="12.5" fill="#94a3b8">the whole picture above inside one container · nginx is the entrypoint</text>
+  <text x="902" y="840" text-anchor="middle" font-size="12.5" fill="#94a3b8">state lives on the host: file.xlsx, data/, backups/</text>
+
+  <text x="620" y="888" text-anchor="middle" font-size="11" fill="#64748b">docs/architecture.svg · keep this in sync with deploy/README.md when the topology changes</text>
+</svg>

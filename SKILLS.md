@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-10 (ONE-GO RUNNERS UPDATED for the nginx topology: Dockerfile now = nginx (apt) + uvicorn loopback 8001 in one container (deploy/nginx-docker.conf + docker-entrypoint.sh, dist pre-gzipped at build); docker-run.bat/.ps1/.sh unchanged behavior; LOCAL DEV = uvicorn 127.0.0.1:8001 + Vite 5173 as entry (run.bat/run.ps1/run.sh/scripts/start-api.bat updated).
+Last updated: 2026-09-10 (DOCS REFRESH: docs/architecture.svg is the system diagram - referenced from README, deploy/README, training deck, PRODUCTION.md; deck + PRODUCTION/RECOVERY updated to the nginx topology, 4-step approval, Gmail; README dev-run section corrected to loopback 8001). ONE-GO RUNNERS UPDATED for the nginx topology: Dockerfile now = nginx (apt) + uvicorn loopback 8001 in one container (deploy/nginx-docker.conf + docker-entrypoint.sh, dist pre-gzipped at build); docker-run.bat/.ps1/.sh unchanged behavior; LOCAL DEV = uvicorn 127.0.0.1:8001 + Vite 5173 as entry (run.bat/run.ps1/run.sh/scripts/start-api.bat updated).
 
 ---
 

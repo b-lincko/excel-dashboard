@@ -56,11 +56,12 @@ sudo systemctl enable --now docker
 docker compose -f docker-compose.yml up --build -d
 
 # Logs
-docker logs linkco-mr --tail 200
+docker logs linkco-mr --tail 200        # nginx + entrypoint output
+# inside the container: /app/data/logs/{nginx-access,nginx-error,backend}.log (mounted at ./data/logs/)
 docker compose -f docker-compose.yml logs --tail 200
 
 # Health
-curl -fsS http://127.0.0.1:8000/api/health
+curl -fsS http://127.0.0.1:8000/api/health   # :8000 is nginx; the API itself is on loopback :8001
 
 # Stop / remove container only (does NOT delete host data/)
 docker compose -f docker-compose.yml down
@@ -72,7 +73,8 @@ If Docker itself is broken, run without it:
 ./run.sh --local
 ```
 
-API: http://127.0.0.1:8000 · UI: http://127.0.0.1:5173
+UI: http://127.0.0.1:5173 (proxies /api) · API: http://127.0.0.1:8001 (loopback)
+Production instead: `deploy/start_production.sh` → everything on http://127.0.0.1:8000 behind nginx
 
 Default logins: `admin` / `admin123` · `manager` / `manager123` · `user` / `user123`
 

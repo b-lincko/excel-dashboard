@@ -1,6 +1,6 @@
 # Work Order Management System (WOMS)
 
-A production-ready operations dashboard for **Linkco’s Material Request / IM Work Order log**.
+A production-ready operations dashboard for **Linkco’s Material Request (MR) log**.
 
 **SQLite (`data/woms.db`) is the only live work-order history.** `file.xlsx` is a midnight replica of all records (plus Backup now).
 
@@ -13,16 +13,15 @@ The application:
 5. Seeds the database from Excel on first boot (empty DB), or when an admin chooses Seed / Upload-then-seed
 6. Calculates statistics dynamically — no fake or stored KPI tables
 
-```
-React dashboard  ⇄  FastAPI  ⇄  SQLite (history)
-                         ↘ file.xlsx (replica + snapshots)
-```
+![Architecture](docs/architecture.svg)
+
+Production topology: **nginx is the only public door** — it serves the built UI and proxies `/api` to the FastAPI backend on `127.0.0.1:8001` (loopback, never exposed). In development the Vite dev server plays that entry role; in Docker the whole picture lives in one container (`docker-run.bat` / `docker-run.sh`). Details: [`deploy/README.md`](deploy/README.md).
 
 **AI / contributors:** read and update [`SKILLS.md`](SKILLS.md) whenever behavior changes. Also [`AGENTS.md`](AGENTS.md) and [`docs/EXCEL_ANALYSIS.md`](docs/EXCEL_ANALYSIS.md).
 
 **Data loss / Docker down:** [`docs/RECOVERY.md`](docs/RECOVERY.md) — find the database, restore snapshots, reset admin. Quick check: `./scripts/recover.sh`.
 
-**Train operators:** open [`docs/training/index.html`](docs/training/index.html) (arrows / space to present) — includes a "What's new" section on the approvals desk, digital signing, and email. Go-live list: [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
+**Train operators:** open [`docs/training/index.html`](docs/training/index.html) (arrows / space to present) — includes a "What's new" section on the approvals desk tabs, pop-up notifications, digital signing, and email. Go-live list: [`docs/PRODUCTION.md`](docs/PRODUCTION.md). System picture: [`docs/architecture.svg`](docs/architecture.svg).
 
 ## Quick start
 
@@ -94,12 +93,12 @@ npm install
 
 ### 4. Run
 
-Terminal A — API (binds `0.0.0.0:8000`):
+Terminal A — API (loopback `127.0.0.1:8001` — the dev UI proxies `/api` to it):
 
 ```bash
 cd backend
 source .venv/bin/activate
-python run.py
+python run.py          # honors WOMS_HOST / WOMS_PORT, defaults 127.0.0.1:8001
 ```
 
 Terminal B — UI (binds `0.0.0.0:5173`, proxies `/api` to the backend):
@@ -129,8 +128,8 @@ Open the UI, then sign in:
 - **Department, technician, priority** performance tables
 - **Work order table** — search, sort, filter, pagination, column visibility, CSV export, inline drill-down
 - **Edit** — Save writes SQLite only. Close order sets CLOSED (remark required). Excel is updated at midnight.
-- **PO approvals with follow-up** — assign → managers sign (or return) → route → Accounts. **Follow up** pings whoever holds the ball (inbox + email) with a cooldown
-- **Email notifications** — preset for the **Resend API** (SMTP optional): verification, password resets, PO requests, follow-ups, assign-to pings, @mentions. No verified domain yet? Resend testing mode is handled automatically — mail lands in the account owner's inbox labelled `[TEST → recipient]` until you verify a domain at resend.com/domains
+- **Purchase approval with digital signatures** — assign → managers sign (or return with changes) → signed slip back to the sender, **done** (signed = locked; pass to a colleague if needed; the extra Accounts step is off by default, admin toggle in Settings). Personal tabs: **To sign / Sent to sign / Received signed**, plus on-screen **pop-up notifications** and **Remind with your own message** (cooldown). The drawn signature prints on the PDF
+- **Email notifications** — **Gmail** (App password), **Resend** or custom SMTP: verification, password resets, PO signature requests, follow-ups, assign-to pings, @mentions. No verified domain yet? Resend testing mode is handled automatically — mail lands in the account owner's inbox labelled `[TEST → recipient]` until you verify a domain at resend.com/domains
 - **Audit log** — user, time, work order, field, old/new value (SQLite)
 - **Backups** — midnight and Backup now dump DB → Excel then snapshot the pair under `backups/YYYY-MM-DD/`. Pairs older than 30 days move to `backups/archive/YYYY-MM/`; archives older than 6 months are deleted. Restore of a pair rolls both back; Excel-only copies do not overwrite live history
 - **Conflict detection** — if Excel changed since you loaded the record, you get a warning instead of a silent overwrite

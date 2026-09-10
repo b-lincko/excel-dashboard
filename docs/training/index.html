@@ -149,9 +149,10 @@
         <div class="card">
           <h3 class="ok">Ready for the team</h3>
           <ul>
+            <li>nginx in front, API loopback-only, login rate-limit</li>
             <li>DB-first saves, Excel replica, conflict 409</li>
             <li>Paired backups on Backup now + the night schedule</li>
-            <li>Roles, audit, JWT, login lockout</li>
+            <li>Roles, audit, JWT, lockout · on-screen pop-ups</li>
             <li>Tour + Guide + recovery commands</li>
           </ul>
         </div>
@@ -169,18 +170,22 @@
 
     <section class="slide">
       <p class="kicker">Architecture</p>
-      <h2>How the pieces sit</h2>
+      <h2>nginx is the only public door</h2>
       <div class="arch">
-        <div class="node">People in the browser<small>React dashboard · search, queue, MR form</small></div>
-        <div class="arrow">↓ HTTPS / same host</div>
-        <div class="node live">FastAPI<small>Auth · rules · reports · /api</small></div>
+        <div class="node">People in the browser<small>React dashboard · pop-up notifications · tours</small></div>
+        <div class="arrow">↓ HTTP(S) · port 8000</div>
+        <div class="node live">nginx — public entry<small>Serves the UI · proxies /api · rate-limits login · TLS here</small></div>
+        <div class="arrow">↓ loopback only — never exposed</div>
+        <div class="node live">FastAPI · 127.0.0.1:8001<small>Auth · rules · signatures · reports · email</small></div>
         <div class="arrow">↓</div>
-        <div class="row three" style="width:100%; max-width:980px">
+        <div class="row" style="width:100%; max-width:1080px; grid-template-columns:repeat(4,1fr)">
           <div class="node live">SQLite<small>data/woms.db · live history</small></div>
-          <div class="node excel">file.xlsx<small>Replica after each save</small></div>
-          <div class="node">backups/<small>.xlsx + .db pair every time</small></div>
+          <div class="node excel">file.xlsx<small>Replica · mounted, never baked in</small></div>
+          <div class="node">backups/<small>.xlsx + .db pairs</small></div>
+          <div class="node">data/<small>attachments · config · logs</small></div>
         </div>
       </div>
+      <p style="margin-top:18px; font-size:16px">Full picture: <strong>docs/architecture.svg</strong>. Run it: <strong>docker-run.bat</strong> (one go) or <strong>deploy/start_production.sh</strong>. Dev mode: run.bat — the dev UI proxies /api to the API.</p>
     </section>
 
     <section class="slide">
@@ -362,14 +367,14 @@
 
     <section class="slide">
       <p class="kicker">What's new · September 2026</p>
-      <h2>Four things changed</h2>
+      <h2>What changed for you</h2>
       <div class="row four">
-        <div class="card"><h3 class="ok">Purchase Approval desk</h3><p>A dedicated screen — <strong>/approvals</strong> — for the whole signature flow: assign, send to managers, sign, route, Accounts.</p></div>
-        <div class="card"><h3 class="ok">Digital signatures</h3><p>Managers draw a signature once per slip. It prints on the PDF at <strong>corporate size</strong> (~80×28&nbsp;mm). Signing locks the slip.</p></div>
-        <div class="card"><h3 class="ok">Manager signing tour</h3><p>An in-app tour walks managers through signing, step by step. Button: <strong>How signing works</strong> on the approvals desk.</p></div>
-        <div class="card"><h3 class="ok">Email + follow-ups</h3><p>Preset for the <strong>Resend API</strong>. Verification, resets, PO requests, <strong>follow-up nudges</strong> and @mentions reach verified addresses. The inbox works without mail too.</p></div>
+        <div class="card"><h3 class="ok">Your own tabs</h3><p>The approvals desk opens on <strong>To sign</strong> (managers), <strong>Sent to sign</strong> or <strong>Received signed</strong> — no more 800-row board. Dispatch still gets the full desk.</p></div>
+        <div class="card"><h3 class="ok">Pop-up notifications</h3><p>A slip landing in your queue <strong>pops on screen</strong> — review &amp; sign straight from the card. <strong>Remind</strong> re-pings the manager with your own message.</p></div>
+        <div class="card"><h3 class="ok">Signature on the PDF</h3><p>The drawn signature prints on the PDF at <strong>corporate size</strong> (~80×28&nbsp;mm). Signing locks the slip — window closes with a <strong>Signed &amp; locked</strong> stamp.</p></div>
+        <div class="card"><h3 class="ok">Email + production nginx</h3><p>Mail via <strong>Gmail</strong> (app password), Resend or SMTP. And the app now runs behind <strong>nginx</strong> — one port, rate-limited, TLS-ready.</p></div>
       </div>
-      <p style="margin-top:22px">Also new: an animated sign-in screen, an animated signature pad with a self-drawing hint, and a <strong>Signed &amp; locked</strong> stamp the moment a manager signs.</p>
+      <p style="margin-top:22px">Also new: every report downloads again (10 kinds × PDF/Excel/CSV, charts included), accounts step is now optional (off), and “IM WO” is simply <strong>MR</strong> everywhere.</p>
     </section>
 
     <section class="slide">
@@ -379,14 +384,13 @@
         <div class="step"><b>1 · Dispatch</b><span>Pick 1–3 managers<br>and a technician</span></div><div class="chev">→</div>
         <div class="step"><b>2 · Technician</b><span>Updates suppliers,<br>sends the PDF</span></div><div class="chev">→</div>
         <div class="step"><b>3 · Manager</b><span>Signs — or returns<br>with written changes</span></div><div class="chev">→</div>
-        <div class="step"><b>4 · Route</b><span>Signed slip goes back<br>to sender — or anyone</span></div><div class="chev">→</div>
-        <div class="step"><b>5 · Accounts</b><span>Holder or dispatch<br>files it</span></div>
+        <div class="step"><b>4 · Signed</b><span>Slip goes back to the<br>sender — done &amp; locked</span></div>
       </div>
       <ul style="margin-top:22px">
         <li>Open it from <strong>Daily → Purchase Approval</strong>, or press <kbd>g</kbd> then <kbd>p</kbd>.</li>
-        <li><strong>Unassign</strong> hands the slip back if the wrong technician has it.</li>
+        <li>Signed = <strong>complete</strong>. The holder can still pass the slip to a colleague; the old Accounts step is now <strong>off by default</strong> — an admin can switch it on in Settings.</li>
         <li>Approve <strong>locks</strong> suppliers, items and prices — changes need a fresh slip.</li>
-        <li><strong class="ok">New: Follow up</strong> — waiting too long? Nudge whoever holds the ball (managers, technician or holder) with one click: an inbox ping plus an email.</li>
+        <li><strong>Remind</strong> — waiting too long? Ping the manager from “Sent to sign” with your own message: pop-up + email, cooldown-protected.</li>
       </ul>
     </section>
 
@@ -405,9 +409,9 @@
         <div class="card">
           <h3>Then decide</h3>
           <ul>
-            <li><strong class="ok">Sign &amp; send</strong> — locks prices and suppliers, hands the slip to the person you picked.</li>
+            <li><strong class="ok">Sign &amp; send</strong> — locks prices and suppliers, hands the slip to the person you picked, and the window closes with a <strong>Signed &amp; locked</strong> stamp.</li>
             <li><strong class="warn">Return with changes</strong> — write what to fix; the technician resends it to you.</li>
-            <li>Wrong technician? <strong>Unassign</strong>. Waiting too long? <strong>Follow up</strong>. Learn it once: the <strong>How signing works</strong> tour.</li>
+            <li>You get a <strong>pop-up</strong> the moment a slip lands in your <strong>To sign</strong> tab. Waiting on someone else? <strong>Remind</strong> with your own message.</li>
           </ul>
         </div>
       </div>
@@ -415,11 +419,11 @@
 
     <section class="slide">
       <p class="kicker">What's new · email</p>
-      <h2>Set up for Resend — turn the key</h2>
+      <h2>Set up mail — Gmail, Resend or SMTP</h2>
       <div class="row three">
-        <div class="card"><h3>Preset: Resend API</h3><p>Settings → Email already points at <strong>Resend</strong>. Paste your <code>re_…</code> API key and send a test — it works immediately, even without a domain (test mail lands in the account owner's inbox, labelled with the intended recipient). Add a verified domain later to deliver to everyone.</p></div>
-        <div class="card"><h3>Accounts get real mail</h3><p>Verification, password reset, PO signature requests, <strong>follow-up nudges</strong>, Accounts hand-offs, assign-to pings and @mentions — to verified addresses only.</p></div>
-        <div class="card"><h3>Nothing depends on it</h3><p>No key yet? Everything still works — the in-app inbox carries every ping. SMTP stays available; mail can be switched off.</p></div>
+        <div class="card"><h3>Gmail (new)</h3><p>Settings → Email → Provider <strong>Gmail</strong>. Enter the Gmail address + a <strong>16-letter Google App password</strong> (myaccount.google.com → Security → 2-Step Verification → App passwords). Save, send a test — done.</p></div>
+        <div class="card"><h3>Resend (preset)</h3><p>Paste your <code>re_…</code> API key and send a test — works even without a domain (test mail lands in the account owner's inbox, labelled with the intended recipient). Add a verified domain to deliver to everyone.</p></div>
+        <div class="card"><h3>What gets mailed</h3><p><strong>Slip received to sign</strong> and <strong>signed slip back from the manager</strong> — plus verification, resets, assign pings and @mentions, to verified addresses. No mail configured? The in-app inbox and on-screen pop-ups carry everything.</p></div>
       </div>
     </section>
 
@@ -441,7 +445,7 @@
       <ol>
         <li>Change default passwords. Create named users.</li>
         <li>Turn the backup schedule on. Copy <code>backups/</code> off-box.</li>
-        <li>HTTPS if it is not only on the office LAN.</li>
+        <li>Run it the production way: <strong>docker-run.bat</strong>, or <code>deploy/start_production.sh</code> — nginx on one port. Add a TLS cert at nginx if it leaves the office LAN.</li>
         <li>Walk Guide → Start tour once per person.</li>
         <li>Practice one Backup now + Download on a test copy.</li>
       </ol>
@@ -457,7 +461,7 @@
         </div>
         <div class="card">
           <h3>Managers</h3>
-          <p>Approvals desk → <strong>How signing works</strong> tour → open a Waiting-for-signature slip → draw a signature → Sign &amp; send to the sender.</p>
+          <p>Approvals desk → your <strong>To sign</strong> tab → <strong>How signing works</strong> tour → open a slip → draw a signature → Sign &amp; send. Watch the stamp, then find the slip under <strong>Received signed</strong>.</p>
         </div>
         <div class="card">
           <h3>Admins</h3>

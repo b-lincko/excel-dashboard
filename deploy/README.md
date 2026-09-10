@@ -7,6 +7,10 @@ browser ──> nginx :8000 ──┬── frontend/dist (static, pre-compresse
                           └── /api/* ──> uvicorn 127.0.0.1:8001 (loopback only)
 ```
 
+Full system picture (storage, dev mode, Docker): [`docs/architecture.svg`](../docs/architecture.svg).
+
+**Docker:** `docker-run.bat` (Windows) or `docker-run.sh` builds ONE container with this exact topology inside — nginx installed from Debian packages is the entrypoint process (`deploy/nginx-docker.conf`, `deploy/docker-entrypoint.sh`), the frontend is built and pre-gzipped at image build, and `file.xlsx` / `data/` / `backups/` are host mounts (stateless image). Logs land in `data/logs/` on the host.
+
 The backend never binds a public interface; nginx is the only entry point.
 
 ## One-command start
