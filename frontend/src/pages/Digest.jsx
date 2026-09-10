@@ -93,6 +93,7 @@ export default function Digest() {
                           <th>Due</th>
                           <th>Status</th>
                           <th>Assigned</th>
+                          <th>Justification</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -105,6 +106,9 @@ export default function Digest() {
                               <StatusBadge value={r.status} />
                             </td>
                             <td>{r.assigned_to || person.name}</td>
+                            <td className="max-w-[200px] truncate" title={r.delay_justification || r.delay_reason || r.issue || ""}>
+                              {r.delay_justification || r.delay_reason || r.issue || "—"}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

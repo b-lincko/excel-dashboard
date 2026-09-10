@@ -152,10 +152,11 @@ class AppConfig(BaseModel):
     delay_open_statuses: list[str] = Field(default_factory=lambda: ["OPEN"])
     delay_pending_statuses: list[str] = Field(default_factory=lambda: ["PENDING"])
     delay_excluded_statuses: list[str] = Field(
+        # PLACED is deliberately NOT excluded (2026-09-10): placed orders with
+        # a missed ETA or delay notes belong in the delay session.
         default_factory=lambda: [
             "CLOSED",
             "CLOSE",
-            "PLACED",
             "ESTIMATION PRICE",
             "DELIVERED MATERIAL INSPECTION",
         ]

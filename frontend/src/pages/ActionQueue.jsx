@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Ban, Bell, CalendarClock, ClipboardList, PauseCircle, Printer, Truck } from "lucide-react";
+import { AlertTriangle, Ban, Bell, CalendarClock, ClipboardList, PauseCircle, Printer, Truck, X } from "lucide-react";
 import { api, qs } from "../lib/api.js";
 import { useApiData, useOptionsCache } from "../lib/apiCache.js";
 import { goSearch, useLiveReload } from "../lib/live.js";
@@ -130,6 +131,75 @@ export default function ActionQueue() {
     [filters, tick]
   );
 
+  // Print briefing: pick a date range, get the morning-digest PDF for it.
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [printFrom, setPrintFrom] = useState("");
+  const [printTo, setPrintTo] = useState("");
+  const [printBusy, setPrintBusy] = useState(false);
+  const [printErr, setPrintErr] = useState("");
+
+  function openPrint() {
+    const now = new Date();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+    setPrintFrom(iso(monday));
+    setPrintTo(iso(now));
+    setPrintErr("");
+    setPrintOpen(true);
+  }
+
+  function preset(days) {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(to.getDate() - days);
+    setPrintFrom(iso(from));
+    setPrintTo(iso(to));
+  }
+
+  async function runPrint() {
+    if (!printFrom || !printTo) {
+      setPrintErr("Pick both dates.");
+      return;
+    }
+    if (printFrom > printTo) {
+      setPrintErr("“From” must be on or before “To”.");
+      return;
+    }
+    setPrintBusy(true);
+    setPrintErr("");
+    try {
+      const blob = await api.blob(`/api/ops/digest?date_from=${printFrom}&date_to=${printTo}&fmt=pdf`);
+      const url = URL.createObjectURL(blob);
+      const frame = document.createElement("iframe");
+      frame.style.position = "fixed";
+      frame.style.right = "0";
+      frame.style.bottom = "0";
+      frame.style.width = "0";
+      frame.style.height = "0";
+      frame.style.border = "0";
+      frame.src = url;
+      frame.onload = () => {
+        try {
+          frame.contentWindow?.focus();
+          frame.contentWindow?.print();
+        } catch {
+          window.open(url, "_blank"); // print blocked — open the PDF instead
+        }
+        window.setTimeout(() => {
+          URL.revokeObjectURL(url);
+          frame.remove();
+        }, 60000);
+      };
+      document.body.appendChild(frame);
+      setPrintOpen(false);
+    } catch (e) {
+      setPrintErr(e.detail || e.message || "Could not build the briefing PDF.");
+    } finally {
+      setPrintBusy(false);
+    }
+  }
+
   async function markSeen(row) {
     const rid = row.record_id || row.work_order_id;
     if (!rid) return;
@@ -205,7 +275,7 @@ export default function ActionQueue() {
             {loading ? " · updating…" : ""}
           </p>
         </div>
-        <button className="btn-primary no-print" onClick={() => window.print()}>
+        <button className="btn-primary no-print" onClick={openPrint}>
           <Printer size={14} /> Print briefing
         </button>
       </div>
@@ -242,6 +312,47 @@ export default function ActionQueue() {
           viewAll={() => go({ flag: s.flag })}
         />
       ))}
-    </div>
+    
+      {printOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[120] grid place-items-center p-4 bg-slate-900/55 backdrop-blur-[2px] no-print" onMouseDown={(e) => { if (e.target === e.currentTarget && !printBusy) setPrintOpen(false); }}>
+            <div role="dialog" aria-modal="true" aria-label="Print briefing" className="w-full max-w-md rounded-2xl bg-white dark:bg-ink-900 border border-slate-200 dark:border-white/10 shadow-2xl p-5 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs uppercase tracking-wider text-slate-400">Print briefing</div>
+                  <div className="text-lg font-bold leading-tight">Pick the period</div>
+                  <div className="text-xs text-slate-500">Overdue, UNDER NTP and due-soon for the range — grouped by site and person, ready to print.</div>
+                </div>
+                <button type="button" className="btn-ghost !px-2" onClick={() => setPrintOpen(false)} disabled={printBusy} aria-label="Close">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="lbl">From</label>
+                  <input type="date" value={printFrom} onChange={(e) => setPrintFrom(e.target.value)} autoFocus />
+                </div>
+                <div>
+                  <label className="lbl">To</label>
+                  <input type="date" value={printTo} onChange={(e) => setPrintTo(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <button type="button" className="btn-outline !py-1 !px-2.5" onClick={() => preset(0)}>Today</button>
+                <button type="button" className="btn-outline !py-1 !px-2.5" onClick={() => preset(6)}>Last 7 days</button>
+                <button type="button" className="btn-outline !py-1 !px-2.5" onClick={() => preset(29)}>Last 30 days</button>
+              </div>
+              {printErr && <div className="rounded-lg bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">{printErr}</div>}
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" className="btn-outline" disabled={printBusy} onClick={() => setPrintOpen(false)}>Cancel</button>
+                <button type="button" className="btn-go" disabled={printBusy} onClick={runPrint}>
+                  <Printer size={14} /> {printBusy ? "Preparing…" : "Print PDF"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+</div>
   );
 }

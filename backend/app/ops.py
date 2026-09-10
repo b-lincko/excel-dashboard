@@ -188,7 +188,7 @@ def _attach_seen(queues: dict[str, list[dict[str, Any]]]) -> None:
 
 def handover_snapshot(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     cfg = load_config()
-    records = _filtered(excel_service.get_all(), filters or {})
+    records = _overlay_delay(_filtered(excel_service.get_all(), filters or {}))
     still_open = _sort_date([r for r in records if is_status_open(r, cfg)], "created_date", False)
     waiting_ntp = _sort_date([r for r in records if is_ntp(r) and is_open(r, cfg)], "created_date", False)
     waiting_supplier = _sort_date([r for r in records if is_waiting_supplier(r, cfg)], "created_date", False)
@@ -393,7 +393,7 @@ def ops_counts(records: list[dict[str, Any]]) -> dict[str, int]:
 def alerts_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """MRs due today through due_soon_days, grouped by site then assignee."""
     cfg = load_config()
-    records = _filtered(excel_service.get_all(), filters or {})
+    records = _overlay_delay(_filtered(excel_service.get_all(), filters or {}))
     t = today()
     try:
         window = int(getattr(cfg, "due_soon_days", 3) or 3)
@@ -450,7 +450,7 @@ def _group_site_assignee(rows: list[dict[str, Any]], cfg) -> list[dict[str, Any]
 def digest_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Morning digest: overdue + NTP + due-soon, grouped site then assignee. Live Excel numbers."""
     cfg = load_config()
-    records = _filtered(excel_service.get_all(), filters or {})
+    records = _overlay_delay(_filtered(excel_service.get_all(), filters or {}))
     buckets = {
         "overdue": _sort_date([r for r in records if is_overdue(r, cfg)], "due_date", False),
         "ntp": _sort_date([r for r in records if is_ntp(r) and is_open(r, cfg)], "created_date", False),

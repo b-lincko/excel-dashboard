@@ -327,22 +327,40 @@ def _delay_excluded(rec: dict[str, Any], cfg: AppConfig) -> bool:
     st = _norm(rec.get("status"))
     excluded = status_set(
         list(cfg.closed_statuses or [])
-        + list(getattr(cfg, "placed_statuses", None) or ["PLACED"])
         + list(getattr(cfg, "cancelled_statuses", None) or [])
         + list(getattr(cfg, "delay_excluded_statuses", None) or [])
     )
-    excluded.update({"close", "closed", "placed", "estimation price", "delivered material inspection"})
+    # PLACED is NOT blanket-excluded any more (2026-09-10): a placed order with
+    # a missed ETA or explicit delay notes belongs in the delay session.
+    excluded.update({"close", "closed", "estimation price", "delivered material inspection"})
     return st in excluded
 
 
+_DELAY_PLACEHOLDERS = {"pending", "na", "n/a", "none", "-"}
+
+
+def _note_is_real(value: Any) -> bool:
+    """True unless empty or a workflow placeholder (the source log stamps
+    `delay_reason='Pending'` on every PLACED row — that is not a delay note)."""
+    v = str(value or "").strip().lower()
+    return bool(v) and v not in _DELAY_PLACEHOLDERS
+
+
+def _has_delay_notes(rec: dict[str, Any]) -> bool:
+    return any(_note_is_real(rec.get(f)) for f in ("delay_kind", "delay_source", "delay_justification", "issue", "delay_reason"))
+
+
 def is_delayed(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optional[date] = None) -> bool:
-    """Delay = OPEN past due date, or PENDING. Closed / placed / estimation / inspection are never delay."""
+    """Delay = OPEN past due date, PENDING, or (since 2026-09-10) a PLACED order
+    whose ETA/due has passed or that carries explicit delay notes. Closed /
+    cancelled / estimation / inspection are never delay."""
     cfg = cfg or load_config()
     if _delay_excluded(rec, cfg):
         return False
     st = _norm(rec.get("status"))
     pending = status_set(getattr(cfg, "delay_pending_statuses", None) or ["PENDING"])
     open_vals = status_set(getattr(cfg, "delay_open_statuses", None) or getattr(cfg, "status_open_values", None) or ["OPEN"])
+    placed_vals = status_set(getattr(cfg, "placed_statuses", None) or ["PLACED"])
     due = to_date(rec.get("due_date"))
     if st in pending:
         return True
@@ -350,6 +368,11 @@ def is_delayed(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optiona
         if not due:
             return False
         return due < (on or today())
+    if st in placed_vals:
+        # placed: the ETA is an estimate, so a slipped ETA alone is "overdue",
+        # not "delayed" (pinned in tests/test_po_approval.py). A placed order
+        # enters the delay session only with an explicit delay note.
+        return _has_delay_notes(rec)
     return False
 
 

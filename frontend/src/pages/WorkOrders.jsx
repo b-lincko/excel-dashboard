@@ -14,6 +14,7 @@ const DEFAULT_COLS = [
   "department",
   "created_date",
   "description",
+  "location",
   "assigned_to",
   "priority",
   "status",

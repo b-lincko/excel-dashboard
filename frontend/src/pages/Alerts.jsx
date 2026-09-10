@@ -92,6 +92,7 @@ export default function Alerts() {
                       <th>Days left</th>
                       <th>Status</th>
                       <th>Priority</th>
+                      <th>Justification</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -106,6 +107,9 @@ export default function Alerts() {
                         </td>
                         <td>
                           <StatusBadge value={r.priority} />
+                        </td>
+                        <td className="max-w-[220px] truncate" title={r.delay_justification || r.delay_reason || r.issue || ""}>
+                          {r.delay_justification || r.delay_reason || r.issue || "—"}
                         </td>
                       </tr>
                     ))}

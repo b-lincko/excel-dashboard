@@ -15,6 +15,8 @@ import {
   ListTodo,
   LogOut,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Moon,
   RefreshCw,
   Search,
@@ -130,6 +132,22 @@ export default function Layout() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [menu, setMenu] = useState(false);
+  // Desktop sidebar can be closed to give the table the full width; remember it.
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("woms.sidebar.collapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
+  function toggleCollapsed() {
+    setCollapsed((v) => {
+      try {
+        localStorage.setItem("woms.sidebar.collapsed", v ? "0" : "1");
+      } catch {}
+      return !v;
+    });
+  }
   const [accountOpen, setAccountOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [inbox, setInbox] = useState({ items: [], unread: 0 });
@@ -504,7 +522,11 @@ export default function Layout() {
         Skip to content
       </a>
       {menu && <button className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setMenu(false)} aria-label="Close menu overlay" />}
-      <aside className="hidden lg:flex w-[250px] shrink-0 bg-white dark:bg-ink-900 text-slate-700 flex-col border-r border-slate-200 dark:border-white/5">{sidebar}</aside>
+      {!collapsed && (
+        <aside className="hidden lg:flex w-[250px] shrink-0 bg-white dark:bg-ink-900 text-slate-700 flex-col border-r border-slate-200 dark:border-white/5">
+          {sidebar}
+        </aside>
+      )}
       <aside
         className={`fixed z-40 inset-y-0 left-0 w-[250px] bg-white dark:bg-ink-900 text-slate-700 flex flex-col border-r border-slate-200 dark:border-white/5 transition-transform lg:hidden ${
           menu ? "translate-x-0" : "-translate-x-full"
@@ -516,6 +538,15 @@ export default function Layout() {
         <header className="h-16 shrink-0 bg-white/90 dark:bg-ink-800/90 backdrop-blur border-b border-slate-200 dark:border-white/5 flex items-center gap-3 px-3 sm:px-6">
           <button className="lg:hidden btn-ghost !px-2" onClick={() => setMenu(true)} aria-label="Open menu">
             <Menu size={18} />
+          </button>
+          <button
+            type="button"
+            className="hidden lg:inline-flex btn-ghost !px-2"
+            onClick={toggleCollapsed}
+            title={collapsed ? "Show sidebar" : "Close sidebar"}
+            aria-label={collapsed ? "Show sidebar" : "Close sidebar"}
+          >
+            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           </button>
           <form
             data-tour="search"
