@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Ban, Bell, Printer } from "lucide-react";
 import { api, qs } from "../lib/api.js";
+import { useApiData, useOptionsCache } from "../lib/apiCache.js";
 import { goSearch, useLiveReload } from "../lib/live.js";
 import KPICard from "../components/KPICard.jsx";
 import Filters from "../components/Filters.jsx";
@@ -12,29 +13,18 @@ export default function Digest() {
   const tick = useLiveReload();
   const [filters, setFilters] = useState({});
   const [options, setOptions] = useState({});
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { data, setData, loading } = useApiData(
+    `digest:${qs(filters)}`,
+    `/api/ops/digest${qs(filters)}`,
+    [filters, tick]
+  );
 
+  const cachedOptions = useOptionsCache();
   useEffect(() => {
-    api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
-  }, []);
+    if (cachedOptions) setOptions(cachedOptions);
+  }, [cachedOptions]);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!data) setLoading(true);
-    api
-      .get(`/api/ops/digest${qs(filters)}`)
-      .then((d) => {
-        if (!cancelled) setData(d);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filters, tick]);
+
 
   const c = data?.counts || {};
   const go = (params) => goSearch(nav, { ...filters, ...params });

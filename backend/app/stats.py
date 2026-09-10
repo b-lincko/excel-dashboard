@@ -494,30 +494,83 @@ def _mm_children_from_rows(rows: list[dict[str, Any]], filter_key: str, limit: i
 
 
 def group_by_sites(records: list[dict[str, Any]], cfg=None) -> list[dict[str, Any]]:
-    """One row per worksheet / SH5-SH1 camp, same identities as SiteSwitcher chips."""
+    """One row per worksheet / SH5-SH1 camp, same identities as SiteSwitcher chips.
+
+    Single pass: each record's site hay-stack and status flags are computed once
+    (the old per-site×per-record matching re-derived both ~21×2193 times and
+    dominated dashboard load time). Match semantics identical to
+    site_filter_match(rec, [sid])."""
     cfg = cfg or load_config()
-    rows: list[dict[str, Any]] = []
-    for item in filter_site_items(cfg):
+    items = [i for i in filter_site_items(cfg) if str(i.get("id") or "").strip()]
+    if not items or not records:
+        return []
+    from .domain import camp_site_of, find_camp_site
+
+    def _normv(v: Any) -> str:
+        return str(v or "").strip().lower()
+
+    # Per-site precomputed matchers (one pass over ~21 sites, not per record).
+    site_matchers = []
+    for item in items:
         sid = str(item.get("id") or "").strip()
-        if not sid:
+        needle = _normv(sid)
+        site_camp = find_camp_site(sid, cfg)
+        site_camp_id = str((site_camp or {}).get("id") or "")
+        site_matchers.append((item, sid, needle, site_camp_id))
+
+    counters = {
+        sid: {"total": 0, "open": 0, "closed": 0, "overdue": 0}
+        for _item, sid, _n, _c in site_matchers
+    }
+    for rec in records:
+        dept = str(rec.get("department") or rec.get("_site") or "").strip()
+        hay = {_normv(dept)} if dept else set()
+        camp = camp_site_of(rec, cfg)
+        camp_id = str((camp or {}).get("id") or "")
+        if camp:
+            hay.update(
+                {
+                    _normv(camp.get("id")),
+                    _normv(camp.get("label")),
+                    _normv(camp.get("group")),
+                    _normv(f"{camp.get('group')} {camp.get('label')}"),
+                }
+            )
+            hay.update(_normv(p) for p in (camp.get("prefixes") or []) if p)
+        rec_open = is_open(rec, cfg)
+        rec_closed = is_closed(rec, cfg)
+        rec_overdue = is_overdue(rec, cfg)
+        for item, sid, needle, site_camp_id in site_matchers:
+            hit = needle in hay or (site_camp_id and site_camp_id == camp_id)
+            if not hit and needle in {"sh5", "sh1"} and camp and _normv(camp.get("group")) == needle:
+                hit = True
+            if not hit and needle == _normv(dept):
+                hit = True
+            if hit:
+                c = counters[sid]
+                c["total"] += 1
+                if rec_open:
+                    c["open"] += 1
+                if rec_closed:
+                    c["closed"] += 1
+                if rec_overdue:
+                    c["overdue"] += 1
+    rows: list[dict[str, Any]] = []
+    for item, sid, _needle, _sc in site_matchers:
+        c = counters[sid]
+        if not c["total"]:
             continue
-        matched = [r for r in records if site_filter_match(r, [sid], cfg)]
-        if not matched:
-            continue
-        closed = [r for r in matched if is_closed(r, cfg)]
-        open_ = [r for r in matched if is_open(r, cfg)]
-        overdue = [r for r in matched if is_overdue(r, cfg)]
         rows.append(
             {
                 "id": sid,
                 "name": item.get("label") or sid,
                 "kind": item.get("kind") or "sheet",
                 "group": item.get("group") or "",
-                "total": len(matched),
-                "open": len(open_),
-                "closed": len(closed),
-                "overdue": len(overdue),
-                "completion_rate": round((len(closed) / len(matched) * 100) if matched else 0, 1),
+                "total": c["total"],
+                "open": c["open"],
+                "closed": c["closed"],
+                "overdue": c["overdue"],
+                "completion_rate": round((c["closed"] / c["total"] * 100) if c["total"] else 0, 1),
             }
         )
     return rows

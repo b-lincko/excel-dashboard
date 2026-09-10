@@ -861,6 +861,23 @@ def wo_cache_count() -> int:
         return int(row["c"] if row else 0)
 
 
+def wo_cache_version() -> str:
+    """Cheap fingerprint of the cached work-order rows (count + last change)."""
+    with connect() as conn:
+        row = conn.execute("SELECT COUNT(*) AS c, COALESCE(MAX(updated_at), '') AS m FROM wo_cache").fetchone()
+        return f"{int(row['c'] if row else 0)}:{row['m'] if row else ''}"
+
+
+def handovers_version() -> str:
+    """Cheap fingerprint of published handover notes."""
+    with connect() as conn:
+        try:
+            row = conn.execute("SELECT COUNT(*) AS c, COALESCE(MAX(created_at), '') AS m FROM handovers").fetchone()
+            return f"{int(row['c'] if row else 0)}:{row['m'] if row else ''}"
+        except Exception:
+            return "0:"
+
+
 def _payload_to_record(raw: Any) -> Optional[dict[str, Any]]:
     try:
         payload = json.loads(raw) if isinstance(raw, str) else raw

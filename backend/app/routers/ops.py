@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from .. import database, reports
 from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
 from ..ops import alerts_payload, digest_payload, handover_snapshot, queue_payload, similar_payload, supplier_payload
+from ..payload_cache import get_or_set
 from ..security import require_permission
 from ..stats import parse_query_filters
 
@@ -37,7 +38,7 @@ def action_queue(
     user=Depends(require_permission("view")),
 ):
     try:
-        return queue_payload(_filters(locals()))
+        return get_or_set(f"queue:{sorted(_filters(locals()).items())}", lambda: queue_payload(_filters(locals())))
     except ExcelUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except ExcelLocked as exc:
@@ -122,11 +123,12 @@ def handover_live(
     user=Depends(require_permission("view")),
 ):
     try:
-        live = handover_snapshot(_filters(locals()))
+        live = get_or_set(f"handover:{sorted(_filters(locals()).items())}", lambda: handover_snapshot(_filters(locals())))
     except ExcelUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except ExcelLocked as exc:
         raise HTTPException(status_code=423, detail=str(exc))
+    # list_handovers is cheap (indexed) and must reflect a just-published note
     return {"live": live, "items": database.list_handovers()}
 
 
@@ -167,7 +169,7 @@ def morning_digest(
     user=Depends(require_permission("view")),
 ):
     try:
-        payload = digest_payload(_filters(locals()))
+        payload = dict(get_or_set(f"digest:{sorted(_filters(locals()).items())}", lambda: digest_payload(_filters(locals()))))
     except ExcelUnavailable as cop:
         raise HTTPException(status_code=503, detail=str(cop))
     except ExcelLocked as cop:

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..dates import week_bounds
 from ..domain import today
 from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
+from ..payload_cache import get_or_set
 from ..security import require_permission
 from ..stats import (
     dashboard_payload,
@@ -60,11 +61,13 @@ def dashboard(
 ):
     filters = _filters(locals())
     try:
-        payload = dashboard_payload(filters)
+        # served from the cached aggregation until the data version changes
+        payload = get_or_set(f"dashboard:{sorted(filters.items())}", lambda: dashboard_payload(filters))
     except ExcelUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except ExcelLocked as exc:
         raise HTTPException(status_code=423, detail=str(exc))
+    payload = dict(payload)
     payload["sync"] = excel_service.ping()
     return payload
 
@@ -77,8 +80,8 @@ def get_kpis(
     year: Optional[str] = None,
     user=Depends(require_permission("view")),
 ):
-    recs = filtered(_records(), _filters(locals()))
-    return kpis(recs)
+    filters = _filters(locals())
+    return get_or_set(f"kpis:{sorted(filters.items())}", lambda: kpis(filtered(_records(), filters)))
 
 
 @router.get("/weekly")
@@ -87,42 +90,42 @@ def get_weekly(year: Optional[int] = None, week: Optional[int] = None, user=Depe
     iso = t.isocalendar()
     y = year or int(iso[0])
     w = week or int(iso[1])
-    return weekly(_records(), y, w)
+    return get_or_set(f"weekly:{y}:{w}", lambda: weekly(_records(), y, w))
 
 
 @router.get("/monthly")
 def get_monthly(year: Optional[int] = None, user=Depends(require_permission("view"))):
-    return monthly(_records(), year or today().year)
+    y = year or today().year
+    return get_or_set(f"monthly:{y}", lambda: monthly(_records(), y))
 
 
 @router.get("/yearly")
 def get_yearly(user=Depends(require_permission("view"))):
-    return yearly(_records())
+    return get_or_set("yearly", lambda: yearly(_records()))
 
 
 @router.get("/status")
 def get_status(user=Depends(require_permission("view"))):
-    return status_distribution(_records())
+    return get_or_set("status", lambda: status_distribution(_records()))
 
 
 @router.get("/reasons")
 def get_reasons(user=Depends(require_permission("view"))):
-    return reasons(_records())
+    return get_or_set("reasons", lambda: reasons(_records()))
 
 
 @router.get("/departments")
 def get_departments(user=Depends(require_permission("view"))):
-    return group_by(_records(), "department")
+    return get_or_set("group:department", lambda: group_by(_records(), "department"))
 
 
 @router.get("/employees")
 def get_employees(user=Depends(require_permission("view"))):
-    return group_by(_records(), "assigned_to")
+    return get_or_set("group:assigned_to", lambda: group_by(_records(), "assigned_to"))
 
 
 @router.get("/performance")
 def get_performance(user=Depends(require_permission("analytics"))):
-    recs = _records()
-    payload = employee_performance(recs)
+    payload = dict(get_or_set("performance", lambda: employee_performance(_records())))
     payload["sync"] = excel_service.ping()
     return payload

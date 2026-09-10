@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Printer } from "lucide-react";
 import { api, qs } from "../lib/api.js";
+import { useApiData, useOptionsCache } from "../lib/apiCache.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 import { useLiveReload } from "../lib/live.js";
@@ -20,22 +21,22 @@ export default function Handover() {
   const tick = useLiveReload();
   const [filters, setFilters] = useState({});
   const [options, setOptions] = useState({});
-  const [data, setData] = useState(null);
+  const { data, setData, loading } = useApiData(
+    `handover:${qs(filters)}`,
+    `/api/ops/handover${qs(filters)}`,
+    [filters, tick]
+  );
   const [notes, setNotes] = useState("");
   const [shift, setShift] = useState("");
   const [department, setDepartment] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const cachedOptions = useOptionsCache();
   useEffect(() => {
-    api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
-  }, []);
+    if (cachedOptions) setOptions(cachedOptions);
+  }, [cachedOptions]);
 
-  useEffect(() => {
-    api
-      .get(`/api/ops/handover${qs(filters)}`)
-      .then(setData)
-      .catch((e) => toast(e.message, "error"));
-  }, [filters, tick]);
+
 
   const live = data?.live || {};
   const c = live.counts || {};

@@ -123,6 +123,42 @@ def _compact_code(value: Any) -> str:
     return re.sub(r"[^A-Z0-9]+", "", str(value or "").upper())
 
 
+# Precomputed camp-site lookup state, keyed by the camp_sites CONTENT (never by
+# object identity — config objects are recreated freely). Building the alias
+# sets and the ranked prefix list once turns site grouping from minutes of CPU
+# per dashboard load into milliseconds.
+_CAMP_STATE: dict[tuple, tuple[list[dict[str, Any]], list[tuple[int, str, dict[str, Any]]]]] = {}
+
+
+def _camp_state(catalog: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[tuple[int, str, dict[str, Any]]]]:
+    key = tuple(
+        (str(c.get("id") or ""), str(c.get("label") or ""), str(c.get("group") or ""), tuple(c.get("prefixes") or []))
+        for c in catalog
+    )
+    hit = _CAMP_STATE.get(key)
+    if hit is not None:
+        return hit
+    for camp in catalog:
+        aliases = [camp["id"], camp["label"], *(camp.get("prefixes") or [])]
+        if camp.get("group"):
+            aliases.append(f"{camp['group']} {camp['label']}")
+        camp["_norm_aliases"] = {_norm(a) for a in aliases if a}
+        camp["_compact_aliases"] = {_compact_code(a) for a in aliases if a}
+        camp["_norm_group"] = _norm(camp.get("group"))
+    ranked = [
+        (len(_compact_code(prefix)), _compact_code(prefix), camp)
+        for camp in catalog
+        for prefix in (camp.get("prefixes") or [])
+        if _compact_code(prefix)
+    ]
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    state = (catalog, ranked)
+    if len(_CAMP_STATE) > 8:
+        _CAMP_STATE.clear()
+    _CAMP_STATE[key] = state
+    return state
+
+
 def camp_site_catalog(cfg: Optional[AppConfig] = None) -> list[dict[str, Any]]:
     """SH5 / SH1 camp sites. They live on the SH5-SH1 worksheet — not extra Excel tabs."""
     cfg = cfg or load_config()
@@ -147,7 +183,9 @@ def camp_site_catalog(cfg: Optional[AppConfig] = None) -> list[dict[str, Any]]:
                 "prefixes": prefixes or [label or sid],
             }
         )
-    return out
+    # Return the annotated instance for this content so every caller shares
+    # the precomputed alias sets / ranked prefixes (see _camp_state).
+    return _camp_state(out)[0]
 
 
 def find_camp_site(value: Any, cfg: Optional[AppConfig] = None) -> Optional[dict[str, Any]]:
@@ -157,12 +195,9 @@ def find_camp_site(value: Any, cfg: Optional[AppConfig] = None) -> Optional[dict
     key = _norm(text)
     compact = _compact_code(text)
     for camp in camp_site_catalog(cfg):
-        aliases = [camp["id"], camp["label"], *(camp.get("prefixes") or [])]
-        if camp.get("group"):
-            aliases.append(f"{camp['group']} {camp['label']}")
-        if key in {_norm(a) for a in aliases if a}:
+        if key in camp["_norm_aliases"]:
             return camp
-        if compact and compact in {_compact_code(a) for a in aliases if a}:
+        if compact and compact in camp["_compact_aliases"]:
             return camp
     return None
 
@@ -205,13 +240,7 @@ def infer_camp_site(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> Opt
     compact = _compact_code(rec.get("location"))
     if not compact:
         return None
-    ranked: list[tuple[int, str, dict[str, Any]]] = []
-    for camp in camp_site_catalog(cfg):
-        for prefix in camp.get("prefixes") or []:
-            code = _compact_code(prefix)
-            if code:
-                ranked.append((len(code), code, camp))
-    ranked.sort(key=lambda row: (-row[0], row[1]))
+    _catalog, ranked = _camp_state(camp_site_catalog(cfg))
     for _n, code, camp in ranked:
         if not compact.startswith(code):
             continue

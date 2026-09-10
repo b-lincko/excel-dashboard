@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Ban, Bell, CalendarClock, ClipboardList, PauseCircle, Printer, Truck } from "lucide-react";
 import { api, qs } from "../lib/api.js";
+import { useApiData, useOptionsCache } from "../lib/apiCache.js";
 import { goSearch, useLiveReload } from "../lib/live.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
@@ -123,8 +124,11 @@ export default function ActionQueue() {
   const { can } = useAuth();
   const [filters, setFilters] = useState({});
   const [options, setOptions] = useState({});
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { data, setData, loading } = useApiData(
+    `queue:${qs(filters)}`,
+    `/api/ops/queue${qs(filters)}`,
+    [filters, tick]
+  );
 
   async function markSeen(row) {
     const rid = row.record_id || row.work_order_id;
@@ -180,26 +184,12 @@ export default function ActionQueue() {
     }
   }
 
+  const cachedOptions = useOptionsCache();
   useEffect(() => {
-    api.get("/api/work-orders/options").then((d) => setOptions(d.options || {})).catch(() => {});
-  }, []);
+    if (cachedOptions) setOptions(cachedOptions);
+  }, [cachedOptions]);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!data) setLoading(true);
-    api
-      .get(`/api/ops/queue${qs(filters)}`)
-      .then((d) => {
-        if (!cancelled) setData(d);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filters, tick]);
+
 
   const c = data?.counts || {};
   const go = (params) => goSearch(nav, { ...filters, ...params });

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from functools import lru_cache
 from typing import Optional, Union
 
 DateLike = Union[str, datetime, date, None]
@@ -22,13 +23,21 @@ FORMATS = [
 
 
 def parse_date(value: DateLike) -> Optional[datetime]:
+    """Parse the workbook's date formats. String results are memoized: the
+    dashboard re-parses the same few thousand distinct date strings tens of
+    thousands of times per aggregation (this was seconds of CPU per load)."""
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
         return value.replace(tzinfo=None)
     if isinstance(value, date):
         return datetime(value.year, value.month, value.day)
-    text = str(value).strip()
+    return _parse_date_str(str(value))
+
+
+@lru_cache(maxsize=65536)
+def _parse_date_str(text: str) -> Optional[datetime]:
+    text = text.strip()
     if not text or text.upper() in {"N/A", "NA", "NONE", "-", "#N/A"}:
         return None
     # Excel serial number
