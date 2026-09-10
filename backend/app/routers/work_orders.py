@@ -940,18 +940,33 @@ def decide_po(wo_id: str, body: DecidePoBody, user=Depends(require_permission("e
     rec = _wo_or_404(wo_id)
     try:
         approval = approvals.decide(
-            rec, user, approve=bool(body.approve), comment=body.comment, signature_png=body.signature_png
+            rec,
+            user,
+            approve=bool(body.approve),
+            comment=body.comment,
+            signature_png=body.signature_png,
+            return_to=body.return_to,
         )
     except (PermissionError, ValueError) as exc:
         _raise_approval(exc)
     return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}
 
 
-@router.post("/{wo_id}/approval/send-accounts")
-def send_po_accounts(wo_id: str, user=Depends(require_permission("edit"))):
+@router.post("/{wo_id}/approval/route")
+def route_po(wo_id: str, body: RoutePoBody, user=Depends(require_permission("edit"))):
     rec = _wo_or_404(wo_id)
     try:
-        approval = approvals.send_accounts(rec, user)
+        approval = approvals.route(rec, user, body.to)
+    except (PermissionError, ValueError) as exc:
+        _raise_approval(exc)
+    return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}
+
+
+@router.post("/{wo_id}/approval/send-accounts")
+def send_po_accounts(wo_id: str, body: Optional[RoutePoBody] = None, user=Depends(require_permission("edit"))):
+    rec = _wo_or_404(wo_id)
+    try:
+        approval = approvals.send_accounts(rec, user, to=str(body.to or "") if body else "")
     except (PermissionError, ValueError) as exc:
         _raise_approval(exc)
     return {"approval": approvals.public_approval(approval), "caps": approvals.capabilities(user, rec, approval)}

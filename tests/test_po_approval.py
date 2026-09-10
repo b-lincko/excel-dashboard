@@ -239,3 +239,74 @@ def test_approval_pdf_embeds_drawn_signature():
     assert signed[:4] == b"%PDF" and unsigned[:4] == b"%PDF"
     assert b"/Subtype /Image" in signed or b"/Subtype/Image" in signed, "drawn signature missing from signed PDF"
     assert b"/Subtype /Image" not in unsigned and b"/Subtype/Image" not in unsigned
+
+
+def test_route_return_to_and_mine_views(tmp_path, monkeypatch):
+    """Regression for the desk 'Method Not Allowed': the frontend posts
+    /approval/route but the router endpoint never existed, and /approval/decide
+    dropped return_to (recipient choice ignored). Also covers the personal
+    inbox views: to_sign / sent (with ping info) / signed."""
+    db = tmp_path / "po-route.db"
+    monkeypatch.setattr(database, "DB_PATH", db)
+    database.init_db()
+    rec = {
+        "record_id": "TEST:PO-ROUTE",
+        "work_order_id": "486001",
+        "po_number": "PO-ROUTE",
+        "status": "PLACED",
+        "supplier": "AAGE",
+        "assigned_to": "",
+    }
+    database.upsert_wo_record(rec)
+    abu = database.get_user_by_username("abubacar")
+    nesar = database.get_user_by_username("nesar")
+    manager = database.get_user_by_username("manager")
+
+    # the 405 fix: the route endpoint must be registered on the work-orders router
+    from app.routers import work_orders as wo_router_module
+
+    rpaths = {getattr(r, "path", "") for r in wo_router_module.router.routes}
+    assert "/api/work-orders/{wo_id}/approval/route" in rpaths
+    assert "/api/work-orders/{wo_id}/approval/decide" in rpaths
+
+    approvals.assign(rec, abu, "Nesar")
+    rec = database.get_wo_record(rec["record_id"])
+    approvals.submit(rec, nesar)
+    rec = database.get_wo_record(rec["record_id"])
+
+    # personal views while waiting for signature
+    m_inbox = approvals.inbox(manager)
+    assert any(i["record_id"] == rec["record_id"] for i in m_inbox["mine"]["to_sign"])
+    n_inbox = approvals.inbox(nesar)
+    sent = [i for i in n_inbox["mine"]["sent"] if i["record_id"] == rec["record_id"]]
+    assert sent and sent[0]["ping"]["can"] is True
+    assert "sign" in (sent[0]["ping"]["target"] or "")
+    assert n_inbox["mine_counts"]["sent"] >= 1
+
+    # decide must honour return_to (recipient dropdown), not ignore it
+    signed = approvals.decide(
+        rec, manager, approve=True, signature_png="data:image/png;base64,aaaa", return_to="Abubacar"
+    )
+    assert signed["state"] == "approved"
+    assert signed["holder"] == "abubacar"
+    rec = database.get_wo_record(rec["record_id"])
+
+    # signed slip lands in the holder's and the signer's personal views
+    for usr in (abu, manager):
+        inx = approvals.inbox(usr)
+        assert any(i["record_id"] == rec["record_id"] for i in inx["mine"]["signed"]), usr
+
+    # passing the signed slip on: approvals.route + holder change
+    routed = approvals.route(rec, abu, "Nesar")
+    assert routed["state"] == "approved" and routed["locked"] in (1, True)
+    assert routed["holder"] == "nesar"
+    nesar_inx = approvals.inbox(nesar)
+    assert any(i["record_id"] == rec["record_id"] for i in nesar_inx["mine"]["signed"])
+
+    # a technician who does not hold the slip cannot route it
+    arun = database.get_user_by_username("arun")
+    try:
+        approvals.route(rec, arun, "Nesar")
+        raise AssertionError("route by a non-holder should fail")
+    except (PermissionError, ValueError):
+        pass

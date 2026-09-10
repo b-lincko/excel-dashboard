@@ -189,7 +189,7 @@ export default function SignWindow({
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  className="btn-primary"
+                  className="btn-go"
                   disabled={busy || !signature}
                   data-tour="sign-send"
                   onClick={() =>
@@ -201,7 +201,12 @@ export default function SignWindow({
                 >
                   <Stamp size={14} /> Sign &amp; send
                 </button>
-                <button type="button" className="btn-ghost text-sm" disabled={busy} onClick={() => setShowReturn((v) => !v)}>
+                <button
+                  type="button"
+                  className="btn-ghost text-sm text-amber-600 dark:text-amber-300"
+                  disabled={busy}
+                  onClick={() => setShowReturn((v) => !v)}
+                >
                   {showReturn ? "Hide" : "Not approved — return with changes"}
                 </button>
               </div>
@@ -223,7 +228,7 @@ export default function SignWindow({
                     />
                   </div>
                   <button
-                    className="btn-outline"
+                    className="btn-warn"
                     disabled={busy || !comment.trim()}
                     onClick={() => onDecide?.({ approve: false, comment }, { done: () => {} })}
                   >

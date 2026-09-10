@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
-import { BellRing, ChevronDown, ChevronUp, Download, FileText, PenLine, Send, Stamp } from "lucide-react";
+import { BellRing, ChevronDown, ChevronUp, Download, FileText, PenLine, Send, Stamp, X } from "lucide-react";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
@@ -18,6 +19,29 @@ const LANES = [
   { id: "accounts", label: "Sent to Accounts", hint: "Done" },
 ];
 
+// Personal tabs — everyone sees their own side of signing; the full desk
+// (LANES above) stays available to dispatchers/accounts below these.
+const MINE_TABS = [
+  {
+    id: "m:sign",
+    label: "To sign",
+    needsApprove: true,
+    hint: "Purchase slips sent to YOU for signature. Open Review & sign, read the PDF, then sign (this locks the slip) or return it with changes.",
+  },
+  {
+    id: "m:sent",
+    label: "Sent to sign",
+    needsApprove: false,
+    hint: "Slips you sent for signature (and yours waiting on you to finish). Waiting on a manager? Use Remind to nudge them with your own message.",
+  },
+  {
+    id: "m:signed",
+    label: "Received signed",
+    needsApprove: false,
+    hint: "Signed slips that involve you — ones you signed or ones sent back to you. Download the PDF, pass a slip on, or file it with Accounts.",
+  },
+];
+
 const STATE_LABEL = {
   none: "New",
   assigned: "Assigned",
@@ -25,6 +49,15 @@ const STATE_LABEL = {
   submitted: "Waiting for signature",
   approved: "Signed · locked",
   sent_to_accounts: "In Accounts",
+};
+
+const STATE_CHIP = {
+  none: "bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300",
+  assigned: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
+  changes_requested: "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300",
+  submitted: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
+  approved: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+  sent_to_accounts: "bg-brand-50 text-brand-700 dark:bg-cyan-500/15 dark:text-cyan-300",
 };
 
 const STAGES = ["Request", "Technician", "Managers", "Signed", "Accounts"];
@@ -78,6 +111,17 @@ function statusStory(a) {
   };
 }
 
+function pickDefault(d) {
+  const mc = d.mine_counts || {};
+  const caps = d.caps || {};
+  if (caps.can_approve && mc.to_sign) return "m:sign";
+  if (mc.sent) return "m:sent";
+  if (mc.signed) return "m:signed";
+  if (caps.can_approve) return "m:sign";
+  if (caps.can_dispatch || caps.can_accounts) return d.default_lane || "incoming";
+  return "m:sent";
+}
+
 export default function PoApprovals() {
   const { user } = useAuth();
   const { toast, ask } = useUi();
@@ -102,12 +146,16 @@ export default function PoApprovals() {
   const [signOpen, setSignOpen] = useState(false);
   const [signStep, setSignStep] = useState(1);
   const [pdfOpen, setPdfOpen] = useState(true);
+  const [remindRow, setRemindRow] = useState(null);
+  const [remindNote, setRemindNote] = useState("");
+  const [remindErr, setRemindErr] = useState("");
+
   function loadInbox() {
     api
       .get(`/api/po-approvals${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`)
       .then((d) => {
         setData(d);
-        setLane((prev) => prev || d.default_lane || "incoming");
+        setLane((prev) => prev || pickDefault(d));
       })
       .catch((e) => setError(e.message));
   }
@@ -124,6 +172,12 @@ export default function PoApprovals() {
 
   useEffect(() => {
     if (!data || !selected) return;
+    for (const t of MINE_TABS) {
+      if ((data.mine?.[t.id.slice(2)] || []).some((row) => row.record_id === selected)) {
+        setLane(t.id);
+        return;
+      }
+    }
     for (const l of LANES) {
       if ((data.lanes?.[l.id] || []).some((row) => row.record_id === selected)) {
         setLane(l.id);
@@ -186,7 +240,12 @@ export default function PoApprovals() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tourActive, tourStep?.id]);
 
-  const rows = useMemo(() => data?.lanes?.[lane] || [], [data, lane]);
+  const isMineTab = lane.startsWith("m:");
+  const rows = useMemo(() => {
+    if (!data) return [];
+    if (isMineTab) return data.mine?.[lane.slice(2)] || [];
+    return data.lanes?.[lane] || [];
+  }, [data, lane, isMineTab]);
 
   function openItem(id, itemLane) {
     setSelected(id);
@@ -194,7 +253,7 @@ export default function PoApprovals() {
     setParams({ id }, { replace: true });
   }
 
-  async function run(path, body, { confirm, confirmLabel } = {}) {
+  async function runFor(rid, path, body, { confirm, confirmLabel } = {}) {
     if (confirm) {
       const ok = await ask({ title: confirm, confirmLabel: confirmLabel || "Continue" });
       if (!ok) return false;
@@ -202,8 +261,8 @@ export default function PoApprovals() {
     setBusy(true);
     setError("");
     try {
-      const d = await api.post(`/api/work-orders/${encodeURIComponent(selected)}${path}`, body || {});
-      setDetail((prev) => ({ ...prev, approval: d.approval, caps: d.caps }));
+      const d = await api.post(`/api/work-orders/${encodeURIComponent(rid)}${path}`, body || {});
+      setDetail((prev) => (prev && prev.item?.record_id === rid ? { ...prev, approval: d.approval, caps: d.caps } : prev));
       toast(d.approval?.state === "approved" ? "PO signed and locked" : "PO updated", "success");
       if (path.includes("ping")) setPingNote("");
       loadInbox();
@@ -216,26 +275,42 @@ export default function PoApprovals() {
     }
   }
 
+  function run(path, body, opts = {}) {
+    return runFor(selected, path, body, opts);
+  }
+
+  // Sign / return straight from the window — no extra confirm dialog here, the
+  // window itself is the explicit step. On success the window closes and the
+  // "Signed & locked" stamp plays.
   async function decideInWindow(body) {
-    const ok = await run(
-      "/approval/decide",
-      body,
-      body.approve
-        ? {
-            confirm: "Sign and lock this purchase slip? After this, suppliers, items and prices cannot be changed.",
-            confirmLabel: "Sign & send",
-          }
-        : {}
-    );
+    const ok = await run("/approval/decide", body);
     if (ok) {
       setCelebrateNote(
-        body.return_to
-          ? `sent to ${body.return_to}`
-          : body.approve
-            ? "sent to the sender"
-            : ""
+        body.approve
+          ? body.return_to
+            ? `sent to ${body.return_to}`
+            : "sent to the sender"
+          : `returned to ${a.assignee || "the technician"}`
       );
       setSignOpen(false);
+      setCelebrate(true);
+    }
+  }
+
+  async function sendRemind() {
+    if (!remindRow) return;
+    setBusy(true);
+    setRemindErr("");
+    try {
+      await api.post(`/api/work-orders/${encodeURIComponent(remindRow.record_id)}/approval/ping`, { note: remindNote });
+      toast(`Reminder sent to ${remindRow.ping?.target || "the manager"}`, "success");
+      setRemindRow(null);
+      setRemindNote("");
+      loadInbox();
+    } catch (e) {
+      setRemindErr(typeof e.detail === "string" ? e.detail : e.message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -246,6 +321,12 @@ export default function PoApprovals() {
   const who = user?.full_name || user?.username || "";
   const story = statusStory(a);
   const stage = STAGE_OF_STATE[a.state] ?? 0;
+  const isDesk = !!(data?.caps?.can_dispatch || data?.caps?.can_accounts);
+  const tabs = [
+    ...MINE_TABS.filter((t) => !t.needsApprove || data?.caps?.can_approve),
+    ...(isDesk ? LANES.map((l) => ({ ...l, desk: true })) : []),
+  ];
+  const activeTab = tabs.find((t) => t.id === lane);
 
   const pingWaitMin = useMemo(() => {
     if (!caps.last_ping_at || !caps.ping_cooldown_minutes) return 0;
@@ -254,6 +335,15 @@ export default function PoApprovals() {
     const end = last + Number(caps.ping_cooldown_minutes) * 60000;
     return Math.max(0, Math.ceil((end - Date.now()) / 60000));
   }, [caps.last_ping_at, caps.ping_cooldown_minutes]);
+
+  const remindWaitMin = useMemo(() => {
+    const p = remindRow?.ping;
+    if (!p?.last || !p?.cooldown_min) return 0;
+    const last = new Date(String(p.last).replace(" ", "T") + "Z").getTime();
+    if (Number.isNaN(last)) return 0;
+    const end = last + Number(p.cooldown_min) * 60000;
+    return Math.max(0, Math.ceil((end - Date.now()) / 60000));
+  }, [remindRow]);
 
   function toggleManager(username) {
     setPickedManagers((prev) => {
@@ -271,7 +361,7 @@ export default function PoApprovals() {
           <h1 className="text-2xl font-bold tracking-tight">Purchase Approval</h1>
           <p className="text-sm text-slate-500 max-w-3xl">
             One slip, five steps: assign a technician, they send it to managers, a manager signs (the slip locks), then
-            it goes to Accounts. Follow the steps below — every screen shows only the action that is due next.
+            it goes to Accounts. Your tabs below show only what involves you; dispatchers also get the full desk.
           </p>
         </div>
         {!tourActive && (
@@ -318,23 +408,28 @@ export default function PoApprovals() {
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2" data-tour="appr-lanes">
-        {LANES.map((l) => {
-          const n = data?.counts?.[l.id] || 0;
+      <div className="flex flex-wrap gap-2 items-center" data-tour="appr-lanes">
+        {tabs.map((t) => {
+          const n = t.desk ? data?.counts?.[t.id] || 0 : data?.mine_counts?.[t.id.slice(2)] || 0;
+          const hot = !t.desk && n > 0 && (t.id === "m:sign" || t.id === "m:sent");
           return (
             <button
-              key={l.id}
+              key={t.id}
               type="button"
-              className={`tab-btn ${lane === l.id ? "is-on" : ""}`}
-              onClick={() => setLane(l.id)}
+              className={`tab-btn ${lane === t.id ? "is-on" : ""}`}
+              onClick={() => setLane(t.id)}
             >
-              {l.label}
-              <span className="ml-1 text-slate-400">{n}</span>
+              {t.label}
+              <span
+                className={`ml-1 ${hot ? "text-amber-600 dark:text-amber-300 font-semibold" : "text-slate-400"}`}
+              >
+                {n}
+              </span>
             </button>
           );
         })}
       </div>
-      <p className="text-xs text-slate-500">{LANES.find((l) => l.id === lane)?.hint}</p>
+      <p className="text-xs text-slate-500">{activeTab?.hint || ""}</p>
 
       <div className="grid lg:grid-cols-[minmax(280px,380px)_1fr] gap-4 items-start">
         <div className="space-y-3" data-tour="appr-list">
@@ -345,32 +440,57 @@ export default function PoApprovals() {
             aria-label="Search POs"
           />
           <div className="card overflow-hidden max-h-[70vh] overflow-y-auto">
-            {rows.map((row) => (
-              <button
-                key={row.record_id}
-                type="button"
-                className={`w-full text-left px-4 py-3 border-b border-slate-100 dark:border-white/5 ${
-                  selected === row.record_id ? "bg-sky-50/80 dark:bg-sky-500/10" : "hover:bg-slate-50 dark:hover:bg-white/5"
-                }`}
-                onClick={() => openItem(row.record_id, row.lane)}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-semibold truncate">{row.work_order_id || row.record_id}</div>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 shrink-0">
-                    {STATE_LABEL[row.approval?.state] || row.approval?.state}
-                  </span>
+            {rows.map((row) => {
+              const st = row.approval?.state || "none";
+              const waiting = st === "submitted";
+              return (
+                <div
+                  key={row.record_id}
+                  className={`w-full text-left px-4 py-3 border-b border-slate-100 dark:border-white/5 ${
+                    selected === row.record_id ? "bg-sky-50/80 dark:bg-sky-500/10" : "hover:bg-slate-50 dark:hover:bg-white/5"
+                  }`}
+                >
+                  <button type="button" className="w-full text-left" onClick={() => openItem(row.record_id)}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-semibold truncate">{row.work_order_id || row.record_id}</div>
+                      <span
+                        className={`text-[10px] uppercase tracking-wider shrink-0 rounded-full px-2 py-0.5 font-semibold ${
+                          STATE_CHIP[st] || "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {STATE_LABEL[st] || st}
+                      </span>
+                    </div>
+                    <div className="text-sm text-slate-600 dark:text-slate-300 truncate">
+                      {row.po_number ? `PO ${row.po_number}` : "No PO #"} · {row.supplier || "No supplier"}
+                    </div>
+                    <div className="text-xs text-slate-500 truncate">
+                      {row.approval?.assignee || row.assigned_to || "Unassigned"} · {row.department || "—"}
+                    </div>
+                  </button>
+                  {lane === "m:sent" && waiting && row.ping?.can && (
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        className="btn-warn !px-2.5 !py-1 text-xs"
+                        disabled={busy}
+                        title="Nudge with an on-screen ping + email"
+                        onClick={() => {
+                          setRemindRow(row);
+                          setRemindNote("");
+                          setRemindErr("");
+                        }}
+                      >
+                        <BellRing size={12} /> Remind
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <div className="text-sm text-slate-600 dark:text-slate-300 truncate">
-                  {row.po_number ? `PO ${row.po_number}` : "No PO #"} · {row.supplier || "No supplier"}
-                </div>
-                <div className="text-xs text-slate-500 truncate">
-                  {row.approval?.assignee || row.assigned_to || "Unassigned"} · {row.department || "—"}
-                </div>
-              </button>
-            ))}
+              );
+            })}
             {!rows.length && (
               <div className="px-4 py-10 text-sm text-slate-500 text-center">
-                {data ? "Nothing in this step." : "Loading POs…"}
+                {data ? "Nothing here right now." : "Loading POs…"}
               </div>
             )}
           </div>
@@ -395,7 +515,7 @@ export default function PoApprovals() {
                     {caps.can_decide && (
                       <button
                         type="button"
-                        className="btn-primary"
+                        className="btn-go"
                         onClick={() => {
                           setSignStep(1);
                           setSignOpen(true);
@@ -427,8 +547,8 @@ export default function PoApprovals() {
                     </button>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2 text-sm">
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-white/10">
+                <div className="flex flex-wrap gap-2 text-sm items-center">
+                  <span className={`rounded-full px-2 py-0.5 font-medium ${STATE_CHIP[a.state] || "bg-slate-100"}`}>
                     {STATE_LABEL[a.state] || a.state}
                   </span>
                   {a.assignee ? <span className="text-slate-500">Technician {a.assignee}</span> : null}
@@ -466,7 +586,7 @@ export default function PoApprovals() {
                         ))}
                       </select>
                       <button
-                        className="btn-primary"
+                        className="btn-go"
                         disabled={busy || !assignee}
                         onClick={() => run("/approval/assign", { assignee })}
                       >
@@ -474,7 +594,7 @@ export default function PoApprovals() {
                       </button>
                       {caps.can_unassign && (
                         <button
-                          className="btn-ghost text-sm text-slate-500"
+                          className="btn-ghost text-sm text-rose-600 dark:text-rose-300"
                           disabled={busy}
                           onClick={() =>
                             run("/approval/unassign", {}, {
@@ -492,7 +612,7 @@ export default function PoApprovals() {
                 {!caps.can_assign && caps.can_unassign && (
                   <div className="flex justify-end">
                     <button
-                      className="btn-ghost text-sm text-slate-500"
+                      className="btn-ghost text-sm text-rose-600 dark:text-rose-300"
                       disabled={busy}
                       onClick={() =>
                         run("/approval/unassign", {}, {
@@ -512,7 +632,7 @@ export default function PoApprovals() {
                       {caps.can_assign ? "2 · " : ""}Send the slip to the manager(s) who must sign
                     </div>
                     <p className="text-xs text-slate-500">
-                      Pick one, two, or three managers. They get an inbox ping (and an email when mail is on). The
+                      Pick one, two, or three managers. They get an on-screen popup (and an email when mail is on). The
                       material request should already show the right suppliers and items.
                     </p>
                     <div className="flex flex-wrap gap-2">
@@ -541,7 +661,7 @@ export default function PoApprovals() {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
-                        className="btn-primary"
+                        className="btn-go"
                         disabled={busy || !pickedManagers.length}
                         onClick={() => run("/approval/submit", { managers: pickedManagers })}
                       >
@@ -562,7 +682,7 @@ export default function PoApprovals() {
                     </p>
                     <button
                       type="button"
-                      className="btn-primary"
+                      className="btn-go"
                       onClick={() => {
                         setSignStep(1);
                         setSignOpen(true);
@@ -589,7 +709,7 @@ export default function PoApprovals() {
                         ))}
                       </select>
                       <button
-                        className="btn-outline"
+                        className="btn-go"
                         disabled={busy || !routeTo}
                         onClick={() => run("/approval/route", { to: routeTo })}
                       >
@@ -615,7 +735,7 @@ export default function PoApprovals() {
                         ))}
                       </select>
                       <button
-                        className="btn-primary"
+                        className="btn-go"
                         disabled={busy}
                         onClick={() =>
                           run(
@@ -646,7 +766,7 @@ export default function PoApprovals() {
                       </span>
                     </div>
                     <p className="text-xs text-slate-500">
-                      Nudge {caps.ping_label || "them"} — an inbox ping, plus an email when mail is on.
+                      Nudge {caps.ping_label || "them"} — an on-screen popup, plus an email when mail is on.
                     </p>
                     <div className="flex flex-wrap gap-2">
                       <input
@@ -657,7 +777,7 @@ export default function PoApprovals() {
                         placeholder="Optional note — e.g. “Please sign today, delivery is waiting”"
                       />
                       <button
-                        className="btn-outline"
+                        className="btn-warn"
                         disabled={busy || pingWaitMin > 0}
                         onClick={() => run("/approval/ping", { note: pingNote })}
                       >
@@ -758,6 +878,74 @@ export default function PoApprovals() {
           onDone={() => setCelebrate(false)}
         />
       )}
+
+      {remindRow &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[120] grid place-items-center p-3 sm:p-6 bg-slate-900/55 backdrop-blur-[2px]"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget && !busy) setRemindRow(null);
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Remind the manager"
+              className="w-full max-w-md rounded-2xl bg-white dark:bg-ink-900 border border-slate-200 dark:border-white/10 shadow-2xl p-5 space-y-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs uppercase tracking-wider text-slate-400">Ping to remind</div>
+                  <div className="text-lg font-bold leading-tight">
+                    {remindRow.po_number ? `PO ${remindRow.po_number}` : remindRow.work_order_id}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Waiting for {remindRow.ping?.target || "the manager"} to sign
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-ghost !px-2"
+                  onClick={() => setRemindRow(null)}
+                  disabled={busy}
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              {remindErr && (
+                <div className="rounded-lg bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">
+                  {remindErr}
+                </div>
+              )}
+              <div>
+                <label className="lbl">Your message (optional)</label>
+                <textarea
+                  rows={3}
+                  maxLength={200}
+                  value={remindNote}
+                  onChange={(e) => setRemindNote(e.target.value)}
+                  placeholder="e.g. Please sign today — the site cannot start without these filters."
+                  autoFocus
+                />
+                <div className="text-[11px] text-slate-400 mt-1">{remindNote.length}/200</div>
+              </div>
+              <p className="text-xs text-slate-500">
+                They get an on-screen popup, an inbox notification, and an email when mail is on.
+                {remindWaitMin > 0 ? ` Cooldown: you can send again in ~${remindWaitMin} min.` : ""}
+              </p>
+              <div className="flex justify-end gap-2">
+                <button type="button" className="btn-outline" disabled={busy} onClick={() => setRemindRow(null)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn-warn" disabled={busy || remindWaitMin > 0} onClick={sendRemind}>
+                  <BellRing size={14} /> Send reminder
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

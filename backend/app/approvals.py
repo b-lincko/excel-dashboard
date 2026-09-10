@@ -769,6 +769,9 @@ def is_mine(user: Optional[dict[str, Any]], approval: dict[str, Any]) -> bool:
         return True
     if str(approval.get("state") or "") == "submitted" and _is_selected_manager(user, approval):
         return True
+    signer = str(approval.get("signed_by") or "")
+    if signer and (_norm(signer) == _norm(user.get("username") or "") or _resolve_login(signer) == user.get("username")):
+        return True
     assignee = str(approval.get("assignee") or "")
     if not assignee:
         return False
@@ -837,6 +840,38 @@ def inbox(user: dict[str, Any], q: str = "") -> dict[str, Any]:
     packed: list[dict[str, Any]] = []
     seen: set[str] = set()
     needle = _norm(q)
+    login = _norm(str(user.get("username") or ""))
+    personal: dict[str, list[dict[str, Any]]] = {"to_sign": [], "sent": [], "signed": []}
+
+    def _bucket(appr: dict[str, Any], item: dict[str, Any]) -> None:
+        """Personal views (independent of lane visibility): slips waiting for my
+        signature, slips I sent out, and signed slips that involve me."""
+        state = str(appr.get("state") or "")
+        if state == "submitted":
+            if _is_selected_manager(user, appr):
+                personal["to_sign"].append(item)
+            sender = _norm(str(_resolve_login(appr.get("updated_by")) or appr.get("updated_by") or ""))
+            if login and sender == login:
+                personal["sent"].append(
+                    {
+                        **item,
+                        "ping": {
+                            "can": can_ping(user, appr),
+                            "last": last_ping_at(appr),
+                            "cooldown_min": ping_cooldown_minutes(),
+                            "target": ping_target_label(state),
+                        },
+                    }
+                )
+        elif state in {"assigned", "changes_requested"}:
+            tech = _norm(str(_resolve_login(appr.get("assignee")) or appr.get("assignee") or ""))
+            if login and tech == login:
+                personal["sent"].append(item)
+        elif state in {"approved", "sent_to_accounts"}:
+            holder = _norm(str(_resolve_login(appr.get("holder")) or appr.get("holder") or ""))
+            signer = _norm(str(_resolve_login(appr.get("signed_by")) or appr.get("signed_by") or ""))
+            if login and login in {x for x in (holder, signer) if x}:
+                personal["signed"].append(item)
 
     def pack(rec: dict[str, Any], appr: dict[str, Any]) -> Optional[dict[str, Any]]:
         rid = str(rec.get("record_id") or appr.get("record_id") or "")
@@ -847,14 +882,11 @@ def inbox(user: dict[str, Any], q: str = "") -> dict[str, Any]:
         if state in {"none", ""} and not po:
             return None
         lane = lane_for(state)
-        mine = is_mine(user, appr)
-        if not _visible(user, lane, mine):
-            return None
         item = _slim_rec(rec)
         item["record_id"] = rid
         item["approval"] = public_approval({**empty_approval(rec), **appr, "events": []})
         item["lane"] = lane
-        item["mine"] = mine
+        item["mine"] = is_mine(user, appr)
         if needle:
             hay = " ".join(
                 str(item.get(k) or "")
@@ -874,7 +906,9 @@ def inbox(user: dict[str, Any], q: str = "") -> dict[str, Any]:
         rec = {**rec, "record_id": rid}
         item = pack(rec, appr)
         if item:
-            packed.append(item)
+            _bucket(appr, item)
+            if _visible(user, item["lane"], item["mine"]):
+                packed.append(item)
     for rec in recs:
         rid = str(rec.get("record_id") or "")
         if not rid or rid in seen:
@@ -882,7 +916,7 @@ def inbox(user: dict[str, Any], q: str = "") -> dict[str, Any]:
         if not str(rec.get("po_number") or "").strip():
             continue
         item = pack(rec, empty_approval(rec))
-        if item:
+        if item and _visible(user, item["lane"], item["mine"]):
             packed.append(item)
 
     packed.sort(
@@ -901,6 +935,8 @@ def inbox(user: dict[str, Any], q: str = "") -> dict[str, Any]:
         "counts": counts,
         "total": len(packed),
         "default_lane": default_lane(user, counts),
+        "mine": personal,
+        "mine_counts": {key: len(val) for key, val in personal.items()},
         "technicians": technician_users(),
         "caps": {
             "can_dispatch": has_perm(user, "po_dispatch"),

@@ -75,6 +75,16 @@ textarea:focus:not(:focus-visible) {
     @apply disabled:opacity-50 disabled:pointer-events-none;
     @apply bg-rose-600 text-white hover:bg-rose-500;
   }
+  .btn-go {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition;
+    @apply disabled:opacity-50 disabled:pointer-events-none;
+    @apply bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm;
+  }
+  .btn-warn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition;
+    @apply disabled:opacity-50 disabled:pointer-events-none;
+    @apply bg-amber-500 text-slate-900 hover:bg-amber-400 shadow-sm;
+  }
 
   input,
   select,
