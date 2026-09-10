@@ -70,7 +70,7 @@ function Rows({ rows, empty, extra, onOpen }) {
       <table className="data">
         <thead>
           <tr>
-            <th>IM WO #</th>
+            <th>MR #</th>
             <th>Site</th>
             <th>Material</th>
             <th>{extra || "Due"}</th>

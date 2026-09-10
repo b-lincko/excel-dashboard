@@ -63,7 +63,7 @@ export default function SignWindow({
   const a = approval || {};
   const people = caps?.people || [];
   const rows = [
-    ["IM work order", item?.work_order_id],
+    ["MR", item?.work_order_id],
     ["PO number", item?.po_number ? `PO ${item.po_number}` : ""],
     ["Supplier", item?.supplier],
     ["Site", item?.department],

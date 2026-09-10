@@ -4,7 +4,7 @@ import StatusBadge from "./StatusBadge.jsx";
 export default function OpsTable({ title, subtitle, rows, columns, empty, onRow, viewAll, seen, onSeen, claim, onClaim }) {
   const nav = useNavigate();
   const baseCols = columns || [
-    ["work_order_id", "IM WO #"],
+    ["work_order_id", "MR #"],
     ["description", "Material"],
     ["department", "Site"],
     ["assigned_to", "Assigned"],

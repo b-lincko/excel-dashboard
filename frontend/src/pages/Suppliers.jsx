@@ -251,7 +251,7 @@ export default function Suppliers() {
             subtitle="Open, no PO number, RFQ / expected PO date empty"
             rows={data?.need_rfq || []}
             columns={[
-              ["work_order_id", "IM WO #"],
+              ["work_order_id", "MR #"],
               ["description", "Material"],
               ["assigned_to", "Assigned"],
               ["work_type", "Purchase type"],
@@ -265,7 +265,7 @@ export default function Suppliers() {
             subtitle="RFQ / expected PO date is filled, still waiting for a PO number"
             rows={data?.rfq_sent || []}
             columns={[
-              ["work_order_id", "IM WO #"],
+              ["work_order_id", "MR #"],
               ["supplier", "Supplier"],
               ["scheduled_date", "RFQ / PO date"],
               ["description", "Material"],
@@ -279,7 +279,7 @@ export default function Suppliers() {
             subtitle="PO number filled, not delivered, ETA not missed"
             rows={data?.po_issued || data?.pending_pos || []}
             columns={[
-              ["work_order_id", "IM WO #"],
+              ["work_order_id", "MR #"],
               ["supplier", "Supplier"],
               ["po_number", "PO"],
               ["description", "Material"],
@@ -295,7 +295,7 @@ export default function Suppliers() {
             subtitle="ETA / expected RFQ date is before today and not delivered"
             rows={data?.eta_late || []}
             columns={[
-              ["work_order_id", "IM WO #"],
+              ["work_order_id", "MR #"],
               ["supplier", "Supplier"],
               ["po_number", "PO"],
               ["closed_date", "ETA"],

@@ -100,11 +100,12 @@ export default function Guide() {
       <div className="card p-5 space-y-2">
         <div className="font-semibold">Purchase Approval (Daily → Purchase Approval, or g then p)</div>
         <p className="text-sm text-slate-500">
-          Dedicated desk at /approvals. It follows five steps — Request → Technician → Managers → Signed → Accounts —
-          and each screen shows only the action that is due next: assign (or Unassign), send to one to three managers,
-          then a manager opens <b>Review &amp; sign</b>: step one shows the request and the PDF, step two takes the
-          signature and the recipient. Signing locks the slip; “return with changes” sends it back to the technician to
-          fix and resend. The holder forwards the signed slip or files it with Accounts.
+          Dedicated desk at /approvals. It follows four steps — Request → Technician → Managers → Signed (an admin can
+          switch the extra Accounts step on in Settings) — and each screen shows only the action that is due next:
+          assign (or Unassign), send to one to three managers, then a manager opens <b>Review &amp; sign</b>: step one
+          shows the request and the PDF, step two takes the signature and the recipient. Signing locks the slip;
+          “return with changes” sends it back to the technician to fix and resend. When signed, the slip is complete —
+          the holder can still pass it to a colleague.
         </p>
         <p className="text-sm text-slate-500">
           Waiting too long? <b>Follow up</b> nudges whoever holds the ball — the managers who must sign, the technician,
@@ -144,7 +145,7 @@ export default function Guide() {
           <Item k="Dashboard" v="Live counts. The mind map is a 2D animated graph of those same counts — click a node, then Open list. Click a KPI to open the matching rows." />
           <Item k="Work orders" v="Every MR. Compact columns by default — add more under Columns. Bulk assign, status, remarks. Back or closing the tab asks if the MR is unsaved." />
           <Item k="Action queue" v="First item in Daily on the left. What to work now, grouped by urgency." />
-          <Item k="Purchase Approval" v="Assign, send to 1–3 managers, digital-sign on the PDF, route to sender or someone else, then Accounts." />
+          <Item k="Purchase Approval" v="Assign, send to 1–3 managers, digital-sign on the PDF, then done — route to sender or someone else if needed." />
           <Item k="Morning digest" v="Overdue / NTP / due soon by site then assignee." />
           <Item k="Suppliers / PO" v="RFQ → PO → ETA board and on-time rate." />
           <Item k="Materials" v="Who supplied an item before. Catalog tab adds and removes vendors. Aliases group spellings." />

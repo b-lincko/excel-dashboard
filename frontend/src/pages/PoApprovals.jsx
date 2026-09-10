@@ -51,6 +51,11 @@ const STATE_LABEL = {
   sent_to_accounts: "In Accounts",
 };
 
+function stateLabel(state, accountsOn) {
+  if (state === "approved" && !accountsOn) return "Signed · complete";
+  return STATE_LABEL[state] || state;
+}
+
 const STATE_CHIP = {
   none: "bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300",
   assigned: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
@@ -70,7 +75,7 @@ const STAGE_OF_STATE = {
   sent_to_accounts: 4,
 };
 
-function statusStory(a) {
+function statusStory(a, accountsOn = false) {
   const state = a.state || "none";
   if (state === "none") {
     return {
@@ -100,9 +105,15 @@ function statusStory(a) {
     };
   }
   if (state === "approved") {
+    if (accountsOn) {
+      return {
+        title: `Signed by ${a.signed_by || "a manager"} — locked`,
+        next: `${a.holder ? `${a.holder} holds the signed slip` : "The signed slip is ready"} and can forward it or send it to Accounts.`,
+      };
+    }
     return {
       title: `Signed by ${a.signed_by || "a manager"} — locked`,
-      next: `${a.holder ? `${a.holder} holds the signed slip` : "The signed slip is ready"} and can forward it or send it to Accounts.`,
+      next: "This slip is complete. You can still pass it to a colleague if someone else needs to hold it.",
     };
   }
   return {
@@ -319,12 +330,21 @@ export default function PoApprovals() {
   const item = detail?.item || {};
   const techs = caps.technicians || data?.technicians || [];
   const who = user?.full_name || user?.username || "";
-  const story = statusStory(a);
+  const accountsOn = data?.accounts_enabled === true;
+  const story = statusStory(a, accountsOn);
   const stage = STAGE_OF_STATE[a.state] ?? 0;
   const isDesk = !!(data?.caps?.can_dispatch || data?.caps?.can_accounts);
+  const deskLanes = LANES.filter((l) => accountsOn || l.id !== "accounts");
   const tabs = [
     ...MINE_TABS.filter((t) => !t.needsApprove || data?.caps?.can_approve),
-    ...(isDesk ? LANES.map((l) => ({ ...l, desk: true })) : []),
+    ...(isDesk
+      ? deskLanes.map((l) => ({
+          ...l,
+          desk: true,
+          label: !accountsOn && l.id === "ready" ? "Signed" : l.label,
+          hint: !accountsOn && l.id === "ready" ? "Signed and complete. Pass to a colleague if needed." : l.hint,
+        }))
+      : []),
   ];
   const activeTab = tabs.find((t) => t.id === lane);
 
@@ -379,7 +399,7 @@ export default function PoApprovals() {
       {/* Workflow stepper */}
       <div className="card px-4 py-3" data-tour="appr-steps">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-2 text-xs">
-          {STAGES.map((label, i) => {
+          {(accountsOn ? STAGES : STAGES.slice(0, 4)).map((label, i) => {
             const done = i < stage;
             const now = i === stage;
             return (
@@ -458,7 +478,7 @@ export default function PoApprovals() {
                           STATE_CHIP[st] || "bg-slate-100 text-slate-500"
                         }`}
                       >
-                        {STATE_LABEL[st] || st}
+                        {stateLabel(st, accountsOn)}
                       </span>
                     </div>
                     <div className="text-sm text-slate-600 dark:text-slate-300 truncate">
@@ -505,7 +525,7 @@ export default function PoApprovals() {
               <div className="card p-5 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="text-xs uppercase tracking-wider text-slate-400">IM WO {item.work_order_id}</div>
+                    <div className="text-xs uppercase tracking-wider text-slate-400">MR {item.work_order_id}</div>
                     <div className="text-lg font-semibold">PO {item.po_number || "—"}</div>
                     <div className="text-sm text-slate-500">
                       {item.supplier || "No supplier"} · {item.department || "—"} · {item.status || "—"}
@@ -549,7 +569,7 @@ export default function PoApprovals() {
                 </div>
                 <div className="flex flex-wrap gap-2 text-sm items-center">
                   <span className={`rounded-full px-2 py-0.5 font-medium ${STATE_CHIP[a.state] || "bg-slate-100"}`}>
-                    {STATE_LABEL[a.state] || a.state}
+                    {stateLabel(a.state, accountsOn)}
                   </span>
                   {a.assignee ? <span className="text-slate-500">Technician {a.assignee}</span> : null}
                   {a.holder ? <span className="text-slate-500">Holding: {a.holder}</span> : null}

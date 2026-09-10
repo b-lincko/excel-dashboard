@@ -178,7 +178,7 @@ export default function Projects() {
               </ul>
               {canEdit && (
                 <form onSubmit={linkWo} className="flex gap-2 mt-2">
-                  <input value={woId} onChange={(e) => setWoId(e.target.value)} placeholder="IM WO # or record id" />
+                  <input value={woId} onChange={(e) => setWoId(e.target.value)} placeholder="MR # or record id" />
                   <button className="btn-outline">Link</button>
                 </form>
               )}

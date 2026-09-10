@@ -23,7 +23,7 @@ const DEFAULT_COLS = [
 ];
 
 const ALL_COLS = [
-  ["work_order_id", "IM WO #"],
+  ["work_order_id", "MR #"],
   ["department", "Site"],
   ["created_date", "MR Received"],
   ["description", "Material / Description"],

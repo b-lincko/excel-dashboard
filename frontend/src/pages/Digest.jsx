@@ -98,7 +98,7 @@ export default function Digest() {
                     <table className="data">
                       <thead>
                         <tr>
-                          <th>IM WO #</th>
+                          <th>MR #</th>
                           <th>Material</th>
                           <th>Due</th>
                           <th>Status</th>

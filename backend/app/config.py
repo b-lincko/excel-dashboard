@@ -237,6 +237,10 @@ class AppConfig(BaseModel):
     # provider's rejection and store it here so delivery keeps working.
     resend_test_inbox: str = ""
     po_ping_cooldown_minutes: int = 30
+    # The Accounts step of PO approval is OFF by default ("remove accounts for
+    # now"): a signed slip is complete. Admins can re-enable it in Settings;
+    # existing sent_to_accounts data is kept and reappears when toggled on.
+    po_accounts_process: bool = False
     auto_refresh_seconds: int = 60
     id_prefix: str = "MR"
     permissions: dict[str, list[str]] = Field(

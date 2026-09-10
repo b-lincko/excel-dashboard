@@ -115,6 +115,9 @@ def test_follow_up_state_rules(tmp_path, monkeypatch):
     approvals.follow_up(rec, abu)
     assert any("you hold the signed slip" in body for body in _bodies("nesar"))
 
+    from app import approvals as _appr
+
+    monkeypatch.setattr(_appr, "accounts_enabled", lambda: True)
     approvals.send_accounts(rec, abu)
     rec = database.get_wo_record(rec["record_id"])
     try:

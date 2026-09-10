@@ -110,7 +110,7 @@ export default function Health() {
                   <tr>
                     <th>Site</th>
                     <th>Row</th>
-                    <th>IM WO #</th>
+                    <th>MR #</th>
                     <th>Detail</th>
                   </tr>
                 </thead>
@@ -295,7 +295,7 @@ export default function Health() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="lbl">IM WO #</label>
+                <label className="lbl">MR #</label>
                 <input value={rowRestore.work_order_id} onChange={(e) => setRowRestore({ ...rowRestore, work_order_id: e.target.value })} />
               </div>
               <div>

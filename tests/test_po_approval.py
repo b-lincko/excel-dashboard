@@ -85,6 +85,8 @@ def test_po_assign_submit_approve_lock(tmp_path, monkeypatch):
     assert signed["locked"] in (1, True)
     assert approvals.is_locked(rec) is True
     assert approvals.locked_fields({"po_number": "X"}, rec) == ["po_number"]
+    # accounts step is opt-in since 2026-09-10; enable it for this legacy flow
+    monkeypatch.setattr(approvals, "accounts_enabled", lambda: True)
     sent = approvals.send_accounts(rec, abu)
     assert sent["state"] == "sent_to_accounts"
     pdf = po_approval_pdf(rec, approvals.approval_for(rec))
@@ -163,6 +165,8 @@ def test_unassign_managers_and_route(tmp_path, monkeypatch):
     assert str(signed.get("holder") or "").lower() == "nesar"
     routed = approvals.route(rec, nesar, "abubacar")
     assert str(routed.get("holder") or "").lower() == "abubacar"
+    # accounts step is opt-in since 2026-09-10; enable it for this legacy flow
+    monkeypatch.setattr(approvals, "accounts_enabled", lambda: True)
     sent_acc = approvals.send_accounts(rec, abu, to="admin")
     assert sent_acc["state"] == "sent_to_accounts"
 
@@ -310,3 +314,59 @@ def test_route_return_to_and_mine_views(tmp_path, monkeypatch):
         raise AssertionError("route by a non-holder should fail")
     except (PermissionError, ValueError):
         pass
+
+
+def test_accounts_step_toggle(tmp_path, monkeypatch):
+    """Accounts step is OFF by default ('remove accounts for now'): the lane
+    disappears from the inbox, the action is blocked with guidance, and a
+    signed slip is terminal. Admins re-enable it in Settings (po_accounts_process)."""
+    import pytest
+
+    from app import config as config_mod
+
+    db = tmp_path / "po-accounts.db"
+    monkeypatch.setattr(database, "DB_PATH", db)
+    monkeypatch.setattr(config_mod, "CONFIG_PATH", tmp_path / "app_config.json")
+    config_mod.invalidate_config_cache()
+    database.init_db()
+    rec = {
+        "record_id": "TEST:PO-ACC",
+        "work_order_id": "486010",
+        "po_number": "PO-ACC",
+        "status": "PLACED",
+        "supplier": "AAGE",
+    }
+    database.upsert_wo_record(rec)
+    abu = database.get_user_by_username("abubacar")
+    manager = database.get_user_by_username("manager")
+
+    assert approvals.accounts_enabled() is False
+    approvals.assign(rec, abu, "Nesar")
+    rec = database.get_wo_record(rec["record_id"])
+    approvals.submit(rec, database.get_user_by_username("nesar"))
+    rec = database.get_wo_record(rec["record_id"])
+    approvals.decide(rec, manager, approve=True, signature_png="data:image/png;base64,aaaa", return_to="Abubacar")
+    rec = database.get_wo_record(rec["record_id"])
+
+    # off (default): no accounts lane/count, action blocked, nothing deleted
+    inx = approvals.inbox(abu)
+    assert "accounts" not in inx["lanes"] and "accounts" not in inx["counts"]
+    assert inx["accounts_enabled"] is False
+    caps = approvals.capabilities(abu, rec, approvals.approval_for(rec))
+    assert caps["can_send_accounts"] is False
+    with pytest.raises(ValueError, match="switched off"):
+        approvals.send_accounts(rec, abu)
+    # routing to a colleague still works while the step is off
+    assert approvals.route(rec, abu, "Nesar")["holder"] == "nesar"
+
+    # on: lane returns (data kept), action allowed, filing works
+    cfg = config_mod.load_config()
+    cfg.po_accounts_process = True
+    config_mod.save_config(cfg)
+    assert approvals.accounts_enabled() is True
+    sent = approvals.send_accounts(rec, abu)
+    assert sent["state"] == "sent_to_accounts"
+    inx2 = approvals.inbox(abu)
+    assert inx2["accounts_enabled"] is True
+    assert "accounts" in inx2["lanes"]
+    assert any(i["record_id"] == rec["record_id"] for i in inx2["lanes"]["accounts"])

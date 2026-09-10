@@ -509,6 +509,8 @@ def decide(
 
 
 def send_accounts(rec: dict[str, Any], actor: dict[str, Any], to: str = "") -> dict[str, Any]:
+    if not accounts_enabled():
+        raise ValueError("The Accounts step is switched off — a signed slip is already complete.")
     current = approval_for(rec)
     if current.get("state") != "approved":
         raise ValueError("Sign the purchase slip before sending it to Accounts.")
@@ -638,6 +640,17 @@ def _parse_ping_time(value: Any) -> Optional[datetime]:
         return None
 
 
+def accounts_enabled() -> bool:
+    """Admin toggle (Settings > Purchase approval): is the Accounts step on?
+    Off (default) a signed slip is complete; the lane and the send action hide."""
+    try:
+        from .config import load_config
+
+        return bool(getattr(load_config(), "po_accounts_process", False))
+    except Exception:
+        return False
+
+
 def ping_cooldown_minutes() -> int:
     try:
         return max(0, int(getattr(load_config(), "po_ping_cooldown_minutes", 30) or 0))
@@ -728,7 +741,8 @@ def capabilities(user: dict[str, Any], rec: dict[str, Any], approval: dict[str, 
         "can_submit": state in {"assigned", "changes_requested"} and (mine or has_perm(user, "po_dispatch")),
         "can_decide": _is_selected_manager(user, approval) and state == "submitted",
         "can_route": state == "approved" and (holding or has_perm(user, "po_dispatch")),
-        "can_send_accounts": state == "approved"
+        "can_send_accounts": accounts_enabled()
+        and state == "approved"
         and (holding or has_perm(user, "po_dispatch") or has_perm(user, "accounts")),
         "can_ping": can_ping(user, approval),
         "ping_label": ping_target_label(state),
@@ -824,7 +838,7 @@ def default_lane(user: dict[str, Any], counts: dict[str, int]) -> str:
         return "changes"
     if counts.get("assigned"):
         return "assigned"
-    if has_perm(user, "accounts") and counts.get("accounts"):
+    if accounts_enabled() and has_perm(user, "accounts") and counts.get("accounts"):
         return "accounts"
     if has_perm(user, "po_approve"):
         return "to_sign"
@@ -930,11 +944,18 @@ def inbox(user: dict[str, Any], q: str = "") -> dict[str, Any]:
     for item in packed:
         lanes.setdefault(item["lane"], []).append(item)
     counts = {key: len(lanes.get(key) or []) for key in LANES}
+    accounts_on = accounts_enabled()
+    if not accounts_on:
+        # The Accounts step is switched off: hide the lane entirely (data is
+        # kept, and comes back when an admin re-enables the step).
+        lanes.pop("accounts", None)
+        counts.pop("accounts", None)
     return {
         "lanes": lanes,
         "counts": counts,
         "total": len(packed),
         "default_lane": default_lane(user, counts),
+        "accounts_enabled": accounts_on,
         "mine": personal,
         "mine_counts": {key: len(val) for key, val in personal.items()},
         "technicians": technician_users(),

@@ -575,7 +575,7 @@ export default function WorkOrderDetail() {
             ← Back
           </button>
           <h1 className="text-2xl font-bold tracking-tight">
-            {isNew ? "New material request" : `IM WO ${form.work_order_id || id}`}
+            {isNew ? "New material request" : `MR ${form.work_order_id || id}`}
           </h1>
           <div className="flex items-center gap-2 mt-2 flex-wrap">
             <StatusBadge value={form.status} />

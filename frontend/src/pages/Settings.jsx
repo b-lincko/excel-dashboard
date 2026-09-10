@@ -132,6 +132,31 @@ export default function Settings() {
 
       {can("settings") && <EmailPanel cfg={cfg} setCfg={setCfg} toast={toast} onSave={save} />}
 
+      {can("settings") && (
+        <div className="card p-5 space-y-2">
+          <div className="font-semibold">Purchase approval process</div>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={cfg.po_accounts_process === true}
+              onChange={(e) => setCfg({ ...cfg, po_accounts_process: e.target.checked })}
+            />
+            <span>
+              <strong>Include the Accounts step</strong> after signing
+              <span className="block text-xs text-slate-500 mt-0.5">
+                Off (default): a signed slip is complete — the flow is Request → Technician → Managers → Signed, and
+                nothing goes to Accounts. On: the holder also gets “File it with Accounts”. Old slips sent to Accounts
+                reappear in that lane when this is switched on; nothing is deleted.
+              </span>
+            </span>
+          </label>
+          <button type="button" className="btn-primary" onClick={save}>
+            Save settings
+          </button>
+        </div>
+      )}
+
       {can("backup") && (
         <BackupPanel
           cfg={cfg}
@@ -1098,7 +1123,7 @@ function BackupPanel({ cfg, setCfg, backups, schedule, canSettings, onRestore, o
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="lbl">IM WO #</label>
+                <label className="lbl">MR #</label>
                 <input
                   value={rowRestore.work_order_id}
                   onChange={(e) => setRowRestore({ ...rowRestore, work_order_id: e.target.value })}

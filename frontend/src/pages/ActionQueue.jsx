@@ -16,7 +16,7 @@ const SECTIONS = [
     hint: "Due date has passed and STATUS is not CLOSED",
     flag: "overdue",
     cols: [
-      ["work_order_id", "IM WO #"],
+      ["work_order_id", "MR #"],
       ["description", "Material"],
       ["department", "Site"],
       ["assigned_to", "Assigned"],
@@ -32,7 +32,7 @@ const SECTIONS = [
     hint: "Waiting on NTP — follow up today",
     flag: "ntp",
     cols: [
-      ["work_order_id", "IM WO #"],
+      ["work_order_id", "MR #"],
       ["description", "Material"],
       ["assigned_to", "Assigned"],
       ["supplier", "Supplier"],
@@ -47,7 +47,7 @@ const SECTIONS = [
     hint: "Blocked until released",
     flag: "on_hold",
     cols: [
-      ["work_order_id", "IM WO #"],
+      ["work_order_id", "MR #"],
       ["description", "Material"],
       ["assigned_to", "Assigned"],
       ["status", "Status"],
@@ -61,7 +61,7 @@ const SECTIONS = [
     hint: "Open MRs whose due date is today through 3 days",
     flag: "due_soon",
     cols: [
-      ["work_order_id", "IM WO #"],
+      ["work_order_id", "MR #"],
       ["description", "Material"],
       ["department", "Site"],
       ["assigned_to", "Assigned"],
@@ -77,7 +77,7 @@ const SECTIONS = [
     hint: "Still open, due date is today or later this week",
     flag: "due_week",
     cols: [
-      ["work_order_id", "IM WO #"],
+      ["work_order_id", "MR #"],
       ["description", "Material"],
       ["assigned_to", "Assigned"],
       ["status", "Status"],
@@ -91,7 +91,7 @@ const SECTIONS = [
     hint: "MR received today",
     flag: "created_today",
     cols: [
-      ["work_order_id", "IM WO #"],
+      ["work_order_id", "MR #"],
       ["description", "Material"],
       ["department", "Site"],
       ["assigned_to", "Assigned"],
@@ -105,7 +105,7 @@ const SECTIONS = [
     hint: "ETA / expected date is before today and not delivered",
     flag: "eta_late",
     cols: [
-      ["work_order_id", "IM WO #"],
+      ["work_order_id", "MR #"],
       ["description", "Material"],
       ["supplier", "Supplier"],
       ["po_number", "PO"],

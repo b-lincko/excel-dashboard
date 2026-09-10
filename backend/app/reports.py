@@ -224,7 +224,7 @@ def wo_sheet_pdf(rec: dict[str, Any], attachments: Optional[list[dict[str, Any]]
         rightMargin=14 * mm,
         topMargin=12 * mm,
         bottomMargin=12 * mm,
-        title=f"IM WO {rec.get('work_order_id') or rec.get('record_id')}",
+        title=f"MR {rec.get('work_order_id') or rec.get('record_id')}",
     )
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
@@ -355,7 +355,7 @@ def po_approval_pdf(rec: dict[str, Any], approval: Optional[dict[str, Any]] = No
     value = ParagraphStyle("POValue", parent=styles["Normal"], fontSize=10, leading=13, textColor=colors.HexColor("#0F172A"))
     wo = _esc(rec.get("work_order_id") or rec.get("record_id"))
     story: list[Any] = [
-        Paragraph(f"Purchase order · IM WO {wo}", title_style),
+        Paragraph(f"Purchase order · MR {wo}", title_style),
         Paragraph(
             f"Printed {datetime.now().strftime('%Y-%m-%d %H:%M')} · Linkco MR · state { _esc(approval.get('state') or 'none') }",
             meta,

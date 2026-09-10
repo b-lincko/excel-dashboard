@@ -58,7 +58,7 @@ export const TOUR_STEPS = [
     page: "work_orders",
     need: "create",
     title: "New material request",
-    body: "Use this when a new IM WO should exist. Existing rows are updated by WO id — the app will not create duplicates on import.",
+    body: "Use this when a new MR should exist. Existing rows are updated by MR id — the app will not create duplicates on import.",
   },
   {
     id: "record",
@@ -216,10 +216,10 @@ export const SIGNING_TOUR_STEPS = [
   {
     id: "sign-dispatch",
     path: "/approvals",
-    target: "appr-accounts",
+    target: "appr-steps",
     need: "po_dispatch",
-    title: "Dispatch sends it to Accounts",
-    body: "Whoever holds the signed slip can pass it to a colleague, and dispatch (or Accounts) files it in the Accounts lane. Unassign hands the slip back if the wrong technician has it.",
+    title: "After signing: pass it on or done",
+    body: "Whoever holds the signed slip can pass it to a colleague from this desk. When the Accounts step is switched on in Settings, they can also file it in the Accounts lane — otherwise a signed slip is already complete. Unassign hands the slip back if the wrong technician has it.",
   },
   {
     id: "sign-done",
