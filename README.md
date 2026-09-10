@@ -28,7 +28,7 @@ React dashboard  ⇄  FastAPI  ⇄  SQLite (history)
 
 ### One command
 
-**Docker (recommended)** — installs Docker if missing, builds the image, serves API + UI on port 8000:
+**Docker (recommended)** — installs Docker if missing, builds one image that runs the production topology (nginx on port 8000 serving the UI + proxying `/api` to the API on loopback), and opens everything at http://127.0.0.1:8000:
 
 ```bash
 chmod +x docker-run.sh run.sh
@@ -56,8 +56,8 @@ run.bat
 
 Local mode installs Python packages into `.venv`, runs `npm install` if needed, then starts:
 
-- API — http://127.0.0.1:8000
-- UI — http://127.0.0.1:5173  (Docker serves both at http://127.0.0.1:8000)
+- UI — http://127.0.0.1:5173  ← open this one; it proxies `/api` to the API
+- API — http://127.0.0.1:8001  (loopback only; in Docker, nginx serves both at http://127.0.0.1:8000)
 
 Keep `file.xlsx` in the project root (replica of the live log; the database is the working history).
 

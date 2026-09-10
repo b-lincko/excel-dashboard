@@ -1,5 +1,8 @@
 name: linkco-mr
 
+# One container, production topology inside:
+#   nginx :8000 (published) -> uvicorn 127.0.0.1:8001 (loopback, not exposed)
+# State lives on the host via the mounts below — the image is stateless.
 services:
   woms:
     build: .
@@ -13,4 +16,7 @@ services:
       - ./backups:/app/backups
     environment:
       WOMS_JWT_SECRET: ${WOMS_JWT_SECRET:-}
+      # Only needed if you serve the UI from a different origin than the API;
+      # same-origin behind nginx needs nothing.
+      WOMS_CORS_ORIGINS: ${WOMS_CORS_ORIGINS:-}
     restart: unless-stopped

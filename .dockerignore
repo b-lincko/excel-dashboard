@@ -16,3 +16,8 @@ backend/.env
 .coverage
 htmlcov
 Unselected files
+deploy/nginx/
+data/logs
+tests
+docs
+*.xlsx

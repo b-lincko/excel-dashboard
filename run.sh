@@ -5,7 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-API_PORT="${API_PORT:-8000}"
+# Dev topology: API on loopback 8001 (the Vite dev server proxies /api to it).
+API_PORT="${API_PORT:-8001}"
 UI_PORT="${UI_PORT:-5173}"
 USE_LOCAL=0
 for arg in "$@"; do
@@ -124,9 +125,9 @@ fi
 echo "      using $ROOT/file.xlsx"
 
 echo
-echo "[4/4] Starting servers"
-echo "      API  → http://127.0.0.1:${API_PORT}"
-echo "      UI   → http://127.0.0.1:${UI_PORT}"
+echo "[4/4] Starting servers (dev mode — ./docker-run.sh for production)"
+echo "      UI   → http://127.0.0.1:${UI_PORT}   <- open this one; it proxies /api to the API"
+echo "      API  → http://127.0.0.1:${API_PORT}  (loopback only)"
 echo
 echo "      Sign in:  admin / admin123"
 echo "                manager / manager123"
@@ -145,7 +146,7 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 cd "$ROOT/backend"
-"$ROOT/.venv/bin/python" run.py &
+WOMS_HOST=127.0.0.1 WOMS_PORT="$API_PORT" "$ROOT/.venv/bin/python" run.py &
 API_PID=$!
 
 cd "$ROOT/frontend"

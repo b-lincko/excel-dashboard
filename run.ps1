@@ -87,24 +87,24 @@ if (-not (Test-Path -LiteralPath $xlsx)) {
 Write-Host "      using $xlsx"
 
 Write-Host ""
-Write-Host "[4/4] Starting API then UI"
-Write-Host "      API window must stay open - that is what reads Excel."
-Write-Host "      UI   http://127.0.0.1:5173"
-Write-Host "      API  http://127.0.0.1:8000"
+Write-Host "[4/4] Starting API then UI (dev mode)"
+Write-Host "      Both windows must stay open. Use docker-run.bat for the production setup (nginx on one port)."
+Write-Host "      UI   http://127.0.0.1:5173   <- open this one; it proxies /api to the API"
+Write-Host "      API  http://127.0.0.1:8001   (loopback only - the UI proxies to it)"
 Write-Host ""
 Write-Host "      Sign in:  admin / admin123"
 Write-Host "============================================================"
 Write-Host ""
 
-$apiArg = "title Linkco MR API && cd /d `"$Root`" && echo Starting http://127.0.0.1:8000 && echo Keep this window OPEN. && `"$venvPy`" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend && echo. && echo API stopped. && pause"
+$apiArg = "title Linkco MR API && cd /d `"$Root`" && echo API on http://127.0.0.1:8001 (loopback - the UI proxies to it) && echo Keep this window OPEN. && `"$venvPy`" -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --app-dir backend && echo. && echo API stopped. && pause"
 Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", $apiArg) -WorkingDirectory $Root
 
-Write-Host "Waiting for API on port 8000 ..."
+Write-Host "Waiting for API on port 8001 ..."
 $up = $false
 for ($i = 0; $i -lt 25; $i++) {
     Start-Sleep -Seconds 2
     try {
-        $null = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/health" -UseBasicParsing -TimeoutSec 2
+        $null = Invoke-WebRequest -Uri "http://127.0.0.1:8001/api/health" -UseBasicParsing -TimeoutSec 2
         $up = $true
         break
     } catch {

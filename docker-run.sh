@@ -8,7 +8,7 @@ cd "$ROOT"
 PORT="${WOMS_PORT:-8000}"
 
 echo "============================================================"
-echo "  Linkco MR Dashboard — Docker"
+echo "  Linkco MR Dashboard — Docker (nginx + API in one container)"
 echo "============================================================"
 echo "  Folder: $ROOT"
 echo

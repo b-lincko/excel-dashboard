@@ -9,7 +9,7 @@ $env:WOMS_PORT = $Port
 $env:COMPOSE_PROJECT_NAME = "linkco-mr"
 
 Write-Host "============================================================"
-Write-Host "  Linkco MR Dashboard - Docker"
+Write-Host "  Linkco MR Dashboard - Docker (nginx + API in one container)"
 Write-Host "============================================================"
 Write-Host "  Folder: $Root"
 Write-Host ""

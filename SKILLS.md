@@ -4,7 +4,7 @@
 
 If you change product behavior, data flow, APIs, permissions, Excel handling, backup, tour, or tests, **update this file in the same commit** and push it to GitHub. Do not leave a second unofficial “notes” file. `README.md` and `docs/EXCEL_ANALYSIS.md` must stay consistent with the Source of truth section below.
 
-Last updated: 2026-09-10 (PRODUCTION TOPOLOGY: nginx 1.28.3 reverse proxy is the public entry on :8000 - serves frontend/dist + proxies /api to uvicorn 127.0.0.1:8001; backend binds loopback only (WOMS_HOST/WOMS_PORT); CORS same-origin by default (WOMS_CORS_ORIGINS to override); see deploy/README.md).
+Last updated: 2026-09-10 (ONE-GO RUNNERS UPDATED for the nginx topology: Dockerfile now = nginx (apt) + uvicorn loopback 8001 in one container (deploy/nginx-docker.conf + docker-entrypoint.sh, dist pre-gzipped at build); docker-run.bat/.ps1/.sh unchanged behavior; LOCAL DEV = uvicorn 127.0.0.1:8001 + Vite 5173 as entry (run.bat/run.ps1/run.sh/scripts/start-api.bat updated).
 
 ---
 
@@ -563,6 +563,8 @@ AI: add a bullet when you make a lasting decision. Date + short why.
 **Commands:** start/stop = `deploy/start_production.sh [stop]`; config test = `deploy/nginx/sbin/nginx -t -c deploy/nginx.conf`; frontend rebuild requires `deploy/precompress.sh` afterwards (start script does it). nginx 1.28.3 was built from source (GitHub mirror; apt mirrors are blocked in this sandbox) into `deploy/nginx/` which is **git-ignored** — rebuild steps in deploy/README.md. The config ships `deploy/mime.types` next to it so it is self-contained; note `return`/rewrite directives are unavailable in this build (no PCRE) — use `try_files` + static error pages instead.
 
 **Backend changes that go with it:** `run.py` binds `WOMS_HOST` (default 127.0.0.1) / `WOMS_PORT` (default 8001) and trusts X-Forwarded-* only from 127.0.0.1; `app/main.py` CORS defaults to same-origin only (`WOMS_CORS_ORIGINS` env to open, "*" for all). Vite dev proxy target follows `WOMS_PORT` (default 8001).
+
+**Docker (added 2026-09-10):** `docker-run.bat` (Windows) / `docker-run.sh` (Linux/macOS) → `docker compose up --build` → one image, production topology inside: nginx installed from Debian packages, `deploy/nginx-docker.conf` (container paths, logs to /app/data/logs host mount), `deploy/docker-entrypoint.sh` starts uvicorn loopback 8001 then `exec nginx -g 'daemon off;'`. Frontend built + pre-gzipped in the node stage (`gzip_static` served). Mounts: `./file.xlsx`, `./data/`, `./backups/` — the image is stateless. HEALTHCHECK hits nginx :8000. `WOMS_JWT_SECRET` / `WOMS_CORS_ORIGINS` env passthrough in compose. Local dev (run.bat/run.sh --local/scripts/start-api.bat) = uvicorn 127.0.0.1:8001 + Vite 5173 as the entry (proxies /api). NEVER bind uvicorn 0.0.0.0 outside the container image.
 
 **Pitfall:** the sandbox snapshot keeps restoring a STALE `file.xlsx` (3.29 MB live-DB copy) over the pristine committed one (4,033,425 B). Symptom: `test_reconcile_migrates_sqlite_delay_into_new_columns` fails with `wrote_excel False` (delay columns already exist in the stale copy). Fix: `git checkout -- file.xlsx` (with servers down), then re-run. Always `git status --short file.xlsx` before committing.
 
