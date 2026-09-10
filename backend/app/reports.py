@@ -9,15 +9,18 @@ from typing import Any, Optional
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.chart import BarChart, Reference
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import HRFlowable, Image, SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.shapes import Drawing
 
 from .dates import to_date, week_bounds
-from .domain import annotate, is_closed, is_open, is_overdue, matches_filters, today
+from .domain import annotate, is_blockade, is_closed, is_delayed, is_open, is_overdue, matches_filters, today
 from .config import load_config
 from .excel.service import excel_service
 from .stats import filtered, group_by, kpis, reasons
@@ -51,7 +54,14 @@ def records_for_report(kind: str, filters: dict[str, Any]) -> list[dict[str, Any
     elif kind == "closed":
         recs = [r for r in recs if is_closed(r, cfg)]
     elif kind == "delay":
-        recs = [r for r in recs if is_open(r, cfg)]
+        recs = [
+            r
+            for r in recs
+            if is_delayed(r, cfg)
+            or is_blockade(r, cfg)
+            or str(r.get("issue") or "").strip()
+            or str(r.get("delay_reason") or "").strip()
+        ]
     elif kind in {"daily", "weekly", "monthly", "yearly", "department", "technician"}:
         pass
     recs = [annotate(r, cfg) for r in recs]
@@ -782,6 +792,47 @@ def period_pdf(payload: dict[str, Any]) -> bytes:
         )
         story.append(day_table)
 
+        story.append(Paragraph("Overview", s["h"]))
+        chart = Drawing(180 * mm, 34 * mm)
+        bc = VerticalBarChart()
+        bc.x = 34
+        bc.y = 14
+        bc.width = 460
+        bc.height = 76
+        bc.data = [
+            [float(d.get("created") or 0) for d in days],
+            [float(d.get("closed") or 0) for d in days],
+            [float(d.get("overdue") or 0) for d in days],
+        ]
+        bc.categoryAxis.categoryNames = [str(d.get("name") or "") for d in days]
+        bc.categoryAxis.labels.fontName = "Helvetica"
+        bc.categoryAxis.labels.fontSize = 7
+        bc.categoryAxis.labels.fillColor = colors.HexColor("#64748B")
+        bc.valueAxis.valueMin = 0
+        bc.valueAxis.labels.fontName = "Helvetica"
+        bc.valueAxis.labels.fontSize = 7
+        bc.valueAxis.labels.fillColor = colors.HexColor("#64748B")
+        bc.valueAxis.gridStrokeColor = colors.HexColor("#E2E8F0")
+        bc.valueAxis.visibleGrid = True
+        bc.bars[(0,)].fillColor = colors.HexColor("#0D9F8A")
+        bc.bars[(1,)].fillColor = colors.HexColor("#0F3D5E")
+        bc.bars[(2,)].fillColor = colors.HexColor("#E11D48")
+        bc.bars.strokeColor = None
+        bc.groupSpacing = 8
+        bc.barSpacing = 2
+        chart.add(bc)
+        legend = Table(
+            [[
+                Paragraph('<font color="#0D9F8A">■</font> New', s["muted"]),
+                Paragraph('<font color="#0F3D5E">■</font> Closed', s["muted"]),
+                Paragraph('<font color="#E11D48">■</font> Overdue', s["muted"]),
+            ]],
+            colWidths=[28 * mm, 28 * mm, 28 * mm],
+        )
+        legend.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+        story.append(chart)
+        story.append(legend)
+
     def _section(title: str, key: str, headers: list[str], keys: list[str], widths: list[float]) -> None:
         n = totals.get(key) or 0
         extra = f" · showing {min(n, PDF_LIST_CAP)} of {n}" if n > PDF_LIST_CAP else ""
@@ -846,11 +897,24 @@ def period_xlsx(payload: dict[str, Any]) -> bytes:
             c.font = white
             c.alignment = Alignment(horizontal="center")
         row += 1
+        matrix_first = row + 1
         for key, label in (("created", "New"), ("closed", "Closed"), ("overdue", "Overdue")):
             ws.cell(row, 1, label)
             for i, d in enumerate(days, 2):
                 ws.cell(row, i, d.get(key) or 0).alignment = Alignment(horizontal="center")
             row += 1
+        chart = BarChart()
+        chart.type = "col"
+        chart.grouping = "clustered"
+        chart.title = "New / closed / overdue by day"
+        chart.height = 7.5
+        chart.width = 16
+        chart.legend.position = "b"
+        data = Reference(ws, min_col=1, min_row=matrix_first, max_col=1 + len(days), max_row=matrix_first + 2)
+        cats = Reference(ws, min_col=2, min_row=matrix_first - 1, max_col=1 + len(days))
+        chart.add_data(data, titles_from_data=True, from_rows=True)
+        chart.set_categories(cats)
+        ws.add_chart(chart, f"A{row + 2}")
         row += 1
     lists = payload.get("lists") or {}
     totals = payload.get("totals") or {}
@@ -930,3 +994,25 @@ def render(kind: str, fmt: str, filters: dict[str, Any]) -> tuple[bytes, str, st
         if fmt == "pdf":
             return period_pdf(payload), f"{slug}.pdf", "application/pdf"
         raise ValueError(f"Unsupported format {fmt}")
+    titles = {
+        "monthly": "Monthly report",
+        "yearly": "Yearly report",
+        "open": "Open material requests",
+        "overdue": "Overdue material requests",
+        "closed": "Closed material requests",
+        "delay": "Delay / blockade report",
+        "department": "Report by department",
+        "technician": "Report by technician",
+    }
+    title = titles.get(kind)
+    if not title:
+        raise ValueError(f"Unknown report kind {kind}")
+    records = records_for_report(kind, filters)
+    stamp = datetime.now().strftime("%Y%m%d")
+    if fmt == "csv":
+        return to_csv(records), f"{kind}_{stamp}.csv", "text/csv"
+    if fmt == "xlsx":
+        return to_xlsx(records, title), f"{kind}_{stamp}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if fmt == "pdf":
+        return to_pdf(records, title), f"{kind}_{stamp}.pdf", "application/pdf"
+    raise ValueError(f"Unsupported format {fmt}")

@@ -130,7 +130,7 @@ export default function Settings() {
 
       {can("settings") && <DatabasePanel toast={toast} ask={ask} onReload={load} />}
 
-      {can("settings") && <EmailPanel cfg={cfg} setCfg={setCfg} toast={toast} />}
+      {can("settings") && <EmailPanel cfg={cfg} setCfg={setCfg} toast={toast} onSave={save} />}
 
       {can("backup") && (
         <BackupPanel
@@ -490,7 +490,7 @@ function DatabasePanel({ toast, ask, onReload }) {
   );
 }
 
-function EmailPanel({ cfg, setCfg, toast }) {
+function EmailPanel({ cfg, setCfg, toast, onSave }) {
   const [testTo, setTestTo] = useState("");
   const [busy, setBusy] = useState(false);
   const provider = cfg.email_provider || "off";
@@ -641,27 +641,18 @@ function EmailPanel({ cfg, setCfg, toast }) {
             autoComplete="new-password"
           />
           <p className="text-[11px] text-slate-500 mt-1">
-            Create the key at resend.com/api-keys. The From email must be on a domain you verified in Resend.
+            Create the key at resend.com/api-keys. From email is optional — without a verified domain the app sends
+            from onboarding@resend.dev to your account email, labelled [TEST → intended recipient]. Verify a domain at
+            resend.com/domains to deliver to everyone.
           </p>
-          <div className="mt-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 p-3 space-y-2">
-            <div className="text-xs font-semibold text-amber-800 dark:text-amber-200">No domain yet? It still sends</div>
-            <p className="text-[11px] text-amber-800/90 dark:text-amber-200/80">
-              Without a verified domain, Resend delivers every message to your Resend account email, from
-              onboarding@resend.dev. The app handles this automatically: the subject shows{" "}
-              <b>[TEST → intended recipient]</b>. Verify a domain at resend.com/domains to deliver directly to everyone.
-            </p>
-            <div>
-              <label className="lbl">Resend account email (test inbox)</label>
-              <input
-                type="email"
-                value={cfg.resend_test_inbox || ""}
-                onChange={(e) => setCfg({ ...cfg, resend_test_inbox: e.target.value })}
-                placeholder="you@your-resend-account.com"
-              />
-              <p className="text-[11px] text-slate-500 mt-1">
-                Usually filled in automatically after the first send. You can set it yourself too.
-              </p>
-            </div>
+          <div className="mt-2">
+            <label className="lbl">Resend account email (test inbox)</label>
+            <input
+              type="email"
+              value={cfg.resend_test_inbox || ""}
+              onChange={(e) => setCfg({ ...cfg, resend_test_inbox: e.target.value })}
+              placeholder="Filled automatically after the first send"
+            />
           </div>
         </div>
       )}
@@ -674,9 +665,12 @@ function EmailPanel({ cfg, setCfg, toast }) {
           <button type="button" className="btn-outline" disabled={busy} onClick={sendTest}>
             {busy ? "Sending…" : "Send test"}
           </button>
+          <button type="button" className="btn-primary" onClick={onSave}>
+            Save settings
+          </button>
         </div>
       )}
-      <p className="text-[11px] text-slate-500">Save configuration after changing provider or keys. Then send a test.</p>
+      <p className="text-[11px] text-slate-500">Save settings after changing the provider or keys. Then send a test.</p>
     </div>
   );
 }

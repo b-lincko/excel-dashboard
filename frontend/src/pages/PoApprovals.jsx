@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { BellRing, ChevronDown, ChevronUp, FileText, PenLine, Send, Stamp } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { BellRing, ChevronDown, ChevronUp, Download, FileText, PenLine, Send, Stamp } from "lucide-react";
 import { api } from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
@@ -404,9 +404,27 @@ export default function PoApprovals() {
                         <Stamp size={14} /> Review &amp; sign…
                       </button>
                     )}
-                    <Link className="btn-outline" to={`/work-orders/${encodeURIComponent(selected)}`}>
+                    <a
+                      className="btn-outline"
+                      href={`/work-orders/${encodeURIComponent(selected)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Opens in a new window so you keep this desk"
+                    >
                       Open material request
-                    </Link>
+                    </a>
+                    <button
+                      type="button"
+                      className="btn-outline"
+                      onClick={() =>
+                        api.download(
+                          `/api/work-orders/${encodeURIComponent(selected)}/approval/pdf`,
+                          `PO_${item.work_order_id || selected}.pdf`
+                        )
+                      }
+                    >
+                      <Download size={14} /> Download PDF
+                    </button>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2 text-sm">

@@ -134,7 +134,7 @@ Open the UI, then sign in:
 - **Audit log** — user, time, work order, field, old/new value (SQLite)
 - **Backups** — midnight and Backup now dump DB → Excel then snapshot the pair under `backups/YYYY-MM-DD/`. Pairs older than 30 days move to `backups/archive/YYYY-MM/`; archives older than 6 months are deleted. Restore of a pair rolls both back; Excel-only copies do not overwrite live history
 - **Conflict detection** — if Excel changed since you loaded the record, you get a warning instead of a silent overwrite
-- **Reports** — daily/weekly/monthly/yearly, open/overdue/closed/delay/department/technician as Excel, CSV or PDF
+- **Reports** — every kind downloads as Excel (with an embedded chart), CSV or one-page PDF (daily/weekly briefings include a New/Closed/Overdue bar chart and the day matrix)
 - **Auth** — admin / manager / user with configurable permissions
 - **Dark / light** theme
 - **Guided tours** — first-run app tour, plus a dedicated manager signing tour on Purchase Approval (auto-plays once, replay from Guide or "How signing works")

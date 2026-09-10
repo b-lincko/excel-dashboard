@@ -229,6 +229,62 @@ def test_resend_test_mode_redirects_to_owner(monkeypatch):
     assert saved.get("resend_test_inbox") == "linkco@spotmodapk.pro"
 
 
+def test_resend_owner_from_real_error_text(monkeypatch):
+    """Regression: Resend formats the owner address as a markdown mailto link.
+    The parser must still find it (this is the exact production error)."""
+    from app import mailer as mailer_mod
+
+    detail = (
+        '{"statusCode":403,"name":"validation_error","message":"You can only send testing emails to your own email '
+        'address ([linkco@spotmodapk.pro](mailto:linkco@spotmodapk.pro)). To send emails to other recipients, please '
+        'verify a domain at resend.com/domains, and change the `from` address to an email using this domain."}'
+    )
+    assert mailer_mod._resend_owner_from_error(detail) == "linkco@spotmodapk.pro"
+
+
+def test_resend_without_from_address_uses_sandbox(monkeypatch):
+    """No From address configured: send anyway via onboarding@resend.dev to a
+    known test inbox instead of failing validation."""
+    from app import mailer as mailer_mod
+
+    calls = []
+
+    def fake_urlopen(req, timeout=20, context=None):
+        calls.append(req)
+        return _FakeResp()
+
+    class Cfg:
+        email_provider = "resend"
+        email_from_name = "Linkco MR"
+        email_from_address = ""
+        resend_api_key = "re_test_key"
+        smtp_host = ""
+        resend_test_inbox = "owner@spotmodapk.pro"
+
+    monkeypatch.setattr(mailer_mod, "_testing", lambda: False)
+    monkeypatch.setattr(mailer_mod.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mailer_mod, "load_config", lambda: Cfg())
+
+    result = mailer_mod.send_mail("manager@example.com", "PO request", "Body text")
+    assert result.get("ok") is True, result
+    assert result.get("test_mode") is True
+    assert result.get("to") == "owner@spotmodapk.pro"
+    body = calls[0].data.decode("utf-8")
+    assert '"from": "onboarding@resend.dev"' in body
+    assert "manager@example.com" in body  # labelled as intended recipient
+
+
+def test_resend_settings_save_needs_key_only(tmp_path, monkeypatch):
+    """Resend + API key but no From address must save fine (test mode covers it)."""
+    client, headers = _admin()
+    got = client.put(
+        "/api/settings",
+        headers=headers,
+        json={"values": {"email_provider": "resend", "resend_api_key": "re_x", "email_from_address": ""}},
+    )
+    assert got.status_code == 200, got.text
+
+
 def test_resend_test_mode_uses_known_inbox(monkeypatch):
     """A saved test inbox is reused even when the error body is not parsable."""
     from app import mailer as mailer_mod

@@ -73,10 +73,11 @@ def _merge_settings(current: dict[str, Any], incoming: dict[str, Any]) -> dict[s
     }
     email_touched = any(merged.get(k) != current.get(k) for k in email_keys)
     if provider != "off" and email_touched:
-        if not str(merged.get("email_from_address") or "").strip():
-            raise HTTPException(status_code=422, detail="From email is required when email is on.")
-        if provider == "smtp" and not str(merged.get("smtp_host") or "").strip():
-            raise HTTPException(status_code=422, detail="SMTP host is required.")
+        if provider == "smtp":
+            if not str(merged.get("email_from_address") or "").strip():
+                raise HTTPException(status_code=422, detail="From email is required when email is on.")
+            if not str(merged.get("smtp_host") or "").strip():
+                raise HTTPException(status_code=422, detail="SMTP host is required.")
         if provider == "resend" and not str(merged.get("resend_api_key") or "").strip():
             raise HTTPException(status_code=422, detail="Resend API key is required.")
     return merged

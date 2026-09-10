@@ -127,8 +127,9 @@ def send_mail(
         return {"ok": False, "skipped": True, "reason": "Resend API key is missing"}
     if provider == "smtp" and not str(getattr(cfg, "smtp_host", "") or "").strip():
         return {"ok": False, "skipped": True, "reason": "SMTP host is missing"}
-    if not str(getattr(cfg, "email_from_address", "") or "").strip():
+    if provider == "smtp" and not str(getattr(cfg, "email_from_address", "") or "").strip():
         return {"ok": False, "skipped": True, "reason": "From email is missing"}
+    # Resend without a From address is fine: test mode sends from the sandbox sender.
     heading = title or subject
     payload = {
         "to": dest,
@@ -184,8 +185,11 @@ def _send_smtp(cfg, payload: dict[str, Any]) -> None:
 
 
 def _resend_owner_from_error(detail: str) -> str:
-    """Pull the account owner's address out of Resend's testing-mode rejection."""
-    match = re.search(r"\(\s*\[?([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})\]?\s*\)", detail or "")
+    """Pull the account owner's address out of Resend's testing-mode rejection.
+
+    Resend formats it like "your own email address ([owner@example.com]
+    (mailto:owner@example.com))" -- so just take the first email in the text."""
+    match = re.search(r"([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})", detail or "")
     return match.group(1).strip().lower() if match else ""
 
 
@@ -203,6 +207,10 @@ def _remember_resend_test_inbox(owner: str) -> None:
         pass
 
 
+def _norm(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
 def _apply_resend_test_mode(payload: dict[str, Any], from_name: str, owner: str) -> dict[str, Any]:
     """Redirect the email to the Resend account owner, clearly labelled."""
     intended = payload["to"]
@@ -211,11 +219,11 @@ def _apply_resend_test_mode(payload: dict[str, Any], from_name: str, owner: str)
         "This message was intended for "
         f"{intended}. Verify a domain at resend.com/domains to deliver directly."
     )
-    sender = f"{from_name} <{RESEND_TEST_FROM}>" if from_name else RESEND_TEST_FROM
+    sender = f"{RESEND_TEST_FROM}"  # the only From Resend allows before a domain is verified
     out = dict(payload)
     out["from"] = sender
     out["to"] = owner
-    out["subject"] = f"[TEST → {intended}] {payload['subject']}"
+    out["subject"] = payload["subject"] if _norm(intended) == _norm(owner) else f"[TEST → {intended}] {payload['subject']}"
     out["text"] = note + "\n\n" + payload["text"]
     banner = (
         f'<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;'
@@ -237,8 +245,28 @@ def _send_resend(cfg, payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Resend API key is required.")
     from_addr = str(getattr(cfg, "email_from_address", "") or "").strip()
     from_name = str(getattr(cfg, "email_from_name", "") or "").strip()
+    known_inbox = str(getattr(cfg, "resend_test_inbox", "") or "").strip().lower()
     if not from_addr:
-        raise ValueError("Set a From email address in Settings. It must be on a domain verified in Resend.")
+        # No From address yet: use the sandbox sender directly. If we already
+        # know the owner inbox, deliver there; otherwise try as-addressed and
+        # learn the owner from Resend's rejection.
+        payload = dict(payload)
+        payload["from"] = RESEND_TEST_FROM
+        if known_inbox and _norm(payload["to"]) != known_inbox:
+            payload = _apply_resend_test_mode(payload, from_name, known_inbox)
+        try:
+            _post_resend(key, payload)
+            return {"ok": True, "to": payload["to"], "test_mode": True, "intended_to": payload.get("intended_to") or payload["to"]}
+        except _ResendDomainError as exc:
+            owner = _resend_owner_from_error(exc.detail) or known_inbox
+            if not owner:
+                raise ValueError(
+                    "Resend refused the email. Add your Resend account email as the test inbox in Settings, "
+                    "or verify a domain at resend.com/domains."
+                ) from exc
+            _remember_resend_test_inbox(owner)
+            _post_resend(key, _apply_resend_test_mode(payload, from_name, owner))
+            return {"ok": True, "to": owner, "test_mode": True, "intended_to": payload["to"]}
     sender = f"{from_name} <{from_addr}>" if from_name else from_addr
     payload = dict(payload)
     payload["from"] = sender
@@ -249,7 +277,7 @@ def _send_resend(cfg, payload: dict[str, Any]) -> dict[str, Any]:
         # No verified domain (or outside the sandbox allow-list): Resend only
         # delivers to the account owner from onboarding@resend.dev. Learn the
         # owner once, then deliver there with a [TEST → …] label.
-        owner = _resend_owner_from_error(exc.detail) or str(getattr(cfg, "resend_test_inbox", "") or "").strip().lower()
+        owner = _resend_owner_from_error(exc.detail) or known_inbox
         if not owner:
             raise ValueError(
                 "Resend refused the sender/recipient. Verify a domain at resend.com/domains and use it in the "

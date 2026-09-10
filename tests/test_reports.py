@@ -156,3 +156,46 @@ def test_reports_api_json_and_pdf(sample):
     assert pdf.content[:4] == b"%PDF"
     assert "inline" in (pdf.headers.get("content-disposition") or "")
     assert _pdf_pages(pdf.content) == 1
+
+def test_render_supports_every_download_kind(sample):
+    """Regression: render() used to return None for every kind except
+    daily/weekly, so monthly/yearly/open/overdue/closed/delay/department/
+    technician downloads all failed."""
+    from app.reports import render
+
+    for kind in ("monthly", "yearly", "open", "overdue", "closed", "delay", "department", "technician"):
+        for fmt, sig in (("pdf", b"%PDF"), ("xlsx", b"PK"), ("csv", b"")):
+            blob, name, mime = render(kind, fmt, {})
+            assert blob, f"{kind}/{fmt} returned empty"
+            assert blob[: len(sig)] == sig, f"{kind}/{fmt} wrong signature"
+            assert kind in name, f"{kind}/{fmt} unexpected filename {name}"
+
+
+def test_period_pdf_contains_day_chart(sample):
+    """The weekly PDF draws a bar chart (vector drawings) and stays one page."""
+    import io
+
+    import fitz
+
+    from app.reports import period_pdf, period_payload
+
+    pdf = period_pdf(period_payload("weekly", {}))
+    assert pdf[:4] == b"%PDF"
+    doc = fitz.open(stream=pdf, filetype="pdf")
+    try:
+        assert doc.page_count == 1
+        assert len(doc[0].get_drawings()) >= 40  # chart + tables render vectors
+    finally:
+        doc.close()
+
+
+def test_period_xlsx_contains_native_chart(sample):
+    import io
+
+    from app.reports import period_payload, period_xlsx
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(period_xlsx(period_payload("weekly", {}))))
+    ws = wb.active
+    assert len(ws._charts) == 1

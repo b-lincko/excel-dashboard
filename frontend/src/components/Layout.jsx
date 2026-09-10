@@ -43,6 +43,7 @@ import { clearDashCache } from "../lib/widgets.js";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import BrandLogo from "./BrandLogo.jsx";
 import CommandPalette from "./CommandPalette.jsx";
+import NotifyPopups from "./NotifyPopups.jsx";
 import { useTour } from "../context/TourContext.jsx";
 
 const NAV = [
@@ -132,6 +133,7 @@ export default function Layout() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [inbox, setInbox] = useState({ items: [], unread: 0 });
+  const [popups, setPopups] = useState([]);
   const searchRef = useRef(null);
   const accountRef = useRef(null);
   const inboxRef = useRef(null);
@@ -219,8 +221,59 @@ export default function Layout() {
   function loadInbox() {
     api
       .get("/api/notifications?limit=40")
-      .then(setInbox)
+      .then((d) => {
+        setInbox(d);
+        announceNew(d.items || []);
+      })
       .catch(() => {});
+  }
+
+  // On-screen popups for notifications that arrive while the app is open.
+  // The first load only sets the baseline, so a refresh does not replay old pings.
+  function announceNew(items) {
+    const key = `woms.notify.last.${user?.username || "anon"}`;
+    const baseKey = `woms.notify.baseline.${user?.username || "anon"}`;
+    let last = 0;
+    let baselined = false;
+    try {
+      last = Number(localStorage.getItem(key) || 0);
+      baselined = localStorage.getItem(baseKey) === "1";
+    } catch {
+      /* ignore */
+    }
+    const fresh = items.filter((n) => Number(n.id) > last);
+    const maxId = items.reduce((m, n) => Math.max(m, Number(n.id) || 0), last);
+    try {
+      localStorage.setItem(key, String(maxId));
+      localStorage.setItem(baseKey, "1");
+    } catch {
+      /* ignore */
+    }
+    if (!baselined) return; // first load only sets the baseline
+    if (!fresh.length) return;
+    setPopups((prev) => {
+      const seen = new Set(prev.map((p) => p.id));
+      const add = fresh
+        .filter((n) => !seen.has(n.id))
+        .map((n) => ({
+          id: n.id,
+          kind: n.kind,
+          body: n.body,
+          created_at: n.created_at,
+          record_id: n.record_id,
+          thread_id: n.thread_id,
+        }));
+      return [...prev, ...add].slice(-4);
+    });
+  }
+
+  function openPopup(n) {
+    setPopups((prev) => prev.filter((p) => p.id !== n.id));
+    api.post("/api/notifications/read", { ids: [n.id] }).then(loadInbox).catch(() => {});
+    if (n.record_id && ["po", "ping", "accounts"].includes(n.kind)) nav(`/approvals?id=${encodeURIComponent(n.record_id)}`);
+    else if (n.thread_id) nav(`/chat?thread=${encodeURIComponent(n.thread_id)}`);
+    else if (n.record_id) nav(`/work-orders/${encodeURIComponent(n.record_id)}`);
+    else nav("/chat");
   }
 
   async function loadSync() {
@@ -691,6 +744,11 @@ export default function Layout() {
         </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <NotifyPopups
+        items={popups}
+        onOpen={openPopup}
+        onDismiss={(id) => setPopups((prev) => prev.filter((p) => p.id !== id))}
+      />
     </div>
   );
 }
