@@ -132,6 +132,11 @@ def test_overlap_guard_matrix(wiz, tmp_path):
     separate = guard(_values(wiz, NETDRIVE_PATH=str(tmp_path / "files"), SMB_MOUNT_PATH=str(backup_dir), LOCAL_BACKUP_PATH=str(tmp_path / "bk")))
     assert separate["status"] == "ok"
 
+    # the INTENDED Linkco layout: files root == files-share mount -> fine
+    files_mount = tmp_path / "mr.drive"
+    same = guard(_values(wiz, NETDRIVE_PATH=str(files_mount), FILES_SMB_MOUNT_PATH=str(files_mount), SMB_MOUNT_PATH=str(backup_dir), LOCAL_BACKUP_PATH=""))
+    assert same["status"] == "ok"
+
 
 def test_mount_state_check(wiz, tmp_path, monkeypatch):
     target = tmp_path / "mnt"

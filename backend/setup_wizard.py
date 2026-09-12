@@ -200,8 +200,11 @@ def check_overlap(values: dict[str, str]) -> dict[str, Any]:
         net = net.resolve()
     except OSError:
         pass
+    # NOTE: FILES_SMB_MOUNT_PATH is deliberately NOT a protected zone -
+    # NETDRIVE_PATH pointing at the files-share mount is the intended setup.
+    # Only BACKUP destinations are off-limits for Files users.
     zones = []
-    for key in ("LOCAL_BACKUP_PATH", "SMB_MOUNT_PATH", "FILES_SMB_MOUNT_PATH"):
+    for key in ("LOCAL_BACKUP_PATH", "SMB_MOUNT_PATH"):
         raw = values.get(key, "").strip()
         if not raw:
             continue
