@@ -28,8 +28,12 @@ Production topology: **nginx is the only public door** — it serves the built U
 ### First run: the setup wizard (recommended)
 
 ```bash
-python3 backend/launch.py
+./setup.sh        # Linux / macOS
+setup.bat         # Windows (double-click works too)
 ```
+
+(Both create `backend/.venv` + install requirements on first run, then run
+`python3 backend/launch.py`.)
 
 If no `.env` exists, a web form opens on **port 8081**: it asks for the SMB
 backup account, the separate Files-share account, where files and backups
