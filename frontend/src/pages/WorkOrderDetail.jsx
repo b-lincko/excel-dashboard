@@ -133,6 +133,10 @@ export default function WorkOrderDetail() {
   const [dueOffsets, setDueOffsets] = useState(DUE_OFFSET_FALLBACK);
   const people = options.mention_users || [];
   const [files, setFiles] = useState([]);
+  // Network-drive copy: when attaching a file to the MR, optionally also save
+  // it to a folder on the Files share ("ask location" per the deployment plan).
+  const [netDirs, setNetDirs] = useState([]);
+  const [netDir, setNetDir] = useState("__none__");
   const [fileNote, setFileNote] = useState("");
   const [watching, setWatching] = useState(false);
   const [watchers, setWatchers] = useState([]);
@@ -187,6 +191,14 @@ export default function WorkOrderDetail() {
           setMeta(item);
           const rid = d.item.record_id || id;
           api.get(`/api/work-orders/${encodeURIComponent(rid)}/files`).then((f) => setFiles(f.items || [])).catch(() => {});
+          // folders on the Files share, for the "also save to network drive" choice
+          api
+            .get("/api/netdrive")
+            .then((nd) => {
+              const dirs = (nd.items || []).filter((x) => x.kind === "dir").map((x) => x.name);
+              setNetDirs(dirs);
+            })
+            .catch(() => setNetDirs([])); // no Files permission -> no location prompt
           api
             .get(`/api/work-orders/${encodeURIComponent(rid)}/watch`)
             .then((w) => {
@@ -1076,6 +1088,18 @@ export default function WorkOrderDetail() {
                       setFiles((prev) => [d.item, ...prev]);
                       setFileNote("");
                       toast("File attached", "success");
+                      // optional copy to the Files share at the chosen location
+                      if (netDir !== "__none__") {
+                        try {
+                          const fd2 = new FormData();
+                          fd2.append("dir", netDir === "__root__" ? "" : netDir);
+                          fd2.append("file", file);
+                          await api.upload("/api/netdrive/upload", fd2);
+                          toast(`Copy saved to network drive${netDir === "__root__" ? "" : ` (${netDir})`}`, "success");
+                        } catch (err2) {
+                          toast(`Network-drive copy failed: ${err2.message}`, "error");
+                        }
+                      }
                     } catch (err) {
                       setError(err.message);
                     }
@@ -1084,6 +1108,22 @@ export default function WorkOrderDetail() {
                 <button type="button" className="btn-outline" onClick={() => attachRef.current?.click()}>
                   Attach PDF or screenshot
                 </button>
+                {netDirs.length > 0 && (
+                  <label className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-2">
+                    Also save to network drive at
+                    <select
+                      value={netDir}
+                      onChange={(e) => setNetDir(e.target.value)}
+                      className="!py-1 !px-2 text-xs"
+                    >
+                      <option value="__none__">— don't save a copy —</option>
+                      <option value="__root__">share root</option>
+                      {netDirs.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
             )}
           </div>

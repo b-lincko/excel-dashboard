@@ -27,3 +27,4 @@ deploy/nginx/
 # dual backup local store (env: LOCAL_BACKUP_PATH)
 /backup/
 data/netdrive/
+setup-commands.sh

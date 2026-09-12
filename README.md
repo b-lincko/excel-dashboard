@@ -25,6 +25,19 @@ Production topology: **nginx is the only public door** — it serves the built U
 
 ## Quick start
 
+### First run: the setup wizard (recommended)
+
+```bash
+python3 backend/launch.py
+```
+
+If no `.env` exists, a web form opens on **port 8081**: it asks for the SMB
+backup account, the separate Files-share account, where files and backups
+are created, and every other option; validates credentials/folders/mounts,
+creates missing folders, writes `.env`, then starts the main server.
+Re-open it any time with `python3 backend/launch.py --setup`.
+See `docs/setup-wizard.md`.
+
 ### One command
 
 **Docker (recommended)** — installs Docker if missing, builds one image that runs the production topology (nginx on port 8000 serving the UI + proxying `/api` to the API on loopback), and opens everything at http://127.0.0.1:8000:
