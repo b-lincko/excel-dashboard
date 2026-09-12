@@ -94,16 +94,16 @@ DEFAULTS: dict[str, str] = {
     "SMB_MOUNT_PATH": "/mnt/mr-backup",
     "SMB_SERVER": "192.168.100.5",
     "SMB_SHARE": "mr.backup",
-    "SMB_DOMAIN": "LINKCO",
-    "SMB_USERNAME": "svc_mr_backup",
+    "SMB_DOMAIN": "LINKCO.COM",
+    "SMB_USERNAME": "mr.backup",
     "SMB_PASSWORD": "",
     "FILES_SMB_SERVER": "192.168.100.5",
-    "FILES_SMB_SHARE": "mr.files",
-    "FILES_SMB_DOMAIN": "LINKCO",
-    "FILES_SMB_USERNAME": "svc_mr_files",
+    "FILES_SMB_SHARE": "mr.drive",
+    "FILES_SMB_DOMAIN": "LINKCO.COM",
+    "FILES_SMB_USERNAME": "drive.mr",
     "FILES_SMB_PASSWORD": "",
-    "FILES_SMB_MOUNT_PATH": "/mnt/mr-files",
-    "NETDRIVE_PATH": "",
+    "FILES_SMB_MOUNT_PATH": "/mnt/mr.drive",
+    "NETDRIVE_PATH": "/mnt/mr.drive",
 }
 
 
@@ -312,8 +312,8 @@ def check_account_names(values: dict[str, str]) -> list[dict[str, Any]]:
             out.append({
                 "id": f"smb-name:{tag}",
                 "label": f"SMB account ({tag})",
-                "status": "error",
-                "detail": f"{user_key}={user!r} is the SHARE name, not an account - enter the service account (e.g. svc_mr_backup), and keep {share_key}={share!r} separately",
+                "status": "warn",
+                "detail": f"{user_key}={user!r} equals the share name - on the Linkco file server this is correct (accounts are named like their shares, e.g. mr.backup/mr.backup, mr.drive/drive.mr); if that is not intended here, enter the account name instead",
             })
         elif values.get(dom_key, "").strip().lower() in {"workgroup", "domain"}:
             out.append({
@@ -514,9 +514,9 @@ def render_commands(v: dict[str, str]) -> str:
             f"printf 'username = {g('SMB_USERNAME')}\npassword = {g('SMB_PASSWORD')}\ndomain = {g('SMB_DOMAIN')}\n' | sudo tee {cred} >/dev/null",
             f"sudo chmod 600 {cred}",
             f"sudo mkdir -p {g('SMB_MOUNT_PATH')}",
-            f"sudo mount -t cifs //{g('SMB_SERVER')}/{g('SMB_SHARE')} {g('SMB_MOUNT_PATH')} -o credentials={cred},uid=$(id -u),gid=$(id -g),iocharset=utf8,noperm",
+            f"sudo mount -t cifs //{g('SMB_SERVER')}/{g('SMB_SHARE')} {g('SMB_MOUNT_PATH')} -o credentials={cred},vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8,noperm",
             f"# fstab line to survive reboots:",
-            f"# //{g('SMB_SERVER')}/{g('SMB_SHARE')}  {g('SMB_MOUNT_PATH')}  cifs  credentials={cred},uid=1000,gid=1000,iocharset=utf8,_netdev  0  0",
+            f"# //{g('SMB_SERVER')}/{g('SMB_SHARE')}  {g('SMB_MOUNT_PATH')}  cifs  credentials={cred},vers=3.0,uid=1000,gid=1000,iocharset=utf8,noperm,_netdev  0  0",
             "",
         ]
 
@@ -527,9 +527,9 @@ def render_commands(v: dict[str, str]) -> str:
             f"printf 'username = {g('FILES_SMB_USERNAME')}\npassword = {g('FILES_SMB_PASSWORD')}\ndomain = {g('FILES_SMB_DOMAIN')}\n' | sudo tee {cred} >/dev/null",
             f"sudo chmod 600 {cred}",
             f"sudo mkdir -p {g('FILES_SMB_MOUNT_PATH')}",
-            f"sudo mount -t cifs //{g('FILES_SMB_SERVER')}/{g('FILES_SMB_SHARE')} {g('FILES_SMB_MOUNT_PATH')} -o credentials={cred},uid=$(id -u),gid=$(id -g),iocharset=utf8,noperm",
+            f"sudo mount -t cifs //{g('FILES_SMB_SERVER')}/{g('FILES_SMB_SHARE')} {g('FILES_SMB_MOUNT_PATH')} -o credentials={cred},vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8,noperm",
             f"# fstab line to survive reboots:",
-            f"# //{g('FILES_SMB_SERVER')}/{g('FILES_SMB_SHARE')}  {g('FILES_SMB_MOUNT_PATH')}  cifs  credentials={cred},uid=1000,gid=1000,iocharset=utf8,_netdev  0  0",
+            f"# //{g('FILES_SMB_SERVER')}/{g('FILES_SMB_SHARE')}  {g('FILES_SMB_MOUNT_PATH')}  cifs  credentials={cred},vers=3.0,uid=1000,gid=1000,iocharset=utf8,noperm,_netdev  0  0",
             "",
         ]
 
@@ -625,7 +625,7 @@ def try_mount(which: str, v: dict[str, str]) -> dict[str, Any]:
         return {"id": f"mount:{label}", "label": f"Mount {label} share", "status": "manual", "detail": f"could not write {cred} ({exc}) - run setup-commands.sh with sudo"}
     # noperm: the client does not enforce local perms (server ACLs still apply),
     # so the app user can use a mount created by root.
-    opts = f"credentials={cred},uid=0,gid=0,iocharset=utf8,noperm"
+    opts = f"credentials={cred},vers=3.0,uid=0,gid=0,iocharset=utf8,noperm"
     try:
         proc = subprocess.run(["mount", "-t", "cifs", unc, target, "-o", opts], capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as exc:

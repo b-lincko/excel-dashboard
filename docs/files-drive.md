@@ -7,21 +7,21 @@ service account, completely separate from the backup account.**
 
 ```
    Windows file server (192.168.100.5)
-   ├── MR-Backup share   ← LINKCO\svc_mr_backup   (backups ONLY, no user access)
-   └── MR-Files share    ← LINKCO\svc_mr_files    (Files page; user-facing)
+   ├── MR-Backup share   ← LINKCO.COM\mr.backup   (backups ONLY, no user access)
+   └── MR-Drive share    ← LINKCO.COM\drive.mr    (Files page; user-facing)
 
    App server
-   ├── /mnt/mr-backup  ← CIFS mount of MR-Backup with svc_mr_backup  (backup system)
-   └── /mnt/mr-files   ← CIFS mount of MR-Files  with svc_mr_files   (NETDRIVE_PATH)
+   ├── /mnt/mr-backup  ← CIFS mount of MR-Backup with mr.backup  (backup system)
+   └── /mnt/mr.drive   ← CIFS mount of MR-Drive  with drive.mr   (NETDRIVE_PATH)
 ```
 
 ## 1. The two accounts (this is the security boundary)
 
 | | Backup | Files page |
 | --- | --- | --- |
-| Account | `LINKCO\svc_mr_backup` | `LINKCO\svc_mr_files` |
-| Share | `\\192.168.100.5\mr.backup` | `\\192.168.100.5\mr.files` |
-| Rights | Modify on MR-Backup **only** | Modify on MR-Files **only** |
+| Account | `LINKCO.COM\mr.backup` | `LINKCO.COM\drive.mr` |
+| Share | `\\192.168.100.5\mr.backup` | `\\192.168.100.5\mr.drive` |
+| Rights | Modify on mr.backup **only** | Modify on mr.drive **only** |
 | Used by | backup service (nightly + manual) | every Files-page user (through the app) |
 | Employee SMB access to this share | **none** | allowed (it is the user-facing share) |
 | App path to the other share | none | none — enforced |
@@ -38,11 +38,12 @@ Rules (mirrored from the backup security model):
 
 ## 2. Windows server side
 
-1. Create the two service accounts (no interactive login, passwords in the
-   secret store).
-2. Create shares `MR-Backup` and `MR-Files`.
-3. Grant `svc_mr_backup` Modify on `MR-Backup` **only**; `svc_mr_files`
-   Modify on `MR-Files` **only**. Remove "Everyone"/"Authenticated Users"
+1. The two service accounts on this file server: `mr.backup` (backup share)
+   and `drive.mr` (files share) - no interactive login, passwords in the
+   secret store.
+2. Shares (UNC): `mr.backup` and `mr.drive` on 192.168.100.5.
+3. Grant `mr.backup` Modify on `MR-Backup` **only**; `svc_mr_files`
+   Modify on `MR-Drive` **only**. Remove "Everyone"/"Authenticated Users"
    from `MR-Backup`.
 
 ## 3. App server side (Linux)
@@ -51,21 +52,21 @@ Rules (mirrored from the backup security model):
 sudo apt install cifs-utils
 
 # credential files (each chmod 600, owned by root or the service user)
-# /etc/mr-backup.cred: username=svc_mr_backup / password=*** / domain=LINKCO
-# /etc/mr-files.cred:  username=svc_mr_files  / password=*** / domain=LINKCO
+# /etc/mr-backup.cred: username=mr.backup / password=*** / domain=LINKCO.COM
+# /etc/mr-files.cred:  username=drive.mr  / password=*** / domain=LINKCO.COM
 
-sudo mkdir -p /mnt/mr-backup /mnt/mr-files
+sudo mkdir -p /mnt/mr-backup /mnt/mr.drive
 sudo mount -t cifs //192.168.100.5/mr.backup /mnt/mr-backup \
-  -o credentials=/etc/mr-backup.cred,uid=$(id -u),gid=$(id -g),iocharset=utf8
-sudo mount -t cifs //192.168.100.5/mr.files /mnt/mr-files \
-  -o credentials=/etc/mr-files.cred,uid=$(id -u),gid=$(id -g),iocharset=utf8
+  -o credentials=/etc/mr-backup.cred,vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8,noperm
+sudo mount -t cifs //192.168.100.5/mr.drive /mnt/mr.drive \
+  -o credentials=/etc/mr-files.cred,vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8,noperm
 ```
 
 `/etc/fstab` (survives reboots):
 
 ```
-//192.168.100.5/mr.backup  /mnt/mr-backup  cifs  credentials=/etc/mr-backup.cred,uid=1000,gid=1000,iocharset=utf8,_netdev  0  0
-//192.168.100.5/mr.files   /mnt/mr-files   cifs  credentials=/etc/mr-files.cred,uid=1000,gid=1000,iocharset=utf8,_netdev  0  0
+//192.168.100.5/mr.backup  /mnt/mr-backup  cifs  credentials=/etc/mr-backup.cred,vers=3.0,uid=1000,gid=1000,iocharset=utf8,noperm,_netdev  0  0
+//192.168.100.5/mr.drive   /mnt/mr.drive   cifs  credentials=/etc/mr-files.cred,vers=3.0,uid=1000,gid=1000,iocharset=utf8,noperm,_netdev  0  0
 ```
 
 ## 4. Application configuration (`.env`)
@@ -77,7 +78,7 @@ SMB_MODE=mount
 SMB_MOUNT_PATH=/mnt/mr-backup
 
 # Files page (account 2)
-NETDRIVE_PATH=/mnt/mr-files
+NETDRIVE_PATH=/mnt/mr.drive
 ```
 
 `.env` is loaded automatically: `run.py` reads it on bare metal (real
@@ -107,6 +108,6 @@ instead of a share (fine for getting started).
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | Files page empty but share has files | `NETDRIVE_PATH` not set / wrong folder | set it to the mounted path, restart |
-| `Permission denied` in uploads | svc_mr_files lacks Modify on MR-Files, or uid/gid mismatch | fix share ACL or mount `uid/gid` |
+| `Permission denied` in uploads | drive.mr lacks Modify on mr.drive, or uid/gid mismatch | fix share ACL or mount `uid/gid` |
 | `overlaps a backup destination` error | `NETDRIVE_PATH` and a backup path collide | use a separate folder/share — this is deliberate |
 | Mounts vanish after reboot | no fstab entries | add the two fstab lines above |

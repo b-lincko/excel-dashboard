@@ -170,8 +170,8 @@ person's AD account:
 
 | Account | Share | Used by |
 | --- | --- | --- |
-| `LINKCO\svc_mr_backup` | `\\FILESERVER\MR-Backup` | the backup system only |
-| `LINKCO\svc_mr_files` | `\\FILESERVER\MR-Files` | the Files page (`NETDRIVE_PATH`) only |
+| `LINKCO.COM\mr.backup` | `\\192.168.100.5\mr.backup` | the backup system only |
+| `LINKCO.COM\drive.mr` | `\\192.168.100.5\mr.drive` | the Files page (`NETDRIVE_PATH`) only |
 
 `svc_mr_files` must have no rights on `MR-Backup`; employees must have no
 rights on `MR-Backup` either. The app refuses to serve a Files root that

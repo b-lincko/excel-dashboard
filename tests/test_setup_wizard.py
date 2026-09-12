@@ -240,17 +240,17 @@ def test_windows_bat_commands_and_guidance(wiz, monkeypatch):
 
 
 def test_share_name_typed_as_account_is_caught(wiz):
-    """Field error seen in the field: mr.backup entered as the username."""
+    """Same-named account/share is the CONFIRMED Linkco layout: warn only."""
     values = _values(
         wiz,
         SMB_BACKUP_ENABLED="true",
         SMB_SERVER="192.168.100.5",
         SMB_SHARE="mr.backup",
-        SMB_USERNAME="mr.backup",  # wrong: the share, not an account
+        SMB_USERNAME="mr.backup",  # real layout: account named like the share
         SMB_PASSWORD="pw",
     )
     out = wiz.check_account_names(values)
-    assert out and out[0]["status"] == "error" and "SHARE name" in out[0]["detail"]
+    assert out and out[0]["status"] == "warn" and "correct" in out[0]["detail"]
 
     ok = _values(
         wiz,
@@ -282,5 +282,14 @@ def test_generated_script_uses_noperm_and_normal_user_hint(wiz):
         NETDRIVE_PATH="",
     )
     text = wiz.render_commands(values)
-    assert "noperm" in text
+    assert "noperm" in text and "vers=3.0" in text
     assert "Run as your NORMAL user" in text
+
+
+def test_linkco_defaults_are_baked_in(wiz):
+    """Confirmed production values (2026-09-13): shares, accounts, domain, vers."""
+    d = wiz.DEFAULTS
+    assert d["SMB_SHARE"] == "mr.backup" and d["SMB_USERNAME"] == "mr.backup"
+    assert d["FILES_SMB_SHARE"] == "mr.drive" and d["FILES_SMB_USERNAME"] == "drive.mr"
+    assert d["SMB_DOMAIN"] == "LINKCO.COM" == d["FILES_SMB_DOMAIN"]
+    assert d["FILES_SMB_MOUNT_PATH"] == "/mnt/mr.drive"
