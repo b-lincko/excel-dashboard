@@ -36,6 +36,7 @@ import {
   ClipboardCheck,
   FileWarning,
   X,
+  HardDrive,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
@@ -56,6 +57,7 @@ const NAV = [
   { to: "/open", label: "Open", icon: FolderOpen, group: "Daily", page: "open" },
   { to: "/overdue", label: "Overdue", icon: AlertTriangle, group: "Daily", page: "overdue" },
   { to: "/chat", label: "Chat", icon: MessageSquare, group: "Daily", page: "chat" },
+  { to: "/files", label: "Files", icon: HardDrive, group: "Daily", page: "files" },
   { to: "/placed", label: "Placed", icon: Truck, group: "Lists", page: "placed" },
   { to: "/closed", label: "Closed", icon: CheckCircle2, group: "Lists", page: "closed" },
   { to: "/guide", label: "Guide", icon: CircleHelp, group: "Lists" },

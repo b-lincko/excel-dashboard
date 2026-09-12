@@ -1163,6 +1163,7 @@ export default function WorkOrderDetail() {
           </div>
         </div>
       )}
+      {viewing && <FileViewer file={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
@@ -1275,8 +1276,6 @@ function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
           + Add item
         </button>
       )}
-    
-      {viewing && <FileViewer file={viewing} onClose={() => setViewing(null)} />}
-</div>
+    </div>
   );
 }

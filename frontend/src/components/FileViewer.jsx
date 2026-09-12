@@ -92,7 +92,7 @@ function ExtractedTable({ rows, caption }) {
   );
 }
 
-export default function FileViewer({ file, onClose }) {
+export default function FileViewer({ file, onClose, contentPath, downloadPath }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [blobUrl, setBlobUrl] = useState("");
@@ -105,14 +105,14 @@ export default function FileViewer({ file, onClose }) {
     setLoading(true);
     setErr("");
     api
-      .get(`/api/files/${file.id}/content`)
+      .get(contentPath || `/api/files/${file.id}/content`)
       .then(async (d) => {
         if (cancelled) return;
         setData(d);
         const kind = d?.item?.kind;
         const noText = !d?.extract?.ok || (!d.extract.text && !(d.extract.tables || []).length && !(d.extract.sheets || []).length);
         if (kind === "screenshot" || (kind === "pdf" && noText)) {
-          const blob = await api.blob(`/api/files/${file.id}`);
+          const blob = await api.blob(downloadPath || `/api/files/${file.id}`);
           url = URL.createObjectURL(blob);
           setBlobUrl(url);
         }
@@ -128,7 +128,7 @@ export default function FileViewer({ file, onClose }) {
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [file?.id]);
+  }, [file?.id, contentPath, downloadPath]);
 
   if (!file) return null;
   const extract = data?.extract;
@@ -159,7 +159,7 @@ export default function FileViewer({ file, onClose }) {
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button type="button" className="btn-outline !py-1.5 text-xs" onClick={() => api.download(`/api/files/${file.id}`, file.filename)}>
+            <button type="button" className="btn-outline !py-1.5 text-xs" onClick={() => api.download(downloadPath || `/api/files/${file.id}`, file.filename)}>
               <Download size={13} /> Download
             </button>
             <button type="button" className="btn-ghost !px-2" onClick={onClose} aria-label="Close">

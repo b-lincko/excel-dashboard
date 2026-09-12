@@ -8,6 +8,7 @@ import WorkOrders from "./pages/WorkOrders.jsx";
 import WorkOrderDetail from "./pages/WorkOrderDetail.jsx";
 
 const Analytics = lazy(() => import("./pages/Analytics.jsx"));
+const NetDrive = lazy(() => import("./pages/NetDrive.jsx"));
 const ActionQueue = lazy(() => import("./pages/ActionQueue.jsx"));
 const Alerts = lazy(() => import("./pages/Alerts.jsx"));
 const Suppliers = lazy(() => import("./pages/Suppliers.jsx"));
@@ -124,6 +125,7 @@ export default function App() {
         <Route path="handover" element={<Lazy page="handover"><Handover /></Lazy>} />
         <Route path="health" element={<Lazy page="health"><Health /></Lazy>} />
         <Route path="suppliers" element={<Lazy page="suppliers"><Suppliers /></Lazy>} />
+        <Route path="files" element={<Perm page="files"><NetDrive /></Perm>} />
         <Route path="materials" element={<Lazy page="materials"><Materials /></Lazy>} />
         <Route path="supplier-suggest" element={<Lazy page="supplier_suggest"><Materials mode="suggest" /></Lazy>} />
         <Route path="reports" element={<Lazy perm="reports" page="reports"><Reports /></Lazy>} />

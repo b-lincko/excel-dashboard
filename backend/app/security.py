@@ -30,6 +30,7 @@ GUEST_PAGES = [
     "analytics",
     "reports",
     "chat",
+    "files",
     "projects",
     "import",
     "performance",
