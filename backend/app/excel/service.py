@@ -770,7 +770,6 @@ class ExcelService:
                 return None
 
     def _emergency_db_snapshot(self, reason: str) -> Optional[Path]:
-        from ..config import DB_PATH
 
         dest_dir = self.backup_dir() / datetime.now().strftime("%Y-%m-%d")
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -780,14 +779,15 @@ class ExcelService:
             database.snapshot_to(db_dest)
             return db_dest
         except Exception:
-            if DB_PATH.exists():
-                _copy_file_durable(DB_PATH, db_dest)
+            # honor the app's live DB_PATH binding (tests/Docker override it);
+            # config.DB_PATH is only the compiled-in default
+            if database.DB_PATH.exists():
+                database.wal_checkpoint()
+                _copy_file_durable(database.DB_PATH, db_dest)
                 return db_dest
             return None
 
     def _create_backup_inner(self, reason: str) -> Optional[Path]:
-        from ..config import DB_PATH
-
         src = self.excel_path()
         day = datetime.now().strftime("%Y-%m-%d")
         ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -829,8 +829,9 @@ class ExcelService:
                 time.sleep(0.2 * (attempt + 1))
         if not db_ok:
             try:
-                if DB_PATH.exists():
-                    _copy_file_durable(DB_PATH, db_dest)
+                if database.DB_PATH.exists():
+                    database.wal_checkpoint()
+                    _copy_file_durable(database.DB_PATH, db_dest)
                     db_ok = True
             except Exception as exc:
                 last_db_err = exc

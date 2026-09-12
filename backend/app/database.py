@@ -976,11 +976,29 @@ def reset_database() -> dict[str, Any]:
         return {"ok": False, "errors": errors}
 
 
+def wal_checkpoint() -> bool:
+    """Fold the -wal journal back into the main database file (best effort).
+
+    Without this, a raw byte-copy of woms.db (the durable fallback path) can
+    silently miss every row that still lives only in the -wal sidecar.
+    """
+    try:
+        conn = sqlite3.connect(str(DB_PATH), timeout=15)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            conn.close()
+        return True
+    except Exception:
+        return False
+
+
 def snapshot_to(dest: Path) -> Path:
     """Copy the live SQLite file with the backup API (safe while connections are open)."""
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    wal_checkpoint()  # keep the main file complete for both the API and byte-copy paths
     last_err: Optional[BaseException] = None
     for attempt in range(3):
         tmp = dest.with_name(dest.name + f".tmp{os.getpid()}-{attempt}")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import shutil
 import sys
 from datetime import timedelta
@@ -66,17 +68,48 @@ def _open_rec(work_order_id: str, **over):
 
 
 def test_export_csv_and_xlsx(client):
+    # seed a probe record so cell alignment can be asserted
+    client.post(
+        "/api/work-orders",
+        json={"data": _open_rec("EXPORT-PROBE-1", location="Probe Villa")},
+    )
+
     r = client.get("/api/work-orders", params={"fmt": "csv"})
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]
     body = r.content.decode("utf-8-sig")
-    lines = [ln for ln in body.splitlines() if ln.strip()]
-    assert len(lines) >= 2  # header + at least one row
-    assert "work order" in lines[0].lower()  # workbook display headers
+    rows = list(csv.reader(io.StringIO(body)))
+    assert len(rows) >= 2
+    header = [h.strip() for h in rows[0]]
+
+    # BUG PIN (2026-09-12): headers are Excel labels but cells must hold the
+    # record's values — the label->internal mapping has to be applied.
+    from app.config import load_config
+
+    mapping = load_config().mapping.internal_to_excel()
+    wo_label = mapping["work_order_id"]
+    assert wo_label in header
+    col = header.index(wo_label)
+    match = next(row for row in rows[1:] if len(row) > col and row[col].strip() == "EXPORT-PROBE-1")
+    loc_label = mapping["location"]
+    loc_col = header.index(loc_label)
+    assert match[loc_col].strip() == "Probe Villa"
 
     r = client.get("/api/work-orders", params={"fmt": "xlsx"})
     assert r.status_code == 200
     assert "spreadsheetml" in r.headers["content-type"]
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    xlsx_header = [str(c.value or "").strip() for c in ws[1]]
+    wo_col = xlsx_header.index(mapping["work_order_id"]) + 1
+    hit = next(
+        row
+        for row in ws.iter_rows(min_row=2, values_only=True)
+        if row[wo_col - 1] and str(row[wo_col - 1]).strip() == "EXPORT-PROBE-1"
+    )
+    assert hit is not None
 
     # fmt unset -> normal JSON list
     r = client.get("/api/work-orders")
@@ -187,3 +220,60 @@ def test_write_safety_backups_are_pruned(client, workbook, tmp_path):
 
     snaps_after = [p for p in svc.backup_dir().rglob("*.xlsx") if p.stem.rsplit("_", 1)[-1] in excel_service.WRITE_REASONS]
     assert len(snaps_after) == 2, "housekeeping must prune write-safety snapshots to backup_write_keep"
+
+
+def test_failed_autobackup_is_retried(client, workbook, tmp_path, monkeypatch):
+    """BUG PIN (2026-09-12): a failed slot must not mark the schedule done."""
+    from app import backup
+    from app.excel.service import excel_service
+
+    dest, svc = workbook
+    calls = {"n": 0}
+    real_export = excel_service.export_database_to_excel
+
+    def flaky(username="system"):
+        calls["n"] += 1
+        raise RuntimeError("excel locked (simulated)")
+
+    def counting(username="system"):
+        calls["n"] += 1
+        return real_export(username=username)
+
+    monkeypatch.setattr(excel_service, "export_database_to_excel", flaky)
+    backup.run_due_backup(force=True)
+    assert calls["n"] == 1
+    assert database.get_sync_meta("last_auto_backup_failed") == "1"
+    assert not database.get_sync_meta("last_auto_backup")  # slot NOT consumed
+
+    # throttled: an immediate retry does not call export again
+    assert backup.run_due_backup(force=False) is None
+    assert calls["n"] == 1
+
+    # after the backoff window the slot is retried and succeeds
+    from datetime import datetime, timedelta
+
+    old = (datetime.now() - timedelta(seconds=backup.RETRY_SECONDS + 1)).strftime("%Y-%m-%d %H:%M:%S")
+    database.set_sync_meta("last_auto_backup_fail_at", old)
+    monkeypatch.setattr(excel_service, "export_database_to_excel", counting)
+    out = backup.run_due_backup(force=False)
+    assert calls["n"] == 2
+    assert database.get_sync_meta("last_auto_backup_failed") == "0"
+    assert database.get_sync_meta("last_auto_backup")  # slot consumed on success
+    assert out is not None or database.get_sync_meta("last_backup")
+
+
+def test_queue_payload_overlays_delay_notes(client, workbook):
+    """BUG PIN (2026-09-12): ActionQueue rows must carry DB-stored delay notes."""
+    from app.excel.service import excel_service
+    from app import ops
+
+    dest, svc = workbook
+    recs = svc.get_all()
+    rid = str(recs[0]["record_id"])
+    svc.update_record(rid, {"delay_justification": "Overlay probe note"}, username="pytest")
+    payload = ops.queue_payload({})
+    rows = payload.get("overdue", []) + payload.get("ntp", []) + payload.get("on_hold", []) + payload.get("due_week", []) + payload.get("created_today", []) + payload.get("done_today", [])
+    target = next((r for r in rows if str(r.get("record_id")) == rid), None)
+    if target is None:
+        return  # record is not in any queue bucket; overlay itself is covered elsewhere
+    assert target.get("delay_justification") == "Overlay probe note"

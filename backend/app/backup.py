@@ -127,15 +127,34 @@ def schedule_status(cfg: Optional[AppConfig] = None, now: Optional[datetime] = N
     }
 
 
+RETRY_SECONDS = 1800  # a failed slot is retried at most every 30 minutes
+
+
+def _failed_recently() -> bool:
+    if database.get_sync_meta("last_auto_backup_failed") != "1":
+        return False
+    fail_dt = parse_last(database.get_sync_meta("last_auto_backup_fail_at"))
+    return bool(fail_dt and (datetime.now() - fail_dt).total_seconds() < RETRY_SECONDS)
+
+
 def run_due_backup(force: bool = False) -> Optional[Path]:
     from .excel.service import excel_service
 
     cfg = load_config()
-    if not force and not is_due(datetime.now(), cfg, database.get_sync_meta("last_auto_backup")):
+    # A failed slot must not wait a whole day: last_auto_backup is only advanced
+    # on success, and failed retries are throttled to once per RETRY_SECONDS.
+    if not force and (_failed_recently() or not is_due(datetime.now(), cfg, database.get_sync_meta("last_auto_backup"))):
         return None
     with _run_lock:
-        if not force and not is_due(datetime.now(), cfg, database.get_sync_meta("last_auto_backup")):
+        if not force and (_failed_recently() or not is_due(datetime.now(), cfg, database.get_sync_meta("last_auto_backup"))):
             return None
+        # Never snapshot an unseeded cache: a fresh deploy would otherwise pair
+        # a full workbook with an empty database (restoring that pair wipes data).
+        try:
+            if database.wo_cache_count() == 0 and excel_service.available():
+                excel_service.seed_from_excel(username="system")
+        except Exception:
+            pass
         export_err = None
         try:
             excel_service.export_database_to_excel(username="system")
@@ -168,7 +187,6 @@ def run_due_backup(force: bool = False) -> Optional[Path]:
         except Exception:
             pruned_write = 0
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        database.set_sync_meta("last_auto_backup", stamp)
         health = None
         if dest:
             try:
@@ -184,6 +202,16 @@ def run_due_backup(force: bool = False) -> Optional[Path]:
             health["error"] = export_err
         else:
             health["excel_export_ok"] = True
+        # Advance the schedule marker only when the slot truly succeeded:
+        # export ok, a snapshot landed, and the health check passed. A failed
+        # slot is retried (throttled) instead of waiting for the next day.
+        healthy = bool(dest) and export_err is None and bool(health.get("ok"))
+        if healthy:
+            database.set_sync_meta("last_auto_backup", stamp)
+            database.set_sync_meta("last_auto_backup_failed", "0")
+        else:
+            database.set_sync_meta("last_auto_backup_failed", "1")
+            database.set_sync_meta("last_auto_backup_fail_at", stamp)
         try:
             database.set_sync_meta("last_auto_backup_health", json.dumps(health, default=str))
         except Exception:

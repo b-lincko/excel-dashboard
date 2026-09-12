@@ -116,7 +116,9 @@ def _filtered(records: list[dict[str, Any]], filters: Optional[dict[str, Any]]) 
 def queue_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     cfg = load_config()
     all_records = excel_service.get_all()
-    records = _filtered(all_records, filters or {})
+    # overlay DB-stored delay notes like handover/digest/alerts so the queue's
+    # Justification column and hover card show notes that are not in Excel yet
+    records = _overlay_delay(_filtered(all_records, filters or {}))
     t = today()
     iso = t.isocalendar()
 

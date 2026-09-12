@@ -282,13 +282,22 @@ def _export_rows(
     fmt: str,
     filters: dict[str, Any],
 ) -> Response:
-    """Serve the whole filtered+sorted view as CSV/XLSX (no pagination)."""
+    """Serve the whole filtered+sorted view as CSV/XLSX (no pagination).
+
+    Headers are the workbook's Excel labels; each label is mapped back to its
+    internal field (cfg.mapping) so row values actually land under the right
+    column. Labels with no internal mapping (legacy columns) export blank.
+    """
     cfg = load_config()
     try:
         rows = [annotate(r, cfg) for r in _with_extras_many(matched)]
     except (ExcelUnavailable, ExcelLocked) as exc:
         _raise_excel(exc)
-    headers = [h for h in excel_service.headers() if str(h or "").strip()]
+    excel_headers = [h for h in excel_service.headers() if str(h or "").strip()]
+    label_to_internal = {}
+    for internal, label in cfg.mapping.internal_to_excel().items():
+        label_to_internal.setdefault(str(label).strip().lower(), internal)
+    cols = [(label_to_internal.get(h.strip().lower(), ""), h) for h in excel_headers]
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
     if fmt == "csv":
         import csv
@@ -296,9 +305,14 @@ def _export_rows(
 
         buf = _io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(headers)
+        writer.writerow([label for _key, label in cols])
         for r in rows:
-            writer.writerow([str(r.get(h) if r.get(h) is not None else "").replace(chr(10), " ") for h in headers])
+            writer.writerow(
+                [
+                    str(r.get(key) if (key and r.get(key) is not None) else "").replace(chr(10), " ")
+                    for key, _label in cols
+                ]
+            )
         return Response(
             content=buf.getvalue().encode("utf-8-sig"),
             media_type="text/csv; charset=utf-8",
@@ -309,9 +323,9 @@ def _export_rows(
     wb = Workbook()
     ws = wb.active
     ws.title = "Work orders"
-    ws.append(headers)
+    ws.append([label for _key, label in cols])
     for r in rows:
-        ws.append([r.get(h) for h in headers])
+        ws.append([r.get(key) if key else None for key, _label in cols])
     import io as _io
 
     out = _io.BytesIO()
