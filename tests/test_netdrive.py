@@ -138,3 +138,38 @@ def test_netdrive_page_imports_what_it_uses():
     src = (ROOT / "frontend" / "src" / "pages" / "NetDrive.jsx").read_text(encoding="utf-8")
     assert "useAuth()" in src
     assert 'import { useAuth } from "../context/AuthContext.jsx";' in src
+
+
+def test_files_root_may_not_overlap_backup_destinations(client, monkeypatch):
+    """SECURITY PIN (2026-09-13): the Files share and the backup share use
+    different accounts/folders; NETDRIVE_PATH must never expose backups."""
+    c, drive = client
+    backup_dir = drive.parent / "mr-backup"
+    backup_dir.mkdir(exist_ok=True)
+    monkeypatch.setenv("SMB_MOUNT_PATH", str(backup_dir))
+
+    # same folder
+    monkeypatch.setenv("NETDRIVE_PATH", str(backup_dir))
+    r = c.get("/api/netdrive")
+    assert r.status_code == 500
+    assert "overlaps a backup destination" in r.json()["detail"]
+
+    # files root INSIDE the backup mount (users would see the backups)
+    nested = backup_dir / "team-files"
+    monkeypatch.setenv("NETDRIVE_PATH", str(nested))
+    r = c.get("/api/netdrive")
+    assert r.status_code == 500
+
+    # backup mount INSIDE the files root (users could delete it)
+    outer = drive / "mixed"
+    outer.mkdir(parents=True, exist_ok=True)
+    (outer / "Daily").mkdir(exist_ok=True)
+    monkeypatch.setenv("NETDRIVE_PATH", str(outer))
+    monkeypatch.setenv("SMB_MOUNT_PATH", str(outer / "Daily"))
+    r = c.get("/api/netdrive")
+    assert r.status_code == 500
+
+    # a normal separate folder is fine
+    monkeypatch.setenv("NETDRIVE_PATH", str(drive / "team-files"))
+    r = c.get("/api/netdrive")
+    assert r.status_code == 200

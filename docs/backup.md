@@ -153,6 +153,20 @@ Two transports (env `SMB_MODE`):
    robocopy/PowerShell cleanup on the file server; mount-mode retention runs
    from the app.)
 
+### Account separation (required)
+
+Two **different** service accounts, one per purpose — never shared, never a
+person's AD account:
+
+| Account | Share | Used by |
+| --- | --- | --- |
+| `LINKCO\svc_mr_backup` | `\\FILESERVER\MR-Backup` | the backup system only |
+| `LINKCO\svc_mr_files` | `\\FILESERVER\MR-Files` | the Files page (`NETDRIVE_PATH`) only |
+
+`svc_mr_files` must have no rights on `MR-Backup`; employees must have no
+rights on `MR-Backup` either. The app refuses to serve a Files root that
+overlaps a backup destination (see `docs/files-drive.md`).
+
 ### Required AD setup
 
 * Dedicated service account, e.g. `LINKCO\svc_mr_backup` — **not** a person's

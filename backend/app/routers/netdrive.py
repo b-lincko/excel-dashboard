@@ -37,14 +37,59 @@ _cache: dict[str, tuple[float, int, dict[str, Any]]] = {}
 _CACHE_CAP = 64
 
 
+def _backup_zones() -> list[Path]:
+    """Folders that Files-page users must NEVER be able to reach."""
+    from ..config import ROOT
+
+    zones: list[Path] = []
+    for raw in (
+        os.environ.get("SMB_MOUNT_PATH", ""),
+        os.environ.get("LOCAL_BACKUP_PATH", ""),
+        str(ROOT / "backups"),
+        str(ROOT / "backup"),
+    ):
+        raw = str(raw or "").strip()
+        if not raw:
+            continue
+        try:
+            zones.append(Path(raw).expanduser().resolve())
+        except OSError:
+            continue
+    return zones
+
+
+def _guard_not_backup(root: Path) -> None:
+    """The Files share and the backup share use DIFFERENT accounts and folders.
+
+    If NETDRIVE_PATH points at (or contains, or sits inside) a backup
+    destination, users could browse or delete backups through the web app -
+    forbidden by the backup security model. Fail closed with a clear message.
+    """
+    from ..config import ROOT
+
+    for zone in _backup_zones():
+        if root == zone or zone in root.parents or root in zone.parents:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"NETDRIVE_PATH ({root}) overlaps a backup destination ({zone}). "
+                    "Files-page users must not be able to reach backups. Use a separate "
+                    "folder/share with a separate service account (docs/files-drive.md)."
+                ),
+            )
+
+
 def drive_root() -> Path:
-    raw = str(os.environ.get("NETDRIVE_PATH") or "").strip() or str(Path(__file__).resolve().parent.parent / "data" / "netdrive")
+    from ..config import ROOT
+
+    raw = str(os.environ.get("NETDRIVE_PATH") or "").strip() or str(ROOT / "data" / "netdrive")
     root = Path(raw).expanduser()
     try:
         root = root.resolve()
     except OSError:
         pass
     root.mkdir(parents=True, exist_ok=True)
+    _guard_not_backup(root)
     return root
 
 

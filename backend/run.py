@@ -10,6 +10,33 @@ os.chdir(BACKEND)
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
+
+def _load_dotenv() -> None:
+    """Load KEY=VALUE lines from .env (repo root or backend/) into os.environ.
+
+    Real environment variables always win. No quotes stripping beyond simple
+    pairs, no export prefix - keep it boring. Values are never logged.
+    """
+    for candidate in (ROOT / ".env", BACKEND / ".env"):
+        if not candidate.is_file():
+            continue
+        try:
+            for line in candidate.read_text(encoding="utf-8").splitlines():
+                text = line.strip()
+                if not text or text.startswith("#") or "=" not in text:
+                    continue
+                key, _, value = text.partition("=")
+                key = key.strip().replace("export ", "")
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+        except OSError:
+            pass
+        break
+
+
+_load_dotenv()
+
 import uvicorn
 
 # Production topology: the backend binds loopback only and nginx is the public

@@ -17,6 +17,8 @@ services:
       # Dual backup (docs/backup.md): local tiers + the mounted MR-Backup share.
       # - ./backup:/app/backup
       # - /mnt/mr-backup:/mnt/mr-backup
+      # Files page share (separate account svc_mr_files):
+      # - /mnt/mr-files:/mnt/mr-files
     environment:
       WOMS_JWT_SECRET: ${WOMS_JWT_SECRET:-}
       # Only needed if you serve the UI from a different origin than the API;
