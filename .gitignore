@@ -28,3 +28,4 @@ deploy/nginx/
 /backup/
 data/netdrive/
 setup-commands.sh
+setup-commands.bat

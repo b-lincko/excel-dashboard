@@ -22,6 +22,7 @@ def _load():
 @pytest.fixture()
 def wiz(tmp_path, monkeypatch):
     mod = _load()
+    monkeypatch.setattr(mod, "ROOT", tmp_path)  # artifacts (incl. commands file) stay in tmp
     monkeypatch.setattr(mod, "ENV_PATH", tmp_path / ".env")
     monkeypatch.setattr(mod, "COMMANDS_PATH", tmp_path / "setup-commands.sh")
     monkeypatch.setattr(mod, "ENV_BACKUP_DIR", tmp_path / "backups" / "env")
@@ -91,7 +92,7 @@ def test_save_env_chmod_backup_and_commands(wiz, tmp_path):
     backups = list(wiz.ENV_BACKUP_DIR.iterdir())
     assert len(backups) == 1 and "OLD=value" in backups[0].read_text(encoding="utf-8")
     assert stat.S_IMODE(backups[0].stat().st_mode) == 0o600
-    cmd = wiz.COMMANDS_PATH
+    cmd = wiz.ROOT / wiz._commands_filename()
     assert cmd.exists() and stat.S_IMODE(cmd.stat().st_mode) == 0o700
     assert "mr.backup" in cmd.read_text(encoding="utf-8")
 
@@ -203,3 +204,36 @@ def test_parse_env_defaults_roundtrip(wiz, tmp_path):
     assert values["SMB_SERVER"] == "10.0.0.9"
     assert values["SMB_SHARE"] == wiz.DEFAULTS["SMB_SHARE"]
     assert "Bogus" not in values
+
+
+def test_windows_bat_commands_and_guidance(wiz, monkeypatch):
+    """Windows app servers: .bat with net use (passwords never embedded),
+    UNC guidance in the mount/account checks, .bat filename."""
+    monkeypatch.setattr(wiz.os, "name", "nt")
+    values = _values(
+        wiz,
+        SMB_BACKUP_ENABLED="true",
+        SMB_SERVER="192.168.100.5",
+        SMB_SHARE="mr.backup",
+        SMB_USERNAME="svc_mr_backup",
+        SMB_DOMAIN="LINKCO",
+        SMB_PASSWORD="bk-secret",
+        NETDRIVE_PATH="\\\\192.168.100.5\\mr.files",
+        FILES_SMB_SERVER="192.168.100.5",
+        FILES_SMB_SHARE="mr.files",
+        FILES_SMB_USERNAME="svc_mr_files",
+        FILES_SMB_DOMAIN="LINKCO",
+        FILES_SMB_PASSWORD="f-secret",
+    )
+    assert wiz._commands_filename() == "setup-commands.bat"
+    text = wiz.render_commands(values)
+    assert "net use \\\\192.168.100.5\\mr.backup /user:LINKCO\\svc_mr_backup * /persistent:yes" in text
+    assert "net use \\\\192.168.100.5\\mr.files /user:LINKCO\\svc_mr_files * /persistent:yes" in text
+    assert "bk-secret" not in text and "f-secret" not in text
+
+    r = wiz.check_mounted("C:/mnt/mr-backup", "L")
+    assert r["status"] == "manual" and "UNC" in r["detail"]
+
+    monkeypatch.setattr(wiz.shutil, "which", lambda name: None)
+    r = wiz.check_smb_credentials("srv", "share", "DOM", "user", "pw", "backup", probe_share=True)
+    assert r["status"] == "manual" and "net use" in r["detail"]

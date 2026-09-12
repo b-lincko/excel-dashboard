@@ -60,6 +60,32 @@ the two credential files (`/etc/mr-backup.cred`, `/etc/mr-files.cred`),
 the two CIFS mounts, and the two fstab lines. The SMB account checks are
 automatic only when `smbclient` is installed (`sudo apt install smbclient`).
 
+## Running on Windows (setup.bat)
+
+On a Windows app server there is no `mount -t cifs`, `fstab` or
+`smbclient` — Windows talks to shares **directly by UNC path**:
+
+- **Backup share mount point** = `\\192.168.100.5\mr.backup`
+- **Files-drive folder (NETDRIVE_PATH)** = `\\192.168.100.5\mr.files`
+- **Files share mount point** = same UNC as NETDRIVE_PATH (or a mapped
+  drive letter like `F:\`)
+
+Windows reports UNC share roots and mapped drives as mounted, so the
+*Backup share mount state* check turns green and backups verify
+honestly. Introduce each service account to Windows once (the wizard's
+`setup-commands.bat` contains exactly these lines; the password prompt
+is secure):
+
+```bat
+net use \\192.168.100.5\mr.backup /user:LINKCO\svc_mr_backup * /persistent:yes
+net use \\192.168.100.5\mr.files  /user:LINKCO\svc_mr_files  * /persistent:yes
+```
+
+On Windows the wizard writes `setup-commands.bat` instead of
+`setup-commands.sh` (it never embeds the passwords — `net use` prompts
+for them). Plain local folders such as `C:\mnt\mr-backup` are reported
+as *not a share* — they are not the file server.
+
 ## The two SMB accounts (never one)
 
 | Account | Share | Used by |

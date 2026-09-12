@@ -153,6 +153,16 @@ Two transports (env `SMB_MODE`):
    robocopy/PowerShell cleanup on the file server; mount-mode retention runs
    from the app.)
 
+#### Windows app server
+
+When the dashboard runs on Windows there is no CIFS mount: set
+`SMB_MOUNT_PATH` to the UNC share path (e.g. `\\FILESERVER\MR-Backup`)
+or a mapped drive letter — `os.path.ismount()` reports both as mounts,
+so verification stays honest. Register the service account once with
+`net use \\FILESERVER\MR-Backup /user:LINKCO\svc_mr_backup * /persistent:yes`.
+A plain local folder still reports FAILED/PARTIAL_SUCCESS — it is not
+the file server.
+
 ### Account separation (required)
 
 Two **different** service accounts, one per purpose — never shared, never a
