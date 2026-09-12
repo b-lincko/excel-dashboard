@@ -147,6 +147,10 @@ def normalize_lines(raw: Any) -> list[dict[str, str]]:
                 "qty": clean_name(row.get("qty")),
                 "unit": clean_name(row.get("unit")),
                 "notes": clean_name(row.get("notes")),
+                "part_model": clean_name(row.get("part_model")),
+                "tech_spec": clean_name(row.get("tech_spec")),
+                "unit_model": clean_name(row.get("unit_model")),
+                "brand": clean_name(row.get("brand")),
                 "needed_date": clean_name(row.get("needed_date"))[:10],
                 "unit_price": clean_name(row.get("unit_price")),
             }

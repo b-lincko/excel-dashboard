@@ -1209,8 +1209,22 @@ export default function WorkOrderDetail() {
 }
 
 
+const MR_TABLE_HEADERS = [
+  "S/N",
+  "Part model no.",
+  "Material description",
+  "Technical specification",
+  "Unit model no. / details",
+  "Brand",
+  "Required qty",
+  "UOM",
+  "Remarks / notes",
+  "Supplier",
+  "Date needed",
+];
+
 function emptyLine() {
-  return { supplier: "", material: "", qty: "", unit: "", notes: "", needed_date: "", unit_price: "" };
+  return { supplier: "", material: "", qty: "", unit: "", notes: "", needed_date: "", unit_price: "", part_model: "", tech_spec: "", unit_model: "", brand: "" };
 }
 
 function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
@@ -1218,6 +1232,9 @@ function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
   const suppliers = options.supplier || [];
   const itemMap = options.supplier_items || {};
   const locked = readOnly || supplierLocked;
+  const [showPaste, setShowPaste] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const { toast } = useUi();
 
   function setLine(index, patch) {
     setForm((f) => {
@@ -1249,73 +1266,212 @@ function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
     });
   }
 
+  function tableTsv() {
+    const head = MR_TABLE_HEADERS.join("\t");
+    const rows = lines.map((line, i) =>
+      [i + 1, line.part_model || "", line.material || "", line.tech_spec || "", line.unit_model || "", line.brand || "", line.qty || "", line.unit || "", line.notes || "", line.supplier || "", (line.needed_date || "").slice(0, 10)]
+        .map((cell) => String(cell).replace(/\t|\r?\n/g, " "))
+        .join("\t")
+    );
+    return [head, ...rows].join("\n");
+  }
+
+  async function copyTable() {
+    const tsv = tableTsv();
+    try {
+      await navigator.clipboard.writeText(tsv);
+      toast("Table copied - paste into Excel or an email", "success");
+    } catch {
+      setShowPaste(true);
+      setPasteText(tsv);
+      toast("Clipboard blocked by the browser - copy the text below with Ctrl+C", "info");
+    }
+  }
+
+  function importPasted() {
+    const rows = pasteText.split(/\r?\n/).map((r) => r.split("\t"));
+    const parsed = [];
+    for (const cells of rows) {
+      if (!cells.some((c) => String(c).trim())) continue;
+      const joined = cells.join(" ").toLowerCase();
+      // skip a header row (column titles copied along with the data)
+      if (/part model\s*(no|number)|technical specification|remarks\s*/.test(joined)) continue;
+      const off = cells.length >= 9 ? 1 : 0; // 9+ columns: first cell is S/N
+      const line = emptyLine();
+      line.part_model = String(cells[0 + off] || "").trim();
+      line.material = String(cells[1 + off] || "").trim();
+      line.tech_spec = String(cells[2 + off] || "").trim();
+      line.unit_model = String(cells[3 + off] || "").trim();
+      line.brand = String(cells[4 + off] || "").trim();
+      line.qty = String(cells[5 + off] || "").trim();
+      line.unit = String(cells[6 + off] || "").trim();
+      line.notes = String(cells[7 + off] || "").trim();
+      if (cells.length >= 9 + off) line.supplier = String(cells[8 + off - 1 + 1] || "").trim();
+      if (cells.length >= 10 + off) line.needed_date = String(cells[9 + off] || "").trim().slice(0, 10);
+      if (!(line.part_model || line.material || line.tech_spec || line.unit_model || line.brand || line.qty)) continue;
+      parsed.push(line);
+    }
+    if (!parsed.length) {
+      toast("Nothing recognised - paste Excel rows with Tab-separated columns", "error");
+      return;
+    }
+    setForm((f) => {
+      const current = Array.isArray(f.lines) && f.lines.length ? f.lines.filter((l) => l.supplier || l.material || l.part_model || l.qty) : [];
+      return { ...f, lines: [...current, ...parsed] };
+    });
+    setPasteText("");
+    setShowPaste(false);
+    toast(`${parsed.length} row${parsed.length > 1 ? "s" : ""} added`, "success");
+  }
+
+  const cellCls =
+    "w-full bg-transparent px-2 py-1.5 text-sm outline-none rounded border border-transparent focus:border-sky-400 focus:bg-sky-50/60 dark:focus:bg-slate-800/60 disabled:text-slate-400";
+  const cellKey = (e) => {
+    if (e.altKey && e.key === "Enter") {
+      e.preventDefault();
+      addLine();
+    }
+  };
+
   return (
     <div className="card p-5 space-y-3" data-tour="wo-lines">
-      <div>
-        <div className="font-semibold">Items & suppliers</div>
-        <p className="text-xs text-slate-500">
-          Type to complete supplier and item names. Alt+Enter adds a row. Add new vendors on Materials.
-          Excel still keeps one supplier cell (item 1) and one material summary.
-        </p>
-      </div>
-      {lines.map((line, index) => (
-        <div key={index} className="rounded-xl border border-slate-200 dark:border-white/10 p-3 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Item {index + 1}</div>
-            {!readOnly && lines.length > 1 && (
-              <button type="button" className="btn-ghost !px-2 !py-1 text-xs" onClick={() => removeLine(index)}>
-                Remove
-              </button>
-            )}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="font-semibold">Material request form</div>
+          <p className="text-xs text-slate-500">
+            Fills like a spreadsheet: click a cell and type, Alt+Enter adds a row. Copy table pastes straight into Excel or email;
+            Paste rows imports a selection copied from Excel.
+          </p>
+        </div>
+        {!readOnly && (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-outline !py-1.5 !px-3 text-xs" onClick={addLine}>
+              + Add row
+            </button>
+            <button type="button" className="btn-outline !py-1.5 !px-3 text-xs" onClick={copyTable}>
+              Copy table
+            </button>
+            <button type="button" className="btn-outline !py-1.5 !px-3 text-xs" onClick={() => { setShowPaste((v) => !v); }}>
+              Paste rows
+            </button>
           </div>
-          <div className="grid md:grid-cols-12 gap-2">
-            <div className="md:col-span-4">
-              <label className="lbl">Supplier</label>
-              <TypeAhead
-                value={line.supplier || ""}
-                disabled={locked}
-                options={line.supplier && !suppliers.includes(line.supplier) ? [line.supplier, ...suppliers] : suppliers}
-                allowCustom={false}
-                placeholder="Type to complete a supplier"
-                onChange={(v) => setLine(index, { supplier: v })}
-              />
-            </div>
-            <div className="md:col-span-4">
-              <label className="lbl">Item they can provide</label>
-              <TypeAhead
-                value={line.material || ""}
-                disabled={readOnly}
-                options={itemMap[line.supplier] || []}
-                allowCustom
-                placeholder={`Item ${index + 1}`}
-                onChange={(v) => setLine(index, { material: v })}
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="lbl">Date</label>
-              <input
-                type="date"
-                value={(line.needed_date || "").slice(0, 10)}
-                disabled={readOnly}
-                onChange={(e) => setLine(index, { needed_date: e.target.value })}
-              />
-            </div>
-            <div className="md:col-span-1">
-              <label className="lbl">Qty</label>
-              <input value={line.qty || ""} disabled={readOnly} onChange={(e) => setLine(index, { qty: e.target.value })} />
-            </div>
-            <div className="md:col-span-1">
-              <label className="lbl">Unit</label>
-              <input value={line.unit || ""} disabled={readOnly} onChange={(e) => setLine(index, { unit: e.target.value })} placeholder="pcs" />
-            </div>
+        )}
+      </div>
+
+      {showPaste && (
+        <div className="rounded-xl border border-slate-200 dark:border-white/10 p-3 space-y-2">
+          <div className="text-xs text-slate-500">
+            Paste rows copied from Excel/Sheets (columns in this order: part model, description, technical specification, unit model,
+            brand, qty, UOM, remarks). A copied header row is skipped automatically.
+          </div>
+          <textarea
+            className="w-full h-28 font-mono text-xs rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 p-2"
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            placeholder={"A123-45\tGate valve\tDN50 PN16\tA123\tBrandsX\t12\tpcs\tfor line 2"}
+          />
+          <div className="flex gap-2">
+            <button type="button" className="btn-go !py-1.5 !px-3 text-xs" onClick={importPasted}>
+              Import rows
+            </button>
+            <button type="button" className="btn-ghost !py-1.5 !px-3 text-xs" onClick={() => setShowPaste(false)}>
+              Cancel
+            </button>
           </div>
         </div>
-      ))}
-      {!readOnly && (
-        <button type="button" className="btn-outline" onClick={addLine}>
-          + Add item
-        </button>
       )}
+
+      <div className="overflow-x-auto -mx-2 px-2">
+        <table className="w-full min-w-[1150px] text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500">
+              {MR_TABLE_HEADERS.map((h) => (
+                <th key={h} className="py-2 px-2 font-semibold border-b border-slate-200 dark:border-white/10 whitespace-nowrap">
+                  {h}
+                </th>
+              ))}
+              <th className="py-2 px-1 border-b border-slate-200 dark:border-white/10" aria-label="remove" />
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((line, index) => (
+              <tr key={index} className="border-b border-slate-100 dark:border-white/5 last:border-0">
+                <td className="px-2 py-1 text-center text-xs text-slate-400 select-none">{index + 1}</td>
+                <td className="px-1 py-0.5 min-w-[110px]">
+                  <input className={cellCls} value={line.part_model || ""} disabled={readOnly} onKeyDown={cellKey}
+                    onChange={(e) => setLine(index, { part_model: e.target.value })} aria-label={`Row ${index + 1} part model number`} />
+                </td>
+                <td className="px-1 py-0.5 min-w-[160px]">
+                  <input className={cellCls} value={line.material || ""} disabled={readOnly} onKeyDown={cellKey} list="mr-items-datalist"
+                    onChange={(e) => setLine(index, { material: e.target.value })} aria-label={`Row ${index + 1} material description`} />
+                </td>
+                <td className="px-1 py-0.5 min-w-[150px]">
+                  <input className={cellCls} value={line.tech_spec || ""} disabled={readOnly} onKeyDown={cellKey}
+                    onChange={(e) => setLine(index, { tech_spec: e.target.value })} aria-label={`Row ${index + 1} technical specification`} />
+                </td>
+                <td className="px-1 py-0.5 min-w-[130px]">
+                  <input className={cellCls} value={line.unit_model || ""} disabled={readOnly} onKeyDown={cellKey}
+                    onChange={(e) => setLine(index, { unit_model: e.target.value })} aria-label={`Row ${index + 1} unit model or details`} />
+                </td>
+                <td className="px-1 py-0.5 min-w-[110px]">
+                  <input className={cellCls} value={line.brand || ""} disabled={readOnly} onKeyDown={cellKey} list="mr-brands-datalist"
+                    onChange={(e) => setLine(index, { brand: e.target.value })} aria-label={`Row ${index + 1} brand`} />
+                </td>
+                <td className="px-1 py-0.5 min-w-[80px]">
+                  <input className={cellCls} value={line.qty || ""} disabled={readOnly} onKeyDown={cellKey}
+                    onChange={(e) => setLine(index, { qty: e.target.value })} aria-label={`Row ${index + 1} required quantity`} />
+                </td>
+                <td className="px-1 py-0.5 min-w-[70px]">
+                  <input className={cellCls} value={line.unit || ""} disabled={readOnly} onKeyDown={cellKey} placeholder="pcs" list="mr-uom-datalist"
+                    onChange={(e) => setLine(index, { unit: e.target.value })} aria-label={`Row ${index + 1} unit of measurement`} />
+                </td>
+                <td className="px-1 py-0.5 min-w-[150px]">
+                  <input className={cellCls} value={line.notes || ""} disabled={readOnly} onKeyDown={cellKey}
+                    onChange={(e) => setLine(index, { notes: e.target.value })} aria-label={`Row ${index + 1} remarks`} />
+                </td>
+                <td className="px-1 py-0.5 min-w-[130px]">
+                  <input className={cellCls} value={line.supplier || ""} disabled={locked} onKeyDown={cellKey} list="mr-suppliers-datalist"
+                    onChange={(e) => setLine(index, { supplier: e.target.value })} aria-label={`Row ${index + 1} supplier`} />
+                </td>
+                <td className="px-1 py-0.5 min-w-[130px]">
+                  <input type="date" className={cellCls} value={(line.needed_date || "").slice(0, 10)} disabled={readOnly}
+                    onChange={(e) => setLine(index, { needed_date: e.target.value })} aria-label={`Row ${index + 1} date needed`} />
+                </td>
+                <td className="px-1 py-0.5">
+                  {!readOnly && lines.length > 1 && (
+                    <button type="button" className="btn-ghost !px-2 !py-1 text-xs" title="Remove row"
+                      onClick={() => removeLine(index)} aria-label={`Remove row ${index + 1}`}>
+                      ×
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <datalist id="mr-suppliers-datalist">
+        {suppliers.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
+      <datalist id="mr-items-datalist">
+        {Array.from(new Set(Object.values(itemMap).flat())).map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
+      <datalist id="mr-brands-datalist">
+        {(options.brand || []).map((b) => (
+          <option key={b} value={b} />
+        ))}
+      </datalist>
+      <datalist id="mr-uom-datalist">
+        {(options.uom || ["pcs", "set", "m", "kg", "ltr", "box", "roll"]).map((u) => (
+          <option key={u} value={u} />
+        ))}
+      </datalist>
+      <p className="text-[11px] text-slate-400">Supplier names are matched to the vendor list on save. Keep Excel's Copy as Tab-separated so Paste rows lines up.</p>
     </div>
   );
 }

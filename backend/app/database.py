@@ -184,6 +184,10 @@ CREATE TABLE IF NOT EXISTS mr_lines (
     qty TEXT,
     unit TEXT,
     notes TEXT,
+    part_model TEXT,
+    tech_spec TEXT,
+    unit_model TEXT,
+    brand TEXT,
     needed_date TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
@@ -380,6 +384,9 @@ def init_db() -> None:
             conn.execute("ALTER TABLE mr_lines ADD COLUMN needed_date TEXT")
         if "unit_price" not in line_cols:
             conn.execute("ALTER TABLE mr_lines ADD COLUMN unit_price TEXT")
+        for col in ("part_model", "tech_spec", "unit_model", "brand"):
+            if col not in line_cols:
+                conn.execute(f"ALTER TABLE mr_lines ADD COLUMN {col} TEXT")
         conn.execute(
             """CREATE TABLE IF NOT EXISTS po_approvals (
                 record_id TEXT PRIMARY KEY,
@@ -1827,6 +1834,10 @@ def replace_mr_lines(
                 "qty": " ".join(str(row.get("qty") or "").split()),
                 "unit": " ".join(str(row.get("unit") or "").split()),
                 "notes": " ".join(str(row.get("notes") or "").split()),
+                "part_model": " ".join(str(row.get("part_model") or "").split()),
+                "tech_spec": " ".join(str(row.get("tech_spec") or "").split()),
+                "unit_model": " ".join(str(row.get("unit_model") or "").split()),
+                "brand": " ".join(str(row.get("brand") or "").split()),
                 "needed_date": " ".join(str(row.get("needed_date") or "").split())[:10],
                 "unit_price": " ".join(str(row.get("unit_price") or "").split()),
             }
@@ -1837,8 +1848,8 @@ def replace_mr_lines(
         for idx, row in enumerate(cleaned):
             conn.execute(
                 """INSERT INTO mr_lines
-                   (record_id, work_order_id, supplier, material, qty, unit, notes, needed_date, unit_price, sort_order, created_at, created_by)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (record_id, work_order_id, supplier, material, qty, unit, notes, part_model, tech_spec, unit_model, brand, needed_date, unit_price, sort_order, created_at, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     rid,
                     wo,
@@ -1847,6 +1858,10 @@ def replace_mr_lines(
                     row["qty"],
                     row["unit"],
                     row["notes"],
+                    row.get("part_model") or "",
+                    row.get("tech_spec") or "",
+                    row.get("unit_model") or "",
+                    row.get("brand") or "",
                     row.get("needed_date") or "",
                     row.get("unit_price") or "",
                     idx,
