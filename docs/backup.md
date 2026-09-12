@@ -134,21 +134,33 @@ Two transports (env `SMB_MODE`):
 > the app simply copies into `SMB_MOUNT_PATH`. If the share is **not actually
 > mounted** there, that path is just a plain folder on the app server — runs
 > report SUCCESS (the copy exists!) but **nothing reaches the file server**.
-> The backup now detects this (`SMB_TARGET_NOT_MOUNTED`), **counts the SMB
-> destination as FAILED → result PARTIAL_SUCCESS** (local copy stays intact),
-> and the Settings card shows the reason. Fix: mount the share (commands
-> above) or switch to `SMB_MODE=smbclient`. Also note `SMB_SERVER`,
-> `SMB_USERNAME` and `SMB_PASSWORD` are **only used in smbclient mode** — in
-> mount mode the OS mount holds the credentials.
-> `SMB_SERVER` must be the bare server name/IP (`192.168.100.5`), never the
-> UNC path, and `SMB_USERNAME` is the account name (here: `mr.backup`),
-> never a share path.
+> The backup detects this (`SMB_TARGET_NOT_MOUNTED`) and then:
+>
+> 1. **Automatic rescue** — if `smbclient` is installed and `SMB_SERVER`,
+>    `SMB_USERNAME` and `SMB_PASSWORD` are set in the environment, the run
+>    **falls back to a direct smbclient push** to `//SMB_SERVER/SMB_SHARE`
+>    for that run (`SMB_FALLBACK_SMBCLIENT` in the log). The copy is verified
+>    on the real file server, the run counts as SUCCESS, and the Settings
+>    card still shows an amber note telling you to fix the mount.
+> 2. **No rescue possible** (no smbclient binary, or no credentials in the
+>    environment) — the SMB destination **counts as FAILED → result
+>    PARTIAL_SUCCESS** (local copy stays intact) and the reason names the
+>    missing pieces. Fix: mount the share (commands above) or set
+>    `SMB_MODE=smbclient`.
+>
+> Because of the fallback it is worth setting `SMB_SERVER`, `SMB_USERNAME`
+> and `SMB_PASSWORD` **even in mount mode** — they are used only when the
+> mount is missing. `SMB_SERVER` must be the bare server name/IP
+> (`192.168.100.5`), never the UNC path, and `SMB_USERNAME` is the account
+> name (here: `mr.backup`), never a share path.
 
 2. **`smbclient`** — direct push with the `smbclient` binary
    (`SMB_SERVER`, `SMB_SHARE`, `SMB_USERNAME`, `SMB_PASSWORD`, `SMB_DOMAIN`).
    Credentials are written to a temp auth file (0600) per run and deleted
    afterwards; the password is never on the command line, in logs, or in the
-   app config. Verification downloads the copy back and hashes it.
+   app config. The client negotiates SMB3 explicitly (`-m SMB3` — the Linkco
+   file server requires it, same reason the mounts use `vers=3.0`).
+   Verification downloads the copy back and hashes it.
    (Retention in this mode must be enforced server-side — e.g. a scheduled
    robocopy/PowerShell cleanup on the file server; mount-mode retention runs
    from the app.)

@@ -1335,7 +1335,14 @@ function DualBackupCard({ canSettings, toast }) {
                 {st.last.smb}
                 {st.last.smb_verification === "PASSED" ? " · verified" : st.last.smb === "SUCCESS" ? "" : ""}
               </div>
-              {st.last.smb_reason ? <div className="text-[11px] text-rose-500 truncate" title={st.last.smb_reason}>{st.last.smb_reason}</div> : null}
+              {st.last.smb_reason ? (
+                <div
+                  className={`text-[11px] truncate ${st.last.smb === "SUCCESS" ? "text-amber-600 dark:text-amber-400" : "text-rose-500"}`}
+                  title={st.last.smb_reason}
+                >
+                  {st.last.smb_reason}
+                </div>
+              ) : null}
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-wider text-slate-400">Result</div>

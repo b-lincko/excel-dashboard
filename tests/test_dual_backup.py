@@ -203,6 +203,66 @@ def test_mount_mode_warns_when_target_is_not_a_mount(env_setup, monkeypatch):
     assert status["local"]["status"] == "SUCCESS"
     assert Path(status["local"]["path"]).is_file()
     assert any(e["event"] == "SMB_TARGET_NOT_MOUNTED" for e in status["log"])
+    # no credentials in the env -> the automatic smbclient fallback must
+    # explain exactly why it could not rescue the run
+    assert "fallback unavailable" in status["smb"]["reason"]
+
+
+def test_mount_missing_falls_back_to_smbclient(env_setup, monkeypatch, tmp_path):
+    """SMB_MODE=mount + no actual mount + full smbclient config -> the run
+    pushes directly to //server/share, verifies it, and still reports the
+    broken mount so the operator fixes it."""
+    dual, local, smb, data_dir, excel = env_setup
+    smb.mkdir(parents=True, exist_ok=True)  # plain dir, not a mountpoint
+    import os as _os
+    import shlex
+
+    monkeypatch.setattr(_os.path, "ismount", lambda p: False if str(p).startswith(str(smb)) else _os.path.ismount(p))
+    monkeypatch.setenv("SMB_USERNAME", "mr.backup")
+    monkeypatch.setenv("SMB_PASSWORD", "secret")
+    monkeypatch.setenv("SMB_DOMAIN", "LINKCO.COM")
+    monkeypatch.setattr(dual.shutil, "which", lambda name: "/usr/bin/smbclient" if name == "smbclient" else None)
+
+    remote = tmp_path / "fake-file-server"
+    remote.mkdir()
+
+    def fake_smbclient(cfg, auth, command, timeout=120):
+        # emulate the file server: mkdir/put/get against `remote`
+        parts = shlex.split(command)
+        op = parts[0]
+        if op == "mkdir":
+            (remote / parts[1].replace("\\", "/")).mkdir(parents=True, exist_ok=True)
+            return True, ""
+        if op == "put":
+            src, dst = Path(parts[1]), remote / parts[2].replace("\\", "/")
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(src.read_bytes())
+            return True, ""
+        if op == "get":
+            src, dst = remote / parts[1].replace("\\", "/"), Path(parts[2])
+            if not src.is_file():
+                return False, "NT_STATUS_OBJECT_NAME_NOT_FOUND"
+            dst.write_bytes(src.read_bytes())
+            return True, ""
+        return False, f"unexpected smbclient command: {command}"
+
+    monkeypatch.setattr(dual, "_smbclient_run", fake_smbclient)
+
+    status = dual.run_dual_backup(reason="manual")
+    assert status["local"]["status"] == "SUCCESS"
+    # the copy really reached the (fake) file server and verified
+    assert status["smb"]["status"] == "SUCCESS", status["smb"]
+    assert status["smb"]["verification"] == "PASSED"
+    assert status["smb"]["fallback"] == "smbclient"
+    assert status["overall"] == "SUCCESS"
+    daily = list((remote / "Daily").rglob("backup_*.zip"))
+    assert daily, "artifact must exist on the remote share"
+    # the operator is still told the mount is broken
+    assert "mount" in status["smb"]["reason"].lower()
+    assert any(e["event"] == "SMB_TARGET_NOT_MOUNTED" for e in status["log"])
+    assert any(e["event"] == "SMB_FALLBACK_SMBCLIENT" for e in status["log"])
+    # nothing was written into the plain folder that pretends to be the share
+    assert not list(smb.rglob("backup_*"))
 
 
 def test_retention_independent_per_destination(env_setup):

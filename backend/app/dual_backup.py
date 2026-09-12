@@ -267,7 +267,9 @@ def _smbclient_run(cfg: DualConfig, auth: Path, command: str, timeout: int = 120
         return False, "smbclient binary is not installed on this host"
     try:
         proc = subprocess.run(
-            ["smbclient", _smb_unc(cfg), "-A", str(auth), "-c", command, "-t", str(timeout)],
+            # -m SMB3: the Linkco file server needs explicit SMB3 negotiation
+            # (the CIFS mounts use vers=3.0 for the same reason).
+            ["smbclient", _smb_unc(cfg), "-A", str(auth), "-m", "SMB3", "-c", command, "-t", str(timeout)],
             capture_output=True,
             text=True,
             timeout=timeout + 30,
@@ -495,26 +497,50 @@ def run_dual_backup(pair: Optional[Path] = None, reason: str = "manual") -> Opti
         else:
             _log(events, "SMB_CONNECTION_STARTED", f"mode={cfg.smb_mode} target={status['config']['smb_target']}")
             mount_warning = ""
+            fallback = ""
             if cfg.smb_mode == "mount" and not os.path.ismount(str(cfg.smb_mount_path)):
                 # A plain folder at SMB_MOUNT_PATH means the share was never
                 # mounted: backups "succeed" into a local directory and never
-                # reach the file server. Warn instead of failing (bind mounts
-                # and CIFS both report as mounts).
+                # reach the file server.
                 mount_warning = (
                     f"{cfg.smb_mount_path} is a plain folder on the app server, not a mounted share - "
                     f"copies are NOT reaching the file server. Mount //{cfg.smb_server or '<server>'}/{cfg.smb_share} "
                     f"at {cfg.smb_mount_path} (docs/backup.md section 4) or set SMB_MODE=smbclient."
                 )
                 _log(events, "SMB_TARGET_NOT_MOUNTED", mount_warning)
+                # Automatic rescue: if the smbclient transport is fully
+                # configured, push directly to //server/share for THIS run so
+                # the off-site copy still lands on the file server while the
+                # mount is broken. The run is still flagged so the operator
+                # fixes the mount.
+                blockers = []
+                if not shutil.which("smbclient"):
+                    blockers.append("smbclient is not installed (sudo apt install smbclient)")
+                if not cfg.smb_server:
+                    blockers.append("SMB_SERVER is empty")
+                if not cfg.smb_username or not cfg.smb_password:
+                    blockers.append("SMB_USERNAME/SMB_PASSWORD are not set in the environment")
+                if not blockers:
+                    fallback = "smbclient"
+                    cfg.smb_mode = "smbclient"
+                    status["config"]["smb_target"] = f"//{cfg.smb_server}/{cfg.smb_share}"
+                    _log(
+                        events,
+                        "SMB_FALLBACK_SMBCLIENT",
+                        f"mount missing - pushing directly to //{cfg.smb_server}/{cfg.smb_share} for this run",
+                    )
+                else:
+                    mount_warning += " Automatic smbclient fallback unavailable: " + "; ".join(blockers) + "."
             auth = _smbclient_conn(cfg, tmpdir) if cfg.smb_mode == "smbclient" else None
             try:
                 pushed = True
                 push_msg = ""
-                if mount_warning:
-                    # The target folder is NOT a mount: pushing there would
-                    # write to the app server, not the file server. Count the
-                    # SMB destination as FAILED (overall PARTIAL_SUCCESS) so
-                    # the UI can't show a misleading off-site success.
+                if mount_warning and not fallback:
+                    # The target folder is NOT a mount and no direct push is
+                    # possible: pushing there would write to the app server,
+                    # not the file server. Count the SMB destination as FAILED
+                    # (overall PARTIAL_SUCCESS) so the UI can't show a
+                    # misleading off-site success.
                     pushed = False
                     push_msg = mount_warning
                 targets = [("Daily", date_dir)]
@@ -559,10 +585,19 @@ def run_dual_backup(pair: Optional[Path] = None, reason: str = "manual") -> Opti
                         smb_reason = ""
                         _log(events, "SMB_BACKUP_VERIFIED", remote_path)
                 if smb_status != "SUCCESS":
-                    _log(events, "SMB_BACKUP_FAILED", smb_reason[:200])
+                    _log(events, "SMB_BACKUP_FAILED", (smb_reason or mount_warning)[:200])
                 size = 0
                 if smb_status == "SUCCESS" and cfg.smb_mode == "mount":
                     size = (cfg.smb_mount_path / "Daily" / date_dir / artifact_name).stat().st_size
+                elif smb_status == "SUCCESS":
+                    size = artifact.stat().st_size
+                if smb_status == "SUCCESS" and fallback:
+                    # The copy IS on the file server (verified via smbclient),
+                    # but the mount is still broken - keep telling the operator.
+                    smb_reason = (
+                        f"delivered via smbclient fallback (mount at {cfg.smb_mount_path} is still missing - "
+                        f"fix it per docs/backup.md section 4, or set SMB_MODE=smbclient permanently)"
+                    )
                 status["smb"] = {
                     "status": smb_status,
                     "verification": smb_ver,
@@ -571,6 +606,7 @@ def run_dual_backup(pair: Optional[Path] = None, reason: str = "manual") -> Opti
                     "sha256": artifact_sha if smb_status == "SUCCESS" else "",
                     "reason": smb_reason or mount_warning,
                     "mount_warning": mount_warning,
+                    "fallback": fallback,
                 }
             finally:
                 if auth is not None:
