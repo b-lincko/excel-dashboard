@@ -14,9 +14,30 @@ services:
       - ./file.xlsx:/app/file.xlsx
       - ./data:/app/data
       - ./backups:/app/backups
+      # Dual backup (docs/backup.md): local tiers + the mounted MR-Backup share.
+      # - ./backup:/app/backup
+      # - /mnt/mr-backup:/mnt/mr-backup
     environment:
       WOMS_JWT_SECRET: ${WOMS_JWT_SECRET:-}
       # Only needed if you serve the UI from a different origin than the API;
       # same-origin behind nginx needs nothing.
       WOMS_CORS_ORIGINS: ${WOMS_CORS_ORIGINS:-}
+      # Dual backup (see .env.example / docs/backup.md) - credentials come from
+      # the host environment or a secrets file, never from this repository.
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      LOCAL_BACKUP_PATH: ${LOCAL_BACKUP_PATH:-/app/backup}
+      SMB_BACKUP_ENABLED: ${SMB_BACKUP_ENABLED:-false}
+      SMB_MODE: ${SMB_MODE:-mount}
+      SMB_MOUNT_PATH: ${SMB_MOUNT_PATH:-/mnt/mr-backup}
+      SMB_SERVER: ${SMB_SERVER:-}
+      SMB_SHARE: ${SMB_SHARE:-MR-Backup}
+      SMB_DOMAIN: ${SMB_DOMAIN:-}
+      SMB_USERNAME: ${SMB_USERNAME:-}
+      SMB_PASSWORD: ${SMB_PASSWORD:-}
+      BACKUP_DAILY_RETENTION: ${BACKUP_DAILY_RETENTION:-7}
+      BACKUP_WEEKLY_RETENTION: ${BACKUP_WEEKLY_RETENTION:-4}
+      BACKUP_MONTHLY_RETENTION: ${BACKUP_MONTHLY_RETENTION:-12}
+      BACKUP_ENCRYPTION_ENABLED: ${BACKUP_ENCRYPTION_ENABLED:-false}
+      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:-}
+      BACKUP_PATHS: ${BACKUP_PATHS:-}
     restart: unless-stopped

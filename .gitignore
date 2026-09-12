@@ -23,3 +23,6 @@ htmlcov/
 
 # nginx built/installed in-place for this deployment (deploy/README.md)
 deploy/nginx/
+
+# dual backup local store (env: LOCAL_BACKUP_PATH)
+/backup/

@@ -209,6 +209,13 @@ def run_due_backup(force: bool = False) -> Optional[Path]:
         if healthy:
             database.set_sync_meta("last_auto_backup", stamp)
             database.set_sync_meta("last_auto_backup_failed", "0")
+            # Dual backup: same verified pair -> one zip -> local tiers + SMB
+            try:
+                from .dual_backup import run_dual_backup
+
+                run_dual_backup(pair=dest, reason="auto")
+            except Exception as exc:
+                print(f"[WOMS] dual backup failed: {exc}")
         else:
             database.set_sync_meta("last_auto_backup_failed", "1")
             database.set_sync_meta("last_auto_backup_fail_at", stamp)

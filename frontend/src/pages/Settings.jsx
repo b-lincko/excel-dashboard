@@ -170,6 +170,7 @@ export default function Settings() {
           ask={ask}
         />
       )}
+      {can("backup") && <DualBackupCard canSettings={can("backup")} toast={toast} />}
 
       <div className="card p-5">
         <div className="font-semibold mb-1">Column mapping wizard</div>
@@ -1248,6 +1249,138 @@ function ListField({ label, value, onChange, disabled }) {
         value={(value || []).join(", ")}
         onChange={(e) => onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
       />
+    </div>
+  );
+}
+
+function DualBackupCard({ canSettings, toast }) {
+  const [st, setSt] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  async function load() {
+    try {
+      const d = await api.get("/api/admin/backups/status");
+      setSt(d);
+    } catch {
+      setSt(null);
+    }
+  }
+
+  useEffect(() => {
+    if (canSettings) load();
+  }, [canSettings]);
+
+  async function runNow() {
+    setBusy(true);
+    try {
+      const d = await api.post("/api/admin/backups");
+      if (d.status === "success") toast(`Dual backup ${d.backup_id} verified`, "success");
+      else if (d.status === "partial_success") toast(`Dual backup ${d.backup_id}: local ok, SMB issue`, "error");
+      else toast(d.detail || "Dual backup failed", "error");
+      load();
+    } catch (e) {
+      toast(e.message || "Dual backup failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!canSettings) return null;
+  const cfgD = st?.config;
+  const dot = (s) =>
+    s === "SUCCESS" ? "text-emerald-600 dark:text-emerald-400" : s === "SKIPPED" ? "text-slate-400" : "text-rose-600 dark:text-rose-400";
+
+  return (
+    <div className="card p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="font-semibold">Off-site copy (local + SMB)</div>
+          <p className="text-xs text-slate-500">
+            {cfgD
+              ? `Local: ${cfgD.local_path}${cfgD.smb_enabled ? ` · SMB: ${cfgD.smb_target}` : " · SMB disabled"}`
+              : "One package, two verified destinations."}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button type="button" className="btn-outline" onClick={load} disabled={busy}>
+            Refresh
+          </button>
+          <button type="button" className="btn-outline" onClick={runNow} disabled={busy}>
+            Run dual backup
+          </button>
+        </div>
+      </div>
+
+      {st?.last ? (
+        <>
+          <div className="grid sm:grid-cols-4 gap-2 text-sm">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-slate-400">Last backup</div>
+              <div className="font-mono text-xs">{st.last.backup_id}</div>
+              <div className="text-[11px] text-slate-500">
+                {st.last.started} · {st.last.duration_s ?? "?"}s{st.last.size ? ` · ${(st.last.size / 1048576).toFixed(1)} MB` : ""}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-slate-400">Local</div>
+              <div className={`font-semibold ${dot(st.last.local)}`}>
+                {st.last.local}
+                {st.last.local_verification === "PASSED" ? " · verified" : st.last.local === "SUCCESS" ? "" : " · failed"}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-slate-400">SMB</div>
+              <div className={`font-semibold ${dot(st.last.smb)}`}>
+                {st.last.smb}
+                {st.last.smb_verification === "PASSED" ? " · verified" : st.last.smb === "SUCCESS" ? "" : ""}
+              </div>
+              {st.last.smb_reason ? <div className="text-[11px] text-rose-500 truncate" title={st.last.smb_reason}>{st.last.smb_reason}</div> : null}
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-slate-400">Result</div>
+              <div className={`font-bold ${st.last.overall === "SUCCESS" ? "text-emerald-600 dark:text-emerald-400" : st.last.overall === "PARTIAL_SUCCESS" ? "text-amber-600 dark:text-amber-400" : "text-rose-600 dark:text-rose-400"}`}>
+                {st.last.overall}
+              </div>
+              {st.last.encrypted ? <div className="text-[11px] text-slate-500">AES-256 encrypted</div> : null}
+            </div>
+          </div>
+
+          {st.history?.length > 1 && (
+            <div>
+              <button type="button" className="text-xs text-sky-700 dark:text-sky-300 underline" onClick={() => setOpen((v) => !v)}>
+                {open ? "Hide" : "Show"} backup history ({st.history.length})
+              </button>
+              {open && (
+                <table className="data w-full text-xs mt-2">
+                  <thead>
+                    <tr>
+                      <th>Backup</th>
+                      <th>Started</th>
+                      <th>Local</th>
+                      <th>SMB</th>
+                      <th>Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {st.history.map((h) => (
+                      <tr key={h.backup_id}>
+                        <td className="font-mono">{h.backup_id}</td>
+                        <td>{h.started}</td>
+                        <td className={dot(h.local)}>{h.local}</td>
+                        <td className={dot(h.smb)} title={h.smb_reason || ""}>{h.smb}</td>
+                        <td className={h.overall === "SUCCESS" ? "text-emerald-600" : h.overall === "PARTIAL_SUCCESS" ? "text-amber-600" : "text-rose-600"}>{h.overall}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-sm text-slate-500">No dual backup has run yet.</p>
+      )}
     </div>
   );
 }

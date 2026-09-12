@@ -16,3 +16,5 @@ PyMuPDF>=1.24.0
 # OCR for scanned PDFs / photos (used only when the tesseract binary is on the host)
 pytesseract>=0.3.10
 Pillow>=10.0.0
+# Dual backup: optional AES-256-GCM package encryption (added 2026-09-12)
+cryptography>=42.0.0
