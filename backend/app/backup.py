@@ -162,6 +162,11 @@ def run_due_backup(force: bool = False) -> Optional[Path]:
             pruned = excel_service.prune_backups(keep, reasons=("auto", "manual")) if keep else 0
         except Exception:
             pruned = 0
+        write_keep = int(getattr(cfg, "backup_write_keep", 8) or 0)
+        try:
+            pruned_write = excel_service.prune_backups(write_keep, reasons=excel_service.WRITE_REASONS) if write_keep else 0
+        except Exception:
+            pruned_write = 0
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         database.set_sync_meta("last_auto_backup", stamp)
         health = None
@@ -185,7 +190,8 @@ def run_due_backup(force: bool = False) -> Optional[Path]:
             pass
         details = (
             f"Automatic backup {dest or ''} "
-            f"(archived {archived.get('moved', 0)}, pruned archives {pruned_arch.get('removed', 0)}, pruned {pruned})"
+            f"(archived {archived.get('moved', 0)}, pruned archives {pruned_arch.get('removed', 0)}, "
+            f"pruned {pruned}, pruned write-safety {pruned_write})"
         )
         if health and not health.get("ok"):
             details += f" HEALTH FAIL rows={health.get('backup_count')} live={health.get('live_count')} {health.get('error') or ''}"

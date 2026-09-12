@@ -165,3 +165,25 @@ def test_options_include_delay_reasons(client):
     reasons = opts.get("delay_reason_options")
     assert isinstance(reasons, list) and reasons, "delay_reason_options must be exposed"
     assert any("Supplier" in str(x) for x in reasons)
+
+
+def test_write_safety_backups_are_pruned(client, workbook, tmp_path):
+    """backup_write_keep is honoured by the housekeeping flows (pinned decision)."""
+    from app.backup import run_due_backup
+    from app.excel.service import excel_service
+
+    dest, svc = workbook
+    for reason in ("update", "create", "bulk", "delete", "import"):
+        svc.create_backup(reason=reason)
+    snaps = [p for p in svc.backup_dir().rglob("*.xlsx") if p.stem.rsplit("_", 1)[-1] in excel_service.WRITE_REASONS]
+    assert len(snaps) == 5
+
+    cfg = AppConfig()
+    cfg.excel_path = str(dest)
+    cfg.backup_dir = str(tmp_path / "backups")
+    cfg.backup_write_keep = 2
+    save_config(cfg)
+    run_due_backup(force=True)
+
+    snaps_after = [p for p in svc.backup_dir().rglob("*.xlsx") if p.stem.rsplit("_", 1)[-1] in excel_service.WRITE_REASONS]
+    assert len(snaps_after) == 2, "housekeeping must prune write-safety snapshots to backup_write_keep"

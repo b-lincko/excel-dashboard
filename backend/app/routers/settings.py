@@ -335,6 +335,10 @@ def create_backup(user=Depends(require_permission("backup"))):
         pruned = excel_service.prune_backups(int(getattr(cfg, "backup_ratio", 14) or 0), reasons=("auto", "manual"))
     except Exception:
         pruned = 0
+    try:
+        pruned_write = excel_service.prune_backups(int(getattr(cfg, "backup_write_keep", 8) or 0), reasons=excel_service.WRITE_REASONS)
+    except Exception:
+        pruned_write = 0
     health = None
     if path:
         try:
@@ -353,6 +357,7 @@ def create_backup(user=Depends(require_permission("backup"))):
     return {
         "path": str(path) if path else None,
         "pruned": pruned,
+        "pruned_write": pruned_write,
         "archived": archived,
         "pruned_archives": pruned_arch,
         "health": health,
