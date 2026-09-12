@@ -490,10 +490,22 @@ def run_dual_backup(pair: Optional[Path] = None, reason: str = "manual") -> Opti
 
         # -- SMB ----------------------------------------------------------------
         if not cfg.smb_enabled:
-            status["smb"] = {"status": "SKIPPED", "verification": "", "path": "", "size": 0, "sha256": "", "reason": "SMB backup is disabled"}
+            status["smb"] = {"status": "SKIPPED", "verification": "", "path": "", "size": 0, "sha256": "", "reason": "SMB backup is disabled", "mount_warning": ""}
             _log(events, "SMB_BACKUP_SKIPPED", "disabled")
         else:
             _log(events, "SMB_CONNECTION_STARTED", f"mode={cfg.smb_mode} target={status['config']['smb_target']}")
+            mount_warning = ""
+            if cfg.smb_mode == "mount" and not os.path.ismount(str(cfg.smb_mount_path)):
+                # A plain folder at SMB_MOUNT_PATH means the share was never
+                # mounted: backups "succeed" into a local directory and never
+                # reach the file server. Warn instead of failing (bind mounts
+                # and CIFS both report as mounts).
+                mount_warning = (
+                    f"{cfg.smb_mount_path} is a plain folder on the app server, not a mounted share - "
+                    f"copies are NOT reaching the file server. Mount //{cfg.smb_server or '<server>'}/{cfg.smb_share} "
+                    f"at {cfg.smb_mount_path} (docs/backup.md section 4) or set SMB_MODE=smbclient."
+                )
+                _log(events, "SMB_TARGET_NOT_MOUNTED", mount_warning)
             auth = _smbclient_conn(cfg, tmpdir) if cfg.smb_mode == "smbclient" else None
             try:
                 pushed = True
@@ -550,7 +562,8 @@ def run_dual_backup(pair: Optional[Path] = None, reason: str = "manual") -> Opti
                     "path": remote_path if smb_status == "SUCCESS" else "",
                     "size": size,
                     "sha256": artifact_sha if smb_status == "SUCCESS" else "",
-                    "reason": smb_reason,
+                    "reason": smb_reason or mount_warning,
+                    "mount_warning": mount_warning,
                 }
             finally:
                 if auth is not None:

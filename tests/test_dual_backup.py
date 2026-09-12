@@ -175,6 +175,20 @@ def test_corrupted_smb_copy_fails_verification(env_setup, monkeypatch):
     assert not (smb / "Daily" / Path(status["local"]["path"]).parent.name / status["artifact"]).exists()
 
 
+def test_mount_mode_warns_when_target_is_not_a_mount(env_setup):
+    """The plain-folder mistake: SMB_MODE=mount without an actual mount."""
+    dual, local, smb, data_dir, excel = env_setup
+    smb.mkdir(parents=True, exist_ok=True)  # plain dir, not a mountpoint
+    import os as _os
+
+    assert not _os.path.ismount(str(smb))
+    status = dual.run_dual_backup(reason="manual")
+    # the copy still lands (it IS the configured folder) but the warning fires
+    assert status["smb"]["status"] == "SUCCESS"
+    assert "not a mounted share" in status["smb"].get("mount_warning", "")
+    assert any(e["event"] == "SMB_TARGET_NOT_MOUNTED" for e in status["log"])
+
+
 def test_retention_independent_per_destination(env_setup):
     dual, local, smb, data_dir, excel = env_setup
     for root, n in ((local, 10), (smb, 3)):

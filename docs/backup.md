@@ -130,6 +130,19 @@ Two transports (env `SMB_MODE`):
      SMB_MOUNT_PATH: /mnt/mr-backup
    ```
 
+> **The #1 misconfiguration (we warn about it now):** with `SMB_MODE=mount`
+> the app simply copies into `SMB_MOUNT_PATH`. If the share is **not actually
+> mounted** there, that path is just a plain folder on the app server — runs
+> report SUCCESS (the copy exists!) but **nothing reaches the file server**.
+> The backup now emits `SMB_TARGET_NOT_MOUNTED` + a warning in the status and
+> the Settings card when the target is not a real mount. Fix: mount the share
+> (commands above) or switch to `SMB_MODE=smbclient`. Also note `SMB_SERVER`,
+> `SMB_USERNAME` and `SMB_PASSWORD` are **only used in smbclient mode** — in
+> mount mode the OS mount holds the credentials.
+> `SMB_SERVER` must be the bare server name/IP (`192.168.100.5`), never the
+> UNC path, and `SMB_USERNAME` is the account name (e.g. `svc_mr_backup`),
+> never a share path.
+
 2. **`smbclient`** — direct push with the `smbclient` binary
    (`SMB_SERVER`, `SMB_SHARE`, `SMB_USERNAME`, `SMB_PASSWORD`, `SMB_DOMAIN`).
    Credentials are written to a temp auth file (0600) per run and deleted
@@ -260,4 +273,5 @@ whole-system package (it adds uploads + configs + manifest).
 | `Decryption failed` during restore | restore CLI | wrong key — the package will not silently restore garbage |
 | SMB `SKIPPED` | status record | `SMB_BACKUP_ENABLED=false` — enable for disaster-recovery copy |
 | No weekly/monthly folder | destinations | tiers appear on the first backup of that ISO week / month |
+| "SMB SUCCESS" but files don't appear on the file server | `mount -t cifs` output; status `smb.mount_warning` | `SMB_MODE=mount` without an actual mount — the app wrote to a plain local folder; mount the share or use smbclient mode |
 | Restore refuses / warns | restore CLI | stop the app for a clean full restore; the DB is written through the backup API, but file.xlsx/attachments copies assume a quiet system |

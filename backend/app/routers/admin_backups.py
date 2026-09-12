@@ -65,6 +65,7 @@ def backup_status(user=Depends(require_permission("backup"))):
                 "smb": h.get("smb", {}).get("status"),
                 "smb_verification": h.get("smb", {}).get("verification"),
                 "smb_reason": h.get("smb", {}).get("reason") or "",
+                "smb_mount_warning": h.get("smb", {}).get("mount_warning") or "",
                 "overall": h.get("overall"),
                 "size": h.get("local", {}).get("size") or 0,
                 "encrypted": bool(h.get("encrypted")),
