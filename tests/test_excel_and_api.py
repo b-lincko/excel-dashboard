@@ -458,15 +458,21 @@ def test_reconcile_migrates_sqlite_delay_into_new_columns(workbook):
     path, svc = workbook
     # Drift guard (2026-09-12): the live file may already carry the delay
     # columns (midnight exports write the current schema). Blank them so the
-    # migration scenario this test pins is always exercised.
+    # migration scenario this test pins is always exercised. The header row
+    # comes from the config (row 3 in the real log - row 1 is a title band).
     from openpyxl import load_workbook
+
+    from app.config import load_config as _lc
 
     _wb = load_workbook(path)
     _delay_labels = {"delay type", "delay source", "delay justification"}
+    _hr = int(getattr(_lc(), "header_row", 1) or 1)
     for _ws in _wb.worksheets:
-        for _c in _ws[1]:
+        for _c in _ws[_hr]:
             if str(_c.value or "").strip().lower() in _delay_labels:
                 _c.value = None
+    # (the pinned seed file has no delay columns at all - the blanking only
+    # matters when a newer file layout already carries them)
     _wb.save(path)
     _wb.close()
     svc.invalidate()

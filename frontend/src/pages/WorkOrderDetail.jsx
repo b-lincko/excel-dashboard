@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, qs } from "../lib/api.js";
+import FileViewer from "../components/FileViewer.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 import StatusBadge from "../components/StatusBadge.jsx";
@@ -123,6 +124,9 @@ export default function WorkOrderDetail() {
   const [success, setSuccess] = useState("");
   const [conflict, setConflict] = useState(null);
   const [dupWarn, setDupWarn] = useState(null);
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [viewing, setViewing] = useState(null);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState(null);
   const [history, setHistory] = useState([]);
@@ -278,6 +282,28 @@ export default function WorkOrderDetail() {
           data: form,
           ...(dupOk ? { confirm_duplicate: true } : {}),
         });
+        // Attach the files picked in the create form (best-effort, never blocks the save)
+        const rid = d.item?.record_id || d.item?.work_order_id;
+        if (rid && pendingFiles.length) {
+          setUploadingFiles(true);
+          let attached = 0;
+          const failed = [];
+          for (const pf of pendingFiles) {
+            const fd = new FormData();
+            fd.append("file", pf);
+            fd.append("note", "");
+            try {
+              await api.upload(`/api/work-orders/${encodeURIComponent(rid)}/files`, fd);
+              attached += 1;
+            } catch {
+              failed.push(pf.name);
+            }
+          }
+          setUploadingFiles(false);
+          setPendingFiles([]);
+          if (attached) toast(`${attached} file${attached > 1 ? "s" : ""} attached and scanned`, "success");
+          if (failed.length) toast(`Could not attach: ${failed.join(", ")}`, "error");
+        }
         setSuccess("Material request saved in the database. Excel updates at midnight.");
         toast("Saved", "success");
         nav(`/work-orders/${encodeURIComponent(d.item.record_id || d.item.work_order_id)}`);
@@ -861,6 +887,45 @@ export default function WorkOrderDetail() {
         </div>
       )}
 
+      {isNew && tab === "details" && (
+        <div className="card p-5 space-y-3">
+          <div>
+            <div className="font-semibold">Attach files (optional)</div>
+            <p className="text-xs text-slate-500">
+              PDF, Word, Excel, CSV or photos. Everyone on this MR can view them on screen, copy the details, or download. PDFs and Excel are scanned into copyable tables automatically.
+            </p>
+          </div>
+          <input
+            type="file"
+            multiple
+            accept=".pdf,.docx,.txt,.xlsx,.xlsm,.csv,.png,.jpg,.jpeg,.webp,.gif"
+            className="text-sm"
+            onChange={(e) => {
+              const picked = Array.from(e.target.files || []);
+              e.target.value = "";
+              if (!picked.length) return;
+              setPendingFiles((prev) => {
+                const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
+                return [...prev, ...picked.filter((f) => !seen.has(`${f.name}:${f.size}`))];
+              });
+            }}
+          />
+          {!!pendingFiles.length && (
+            <ul className="space-y-1.5">
+              {pendingFiles.map((f) => (
+                <li key={`${f.name}:${f.size}`} className="flex items-center justify-between gap-3 text-sm bg-slate-50 dark:bg-white/5 rounded-lg px-3 py-1.5">
+                  <span className="truncate">{f.name} <span className="text-slate-400">({Math.max(1, Math.round(f.size / 1024))} KB)</span></span>
+                  <button type="button" className="btn-outline !py-0.5 !px-2 text-xs" onClick={() => setPendingFiles((prev) => prev.filter((x) => x !== f))}>
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {uploadingFiles && <p className="text-xs text-sky-700 dark:text-sky-300">Attaching and scanning files…</p>}
+        </div>
+      )}
+
       {tab === "lines" && (
         <LineItemsCard
           form={form}
@@ -957,26 +1022,36 @@ export default function WorkOrderDetail() {
               {files.map((f) => (
                 <li key={f.id} className="flex items-center justify-between gap-3 text-sm">
                   <div className="min-w-0">
-                    <button className="text-brand-700 hover:underline truncate" type="button" onClick={() => api.download(`/api/files/${f.id}`, f.filename)}>
+                    <button className="text-brand-700 hover:underline truncate" type="button" onClick={() => setViewing(f)}>
                       {f.filename}
                     </button>
+                    {f.has_extract && f.extract_ok && (
+                      <span className="ml-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                        scanned{f.extract_tables ? ` · ${f.extract_tables} table${f.extract_tables > 1 ? "s" : ""}` : ""}
+                      </span>
+                    )}
                     <div className="text-[11px] text-slate-500">
                       {f.kind} · {f.created_by} · {f.created_at}
                       {f.note ? ` · ${f.note}` : ""}
                     </div>
                   </div>
-                  {can("edit") && (
-                    <button
-                      type="button"
-                      className="btn-outline !py-1 !px-2 text-xs"
-                      onClick={async () => {
-                        await api.del(`/api/files/${f.id}`);
-                        setFiles((prev) => prev.filter((x) => x.id !== f.id));
-                      }}
-                    >
-                      Remove
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button type="button" className="btn-outline !py-1 !px-2 text-xs" onClick={() => setViewing(f)}>
+                      View
                     </button>
-                  )}
+                    {can("edit") && (
+                      <button
+                        type="button"
+                        className="btn-outline !py-1 !px-2 text-xs"
+                        onClick={async () => {
+                          await api.del(`/api/files/${f.id}`);
+                          setFiles((prev) => prev.filter((x) => x.id !== f.id));
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
               {!files.length && <li className="text-sm text-slate-500">No files yet.</li>}
@@ -987,7 +1062,7 @@ export default function WorkOrderDetail() {
                 <input
                   ref={attachRef}
                   type="file"
-                  accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,application/pdf,image/*"
+                  accept=".pdf,.docx,.txt,.xlsx,.xlsm,.csv,.png,.jpg,.jpeg,.webp,.gif,application/pdf,image/*"
                   className="hidden"
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
@@ -1200,6 +1275,8 @@ function LineItemsCard({ form, setForm, options, readOnly, supplierLocked }) {
           + Add item
         </button>
       )}
-    </div>
+    
+      {viewing && <FileViewer file={viewing} onClose={() => setViewing(null)} />}
+</div>
   );
 }

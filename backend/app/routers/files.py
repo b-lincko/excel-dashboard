@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 import uuid
 from pathlib import Path
@@ -14,12 +15,13 @@ from openpyxl import load_workbook
 from .. import database
 from ..config import ATTACHMENTS_DIR, load_config, norm_header
 from ..excel.service import ExcelLocked, ExcelUnavailable, excel_service
-from ..security import require_permission
+from ..extract import extract_attachment
+from ..security import require_any_permission, require_permission
 from ..stats import invalidate_dash_cache
 
 router = APIRouter(tags=["files"])
 
-ALLOWED_EXT = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".csv", ".xlsx", ".xlsm"}
+ALLOWED_EXT = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".csv", ".xlsx", ".xlsm", ".docx", ".txt"}
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 MAX_BYTES = 15 * 1024 * 1024
 
@@ -37,6 +39,28 @@ def _kind_for(name: str, mime: str) -> str:
     if ext in IMAGE_EXT or (mime or "").startswith("image/"):
         return "screenshot"
     return "file"
+
+
+def _extract_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """Small flags so list responses stay light (full extract lives at /content)."""
+    raw = item.get("extract")
+    info: dict[str, Any] = {"has_extract": False, "extract_ok": False, "extract_words": 0, "extract_tables": 0, "extract_message": ""}
+    if raw:
+        try:
+            data = json.loads(raw)
+            info = {
+                "has_extract": True,
+                "extract_ok": bool(data.get("ok")),
+                "extract_words": int(data.get("words") or 0),
+                "extract_tables": len(data.get("tables") or []) + len(data.get("sheets") or []),
+                "extract_message": str(data.get("message") or ""),
+            }
+        except (TypeError, ValueError):
+            pass
+    out = dict(item)
+    out.pop("extract", None)
+    out.update(info)
+    return out
 
 
 def _raise_excel(exc: Exception):
@@ -122,6 +146,13 @@ def _store_file(record_id: str, filename: str, content: bytes, mime: str, userna
     stored = f"{uuid.uuid4().hex}_{_safe_name(filename)}"
     dest = folder / stored
     dest.write_bytes(content)
+    # Content extraction for the on-screen viewer (copy/paste + tables).
+    # Best-effort: an extraction failure must never fail the upload.
+    extract_json: Optional[str] = None
+    try:
+        extract_json = json.dumps(extract_attachment(filename, content), ensure_ascii=False)[:1_000_000]
+    except Exception as exc:
+        extract_json = json.dumps({"ok": False, "kind": "", "engine": "", "pages": 0, "words": 0, "text": "", "tables": [], "sheets": [], "message": f"Preview extraction failed: {exc}"})
     item = database.add_attachment(
         record_id=str(rec.get("record_id")),
         filename=_safe_name(filename),
@@ -132,8 +163,9 @@ def _store_file(record_id: str, filename: str, content: bytes, mime: str, userna
         work_order_id=str(rec.get("work_order_id") or ""),
         kind=_kind_for(filename, mime),
         note=note,
+        extract=extract_json,
     )
-    return item
+    return _extract_summary(item)
 
 
 @router.get("/api/work-orders/{wo_id}/files")
@@ -141,7 +173,7 @@ def list_files(wo_id: str, user=Depends(require_permission("view"))):
     rec = excel_service.get_by_id(wo_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Work order not found")
-    return {"items": database.list_attachments(str(rec.get("record_id")))}
+    return {"items": [_extract_summary(it) for it in database.list_attachments(str(rec.get("record_id")))]}
 
 
 @router.post("/api/work-orders/{wo_id}/files")
@@ -149,7 +181,7 @@ async def upload_file(
     wo_id: str,
     file: UploadFile = File(...),
     note: str = Form(""),
-    user=Depends(require_permission("edit")),
+    user=Depends(require_any_permission("edit", "create")),
 ):
     content = await file.read()
     if not content:
@@ -172,6 +204,31 @@ def download_file(attachment_id: int, user=Depends(require_permission("view"))):
     if not inside or not path.is_file():
         raise HTTPException(status_code=404, detail="File is missing on disk")
     return FileResponse(path, filename=item["filename"], media_type=item.get("mime") or "application/octet-stream")
+
+
+@router.get("/api/files/{attachment_id}/content")
+def file_content(attachment_id: int, user=Depends(require_permission("view"))):
+    """Extracted content for the on-screen viewer (text + tables, copyable)."""
+    item = database.get_attachment(attachment_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    extract: Optional[dict[str, Any]] = None
+    raw = item.get("extract")
+    if raw:
+        try:
+            extract = json.loads(raw)
+        except (TypeError, ValueError):
+            extract = None
+    return {
+        "item": {
+            "id": item["id"],
+            "filename": item["filename"],
+            "mime": item.get("mime") or "",
+            "kind": item.get("kind") or "file",
+            "size": item.get("size"),
+        },
+        "extract": extract,
+    }
 
 
 @router.delete("/api/files/{attachment_id}")

@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS attachments (
     kind TEXT,
     note TEXT,
     created_at TEXT NOT NULL,
-    created_by TEXT
+    created_by TEXT,
+    extract TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_att_record ON attachments(record_id);
 CREATE TABLE IF NOT EXISTS chat_threads (
@@ -408,6 +409,9 @@ def init_db() -> None:
             )"""
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_po_events_record ON po_approval_events(record_id, id)")
+        att_cols = {r[1] for r in conn.execute("PRAGMA table_info(attachments)")}
+        if "extract" not in att_cols:
+            conn.execute("ALTER TABLE attachments ADD COLUMN extract TEXT")
         sup_cols = {r[1] for r in conn.execute("PRAGMA table_info(suppliers)")}
         for col, spec in (
             ("phone", "TEXT"),
@@ -1070,13 +1074,14 @@ def add_attachment(
     work_order_id: str = "",
     kind: str = "file",
     note: str = "",
+    extract: Optional[str] = None,
 ) -> dict[str, Any]:
     with connect() as conn:
         cur = conn.execute(
             """INSERT INTO attachments
-               (record_id, work_order_id, filename, stored_name, mime, size, kind, note, created_at, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (record_id, work_order_id, filename, stored_name, mime, size, kind, note, now_iso(), created_by),
+               (record_id, work_order_id, filename, stored_name, mime, size, kind, note, created_at, created_by, extract)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (record_id, work_order_id, filename, stored_name, mime, size, kind, note, now_iso(), created_by, extract),
         )
         aid = cur.lastrowid
     item = get_attachment(int(aid))

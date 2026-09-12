@@ -179,6 +179,25 @@ def user_permissions(user: dict[str, Any]) -> list[str]:
     return allowed
 
 
+def require_any_permission(*permissions: str):
+    """Pass when the user holds ANY of the listed permissions (admins always pass)."""
+
+    def checker(user: dict = Depends(get_current_user)) -> dict:
+        if enforce_password_change() and user.get("must_change_password"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Change your password before continuing.",
+            )
+        if user.get("role") == "admin":
+            return user
+        allowed = user_permissions(user)
+        if not any(p in allowed for p in permissions):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        return user
+
+    return checker
+
+
 def require_permission(permission: str):
     def checker(user: dict = Depends(get_current_user)) -> dict:
         if enforce_password_change() and user.get("must_change_password"):
