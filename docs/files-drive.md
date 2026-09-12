@@ -42,8 +42,8 @@ Rules (mirrored from the backup security model):
    and `drive.mr` (files share) - no interactive login, passwords in the
    secret store.
 2. Shares (UNC): `mr.backup` and `mr.drive` on 192.168.100.5.
-3. Grant `mr.backup` Modify on `MR-Backup` **only**; `svc_mr_files`
-   Modify on `MR-Drive` **only**. Remove "Everyone"/"Authenticated Users"
+3. Grant `mr.backup` Modify on `mr.backup` **only**; `drive.mr` Modify on
+   `mr.drive` **only**. Remove "Everyone"/"Authenticated Users"
    from `MR-Backup`.
 
 ## 3. App server side (Linux)

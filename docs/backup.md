@@ -114,7 +114,7 @@ Two transports (env `SMB_MODE`):
    ```
    ```
    # /etc/mr-backup.cred  (chmod 600)
-   username=svc_mr_backup
+   username=mr.backup
    password=********
    domain=LINKCO
    ```
@@ -141,7 +141,7 @@ Two transports (env `SMB_MODE`):
 > `SMB_USERNAME` and `SMB_PASSWORD` are **only used in smbclient mode** — in
 > mount mode the OS mount holds the credentials.
 > `SMB_SERVER` must be the bare server name/IP (`192.168.100.5`), never the
-> UNC path, and `SMB_USERNAME` is the account name (e.g. `svc_mr_backup`),
+> UNC path, and `SMB_USERNAME` is the account name (here: `mr.backup`),
 > never a share path.
 
 2. **`smbclient`** — direct push with the `smbclient` binary
@@ -159,7 +159,7 @@ When the dashboard runs on Windows there is no CIFS mount: set
 `SMB_MOUNT_PATH` to the UNC share path (e.g. `\\FILESERVER\MR-Backup`)
 or a mapped drive letter — `os.path.ismount()` reports both as mounts,
 so verification stays honest. Register the service account once with
-`net use \\FILESERVER\MR-Backup /user:LINKCO\svc_mr_backup * /persistent:yes`.
+`net use \\192.168.100.5\mr.backup /user:LINKCO.COM\mr.backup * /persistent:yes`.
 A plain local folder still reports FAILED/PARTIAL_SUCCESS — it is not
 the file server.
 
@@ -173,15 +173,15 @@ person's AD account:
 | `LINKCO.COM\mr.backup` | `\\192.168.100.5\mr.backup` | the backup system only |
 | `LINKCO.COM\drive.mr` | `\\192.168.100.5\mr.drive` | the Files page (`NETDRIVE_PATH`) only |
 
-`svc_mr_files` must have no rights on `MR-Backup`; employees must have no
+`drive.mr` must have no rights on `mr.backup`; employees must have no
 rights on `MR-Backup` either. The app refuses to serve a Files root that
 overlaps a backup destination (see `docs/files-drive.md`).
 
 ### Required AD setup
 
-* Dedicated service account, e.g. `LINKCO\svc_mr_backup` — **not** a person's
+* Dedicated service account (here: `LINKCO.COM\mr.backup`) — **not** a person's
   account; no interactive login; password in the secret store only.
-* Share `\\FILESERVER\MR-Backup` granting **modify** to `svc_mr_backup` only.
+* Share `\\192.168.100.5\mr.backup` granting **modify** to `mr.backup` only.
 * Normal employees get **no** permission on `MR-Backup`; the service account
   gets **no** permission on `CompanyFiles`. Web-app users have no path to the
   backup share — backups are written/read only by the backend service.
@@ -275,7 +275,7 @@ whole-system package (it adds uploads + configs + manifest).
 1. Pull the new code; `pip install -r backend/requirements.txt`
    (adds `cryptography` for optional encryption).
 2. Choose the local disk: `LOCAL_BACKUP_PATH=/backup` (create + mount it).
-3. Ask IT to create the `MR-Backup` share + `svc_mr_backup` service account;
+3. Ask IT to keep the `mr.backup` share + `mr.backup` service account (both exist);
    mount it at `/mnt/mr-backup` (fstab/autofs) or install `smbclient`.
 4. Fill the backup section of `.env` (or systemd `EnvironmentFile` /
    docker-compose `environment:`) — placeholders in `.env.example`.
