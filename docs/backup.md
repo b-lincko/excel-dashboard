@@ -134,9 +134,10 @@ Two transports (env `SMB_MODE`):
 > the app simply copies into `SMB_MOUNT_PATH`. If the share is **not actually
 > mounted** there, that path is just a plain folder on the app server — runs
 > report SUCCESS (the copy exists!) but **nothing reaches the file server**.
-> The backup now emits `SMB_TARGET_NOT_MOUNTED` + a warning in the status and
-> the Settings card when the target is not a real mount. Fix: mount the share
-> (commands above) or switch to `SMB_MODE=smbclient`. Also note `SMB_SERVER`,
+> The backup now detects this (`SMB_TARGET_NOT_MOUNTED`), **counts the SMB
+> destination as FAILED → result PARTIAL_SUCCESS** (local copy stays intact),
+> and the Settings card shows the reason. Fix: mount the share (commands
+> above) or switch to `SMB_MODE=smbclient`. Also note `SMB_SERVER`,
 > `SMB_USERNAME` and `SMB_PASSWORD` are **only used in smbclient mode** — in
 > mount mode the OS mount holds the credentials.
 > `SMB_SERVER` must be the bare server name/IP (`192.168.100.5`), never the

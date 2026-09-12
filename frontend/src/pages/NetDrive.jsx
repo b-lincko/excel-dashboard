@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api.js";
 import FileViewer from "../components/FileViewer.jsx";
+import { useAuth } from "../context/AuthContext.jsx";
 import { useUi } from "../context/UiContext.jsx";
 
 /**

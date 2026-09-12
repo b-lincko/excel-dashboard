@@ -86,6 +86,14 @@ def env_setup(tmp_path, monkeypatch, workbook):
 
     from app import dual_backup
 
+    # simulate a REAL mounted share: os.path.ismount(True) for the fake share
+    real_ismount = os.path.ismount
+    monkeypatch.setattr(
+        os.path,
+        "ismount",
+        lambda p: True if str(p) == str(smb) or str(p).startswith(str(smb) + os.sep) else real_ismount(p),
+    )
+
     yield dual_backup, local, smb, data_dir, dest
 
     monkeypatch.delenv("BACKUP_ENABLED", raising=False)
@@ -175,17 +183,25 @@ def test_corrupted_smb_copy_fails_verification(env_setup, monkeypatch):
     assert not (smb / "Daily" / Path(status["local"]["path"]).parent.name / status["artifact"]).exists()
 
 
-def test_mount_mode_warns_when_target_is_not_a_mount(env_setup):
+def test_mount_mode_warns_when_target_is_not_a_mount(env_setup, monkeypatch):
     """The plain-folder mistake: SMB_MODE=mount without an actual mount."""
     dual, local, smb, data_dir, excel = env_setup
     smb.mkdir(parents=True, exist_ok=True)  # plain dir, not a mountpoint
     import os as _os
 
+    # undo the fixture's simulated mount for this test
+    monkeypatch.setattr(_os.path, "ismount", lambda p: False if str(p).startswith(str(smb)) else _os.path.ismount(p))
     assert not _os.path.ismount(str(smb))
     status = dual.run_dual_backup(reason="manual")
-    # the copy still lands (it IS the configured folder) but the warning fires
-    assert status["smb"]["status"] == "SUCCESS"
-    assert "not a mounted share" in status["smb"].get("mount_warning", "")
+    # a plain folder is NOT the file server: SMB counts as FAILED,
+    # overall PARTIAL_SUCCESS, and the local copy stays intact
+    assert status["smb"]["status"] == "FAILED"
+    assert status["smb"]["verification"] == "FAILED"
+    assert "not a mounted share" in status["smb"]["reason"]
+    assert status["smb"].get("mount_warning", "") == status["smb"]["reason"]
+    assert status["overall"] == "PARTIAL_SUCCESS"
+    assert status["local"]["status"] == "SUCCESS"
+    assert Path(status["local"]["path"]).is_file()
     assert any(e["event"] == "SMB_TARGET_NOT_MOUNTED" for e in status["log"])
 
 

@@ -510,6 +510,13 @@ def run_dual_backup(pair: Optional[Path] = None, reason: str = "manual") -> Opti
             try:
                 pushed = True
                 push_msg = ""
+                if mount_warning:
+                    # The target folder is NOT a mount: pushing there would
+                    # write to the app server, not the file server. Count the
+                    # SMB destination as FAILED (overall PARTIAL_SUCCESS) so
+                    # the UI can't show a misleading off-site success.
+                    pushed = False
+                    push_msg = mount_warning
                 targets = [("Daily", date_dir)]
                 for tier, tier_dir_name in (("Weekly", week_dir), ("Monthly", month_dir)):
                     existing = cfg.smb_mount_path / tier / tier_dir_name if cfg.smb_mode == "mount" else None

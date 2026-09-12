@@ -130,3 +130,11 @@ def test_workorderdetail_viewer_is_in_the_right_component():
     assert body.count("{viewing && <FileViewer") == 1
     # and nowhere else in the file (LineItemsCard etc.)
     assert src.count("{viewing && <FileViewer") == 1
+
+
+def test_netdrive_page_imports_what_it_uses():
+    """BUG PIN (2026-09-13): NetDrive calls useAuth() - the import must exist,
+    otherwise the whole /files page crashes with 'useAuth is not defined'."""
+    src = (ROOT / "frontend" / "src" / "pages" / "NetDrive.jsx").read_text(encoding="utf-8")
+    assert "useAuth()" in src
+    assert 'import { useAuth } from "../context/AuthContext.jsx";' in src
