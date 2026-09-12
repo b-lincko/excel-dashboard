@@ -1494,6 +1494,18 @@ def add_notification(
     return dict(row)
 
 
+def last_notification_at(kind: str, record_id: str) -> Optional[str]:
+    """Timestamp of the most recent notification of `kind` for `record_id` (cooldown checks)."""
+    if not record_id:
+        return None
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT created_at FROM notifications WHERE kind = ? AND record_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (kind, record_id),
+        ).fetchone()
+    return str(row["created_at"]) if row else None
+
+
 def list_notifications(username: str, unread_only: bool = False, limit: int = 50) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit or 50), 200))
     clause = "AND read_at IS NULL" if unread_only else ""

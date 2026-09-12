@@ -107,6 +107,7 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
     return new Set(DEFAULT_COLS);
   });
   const [showCols, setShowCols] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [q, setQ] = useState(filters.q || "");
   const [selected, setSelected] = useState(() => new Set());
   const [views, setViews] = useState([]);
@@ -299,26 +300,11 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
     }
   }
 
-  async function exportCsv() {
-    const params = { ...filters, q, page: 1, page_size: 500, sort, order };
-    const d = await api.get(`/api/work-orders${qs(params)}`);
-    const header = cols.map((c) => c[1]);
-    const lines = [header.join(",")];
-    (d.items || []).forEach((r) => {
-      lines.push(
-        cols
-          .map((c) => {
-            const val = c[0] === "department" ? r.site_display || r.camp_site_label || r[c[0]] : r[c[0]];
-            return `"${String(val ?? "").replace(/"/g, '""')}"`;
-          })
-          .join(",")
-      );
-    });
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "work_orders.csv";
-    a.click();
+  // Export the WHOLE filtered view server-side (no 500-row cap, Excel column set).
+  async function exportView(fmt) {
+    const params = { ...filters, q, sort, order, fmt };
+    const stamp = new Date().toISOString().slice(0, 10);
+    await api.download(`/api/work-orders${qs(params)}`, `work_orders_${stamp}.${fmt}`);
   }
 
   const subtitle = useMemo(() => {
@@ -342,9 +328,21 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
           <button className="btn-outline" onClick={() => load()}>
             <RefreshCw size={14} /> Refresh
           </button>
-          <button className="btn-outline" onClick={exportCsv}>
-            <Download size={14} /> Export CSV
-          </button>
+          <div className="relative">
+            <button className="btn-outline" onClick={() => setShowExport((v) => !v)}>
+              <Download size={14} /> Export
+            </button>
+            {showExport && (
+              <div className="absolute right-0 mt-2 w-44 card p-1.5 z-20">
+                <button className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-white/5" onClick={() => { setShowExport(false); exportView("csv"); }}>
+                  CSV (all columns)
+                </button>
+                <button className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-100 dark:hover:bg-white/5" onClick={() => { setShowExport(false); exportView("xlsx"); }}>
+                  Excel workbook
+                </button>
+              </div>
+            )}
+          </div>
           <button className="btn-outline" onClick={() => setShowSaveView((s) => !s)}>
             <Bookmark size={14} /> Save view
           </button>
@@ -581,7 +579,18 @@ export default function WorkOrders({ presetFlag, title = "Work Orders" }) {
                       ) : k === "work_order_id" ? (
                         <span className="font-mono text-xs font-semibold">{r[k]}</span>
                       ) : k === "days_overdue" ? (
-                        r[k] ? <span className="text-rose-600 font-semibold">{r[k]}</span> : "—"
+                        r[k] ? (
+                          <span className="text-rose-600 font-semibold">
+                            {r[k]}
+                            {r.is_stale && (
+                              <span className="ml-1 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
+                                stale
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          "—"
+                        )
                       ) : k === "department" ? (
                         r.site_display || r.camp_site_label || r[k] || "—"
                       ) : (

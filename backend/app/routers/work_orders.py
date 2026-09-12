@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -115,6 +115,7 @@ class WorkOrderUpdate(BaseModel):
 
 class WorkOrderCreate(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
+    confirm_duplicate: bool = False  # set after the user confirms a duplicate warning
 
 
 class BulkUpdate(BaseModel):
@@ -202,6 +203,7 @@ def list_work_orders(
     order: str = "desc",
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=500),
+    fmt: Optional[str] = None,  # csv | xlsx -> download the WHOLE filtered view
     user=Depends(require_permission("view")),
 ):
     try:
@@ -251,6 +253,9 @@ def list_work_orders(
         return str(v).lower()
 
     matched.sort(key=sort_key, reverse=reverse)
+    fmt_val = str(fmt or "").strip().lower()
+    if fmt_val in {"csv", "xlsx"}:
+        return _export_rows(matched, fmt_val, filters)
     total = len(matched)
     start = (page - 1) * page_size
     page_rows = [annotate(r, cfg) for r in _with_extras_many(matched[start : start + page_size])]
@@ -270,6 +275,52 @@ def list_work_orders(
         "sync_token": excel_service.sync_token(),
         "headers": excel_service.headers(),
     }
+
+
+def _export_rows(
+    matched: list[dict[str, Any]],
+    fmt: str,
+    filters: dict[str, Any],
+) -> Response:
+    """Serve the whole filtered+sorted view as CSV/XLSX (no pagination)."""
+    cfg = load_config()
+    try:
+        rows = [annotate(r, cfg) for r in _with_extras_many(matched)]
+    except (ExcelUnavailable, ExcelLocked) as exc:
+        _raise_excel(exc)
+    headers = [h for h in excel_service.headers() if str(h or "").strip()]
+    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    if fmt == "csv":
+        import csv
+        import io as _io
+
+        buf = _io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(headers)
+        for r in rows:
+            writer.writerow([str(r.get(h) if r.get(h) is not None else "").replace(chr(10), " ") for h in headers])
+        return Response(
+            content=buf.getvalue().encode("utf-8-sig"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="work_orders_{stamp}.csv"'},
+        )
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Work orders"
+    ws.append(headers)
+    for r in rows:
+        ws.append([r.get(h) for h in headers])
+    import io as _io
+
+    out = _io.BytesIO()
+    wb.save(out)
+    return Response(
+        content=out.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="work_orders_{stamp}.xlsx"'},
+    )
 
 
 @router.get("/options")
@@ -328,6 +379,7 @@ def options(user=Depends(require_permission("view"))):
     delivery = getattr(cfg, "delivery_statuses", None) or []
     opts["issue"] = merge_choices(opts.get("issue") or [], delivery)
     opts["delay_reason"] = merge_choices(opts.get("delay_reason") or [], delivery)
+    opts["delay_reason_options"] = list(getattr(cfg, "delay_reason_options", None) or [])
     opts["mention_users"] = mention_users
     opts["assigned_to"] = approvals.technician_names()
     opts["supplier_items"] = supplier_items
@@ -601,6 +653,45 @@ def update_work_order(wo_id: str, body: WorkOrderUpdate, user=Depends(require_pe
     }
 
 
+def _recent_duplicates(excel_data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Open MRs with the same work-order number + supplier within duplicate_check_days."""
+    cfg = load_config()
+    days = int(getattr(cfg, "duplicate_check_days", 30) or 0)
+    if days <= 0:
+        return []
+    wo = str(excel_data.get("work_order_id") or "").strip()
+    sup = str(excel_data.get("supplier") or "").strip().lower()
+    if not wo or not sup:
+        return []
+    cutoff = today() - timedelta(days=days)
+    out: list[dict[str, Any]] = []
+    try:
+        records = excel_service.get_all()
+    except (ExcelUnavailable, ExcelLocked):
+        return []
+    for rec in records:
+        if str(rec.get("work_order_id") or "").strip() != wo:
+            continue
+        if str(rec.get("supplier") or "").strip().lower() != sup:
+            continue
+        if is_closed(rec, cfg):
+            continue
+        seen = to_date(rec.get("created_date")) or to_date(rec.get("last_updated"))
+        if not seen or seen < cutoff:
+            continue
+        out.append(
+            {
+                "record_id": str(rec.get("record_id") or ""),
+                "work_order_id": wo,
+                "status": str(rec.get("status") or ""),
+                "supplier": str(rec.get("supplier") or ""),
+                "created_date": rec.get("created_date") or "",
+                "assigned_to": str(rec.get("assigned_to") or ""),
+            }
+        )
+    return out
+
+
 @router.post("")
 def create_work_order(body: WorkOrderCreate, user=Depends(require_permission("create"))):
     excel_data, extra_changes, lines = _split_changes(body.data)
@@ -611,6 +702,19 @@ def create_work_order(body: WorkOrderCreate, user=Depends(require_permission("cr
     errors = validate_work_order(excel_data, partial=False)
     if errors:
         raise HTTPException(status_code=422, detail=errors)
+    # Duplicate guard (2026-09-12): same work-order number + supplier already
+    # logged recently -> warn (409) and let the UI confirm. Several MRs per IM
+    # work order are legitimate (pinned decision), so this is only a warning.
+    if not body.confirm_duplicate:
+        duplicates = _recent_duplicates(excel_data)
+        if duplicates:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "A similar MR was already logged recently. Create anyway?",
+                    "duplicates": duplicates,
+                },
+            )
     try:
         created = excel_service.create_record(excel_data, username=user["username"])
     except (ExcelUnavailable, ExcelLocked, ValueError) as exc:

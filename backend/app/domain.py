@@ -543,6 +543,18 @@ def eta_date(rec: dict[str, Any]) -> Optional[date]:
     return to_date(rec.get("closed_date"))
 
 
+def is_stale(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optional[date] = None) -> bool:
+    """Stale = overdue for >= cfg.stale_after_days (needs a push; escalation range)."""
+    cfg = cfg or load_config()
+    if not is_overdue(rec, cfg, on):
+        return False
+    n = int(getattr(cfg, "stale_after_days", 7) or 7)
+    clock = eta_date(rec) if is_placed(rec, cfg) else to_date(rec.get("due_date"))
+    if not clock:
+        return False
+    return ((on or today()) - clock).days >= n
+
+
 def is_eta_late(rec: dict[str, Any], cfg: Optional[AppConfig] = None, on: Optional[date] = None) -> bool:
     if is_closed(rec, cfg) or is_delivered(rec):
         return False
@@ -839,6 +851,7 @@ def annotate(rec: dict[str, Any], cfg: Optional[AppConfig] = None) -> dict[str, 
     out["is_placed"] = is_placed(rec, cfg)
     out["is_overdue"] = is_overdue(rec, cfg)
     out["is_delayed"] = is_delayed(rec, cfg)
+    out["is_stale"] = is_stale(rec, cfg)
     out["is_pending"] = is_pending(rec, cfg)
     out["is_in_progress"] = is_in_progress(rec, cfg)
     out["aging_days"] = aging_days(rec)

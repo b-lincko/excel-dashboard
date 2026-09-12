@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import database
 from .backup import start_scheduler, stop_scheduler
+from .escalation import start_escalator, stop_escalator
 from .config import DATA_DIR
 from .excel.service import excel_service
 from .routers import audit, auth, catalog, collab, dashboard, files, ops, po_approvals, reports, settings, sync, users, work_orders
@@ -46,8 +47,16 @@ async def lifespan(_app: FastAPI):
     except Exception as exc:
         print(f"[WOMS] autobackup scheduler skipped: {exc}")
     try:
+        start_escalator()
+    except Exception as exc:
+        print(f"[WOMS] escalation scheduler skipped: {exc}")
+    try:
         yield
     finally:
+        try:
+            stop_escalator()
+        except Exception:
+            pass
         try:
             stop_scheduler()
         except Exception:

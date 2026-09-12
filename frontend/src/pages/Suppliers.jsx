@@ -153,7 +153,9 @@ export default function Suppliers() {
                       <th>Supplier</th>
                       <th>Total</th>
                       <th>Open</th>
-                      <th>On-time</th>
+                      <th>On-time %</th>
+                      <th>On time</th>
+                      <th>Late</th>
                       <th>Overdue</th>
                       <th>Need RFQ</th>
                       <th>PO issued</th>
@@ -171,6 +173,8 @@ export default function Suppliers() {
                         <td>{r.total}</td>
                         <td>{r.open}</td>
                         <td>{r.scored ? `${r.on_time_rate}%` : "—"}</td>
+                        <td className="text-emerald-700 dark:text-emerald-300">{r.scored ? r.on_time : "—"}</td>
+                        <td className={r.scored && r.late ? "text-rose-600 font-semibold" : ""}>{r.scored ? r.late : "—"}</td>
                         <td className={r.overdue ? "text-rose-600 font-semibold" : ""}>{r.overdue}</td>
                         <td>{r.need_rfq}</td>
                         <td>{r.po_issued}</td>

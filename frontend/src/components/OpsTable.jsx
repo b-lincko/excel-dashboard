@@ -16,7 +16,7 @@ function RowHoverCard({ row }) {
     ["Due", (row.due_date || "").slice(0, 10)],
     ["PO / RFQ date", (row.scheduled_date || "").slice(0, 10)],
     ["Age (days)", row.aging_days],
-    ["Overdue (days)", row.days_overdue],
+    ["Overdue (days)", row.days_overdue ? `${row.days_overdue}${row.is_stale ? " · stale" : ""}` : null],
     ["Delay type", row.delay_kind],
     ["Delay source", row.delay_source],
   ];

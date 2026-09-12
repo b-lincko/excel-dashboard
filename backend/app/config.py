@@ -149,6 +149,24 @@ class AppConfig(BaseModel):
     status_open_values: list[str] = Field(default_factory=lambda: ["OPEN"])
     placed_statuses: list[str] = Field(default_factory=lambda: ["PLACED"])
     pending_statuses: list[str] = Field(default_factory=lambda: ["OPEN", "UNDER NTP", "ON HOLD"])
+    # Productivity batch (2026-09-12): duplicate create guard, stale/escalation, delay quick-picks.
+    duplicate_check_days: int = 30  # 0 disables the duplicate warning on create
+    stale_after_days: int = 7  # overdue for >= N days shows the "stale" flag
+    escalation_enabled: bool = True
+    escalate_after_days: int = 7  # overdue for >= N days pings the assignee
+    escalation_cooldown_days: int = 3  # min days between escalation pings per record
+    delay_reason_options: list[str] = Field(
+        default_factory=lambda: [
+            "Supplier delay",
+            "Material not available",
+            "Price approval pending",
+            "Client / instructor instruction",
+            "Shipping / customs delay",
+            "Site not ready",
+            "Manpower shortage",
+            "Other - see remarks",
+        ]
+    )
     delay_open_statuses: list[str] = Field(default_factory=lambda: ["OPEN"])
     delay_pending_statuses: list[str] = Field(default_factory=lambda: ["PENDING"])
     delay_excluded_statuses: list[str] = Field(

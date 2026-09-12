@@ -456,6 +456,20 @@ def test_reconcile_migrates_sqlite_delay_into_new_columns(workbook):
     from fastapi.testclient import TestClient
 
     path, svc = workbook
+    # Drift guard (2026-09-12): the live file may already carry the delay
+    # columns (midnight exports write the current schema). Blank them so the
+    # migration scenario this test pins is always exercised.
+    from openpyxl import load_workbook
+
+    _wb = load_workbook(path)
+    _delay_labels = {"delay type", "delay source", "delay justification"}
+    for _ws in _wb.worksheets:
+        for _c in _ws[1]:
+            if str(_c.value or "").strip().lower() in _delay_labels:
+                _c.value = None
+    _wb.save(path)
+    _wb.close()
+    svc.invalidate()
     recs = svc.get_all(force=True)
     target = recs[0]
     rid = target["record_id"]

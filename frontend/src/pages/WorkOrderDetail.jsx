@@ -122,6 +122,7 @@ export default function WorkOrderDetail() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [conflict, setConflict] = useState(null);
+  const [dupWarn, setDupWarn] = useState(null);
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState(null);
   const [history, setHistory] = useState([]);
@@ -265,14 +266,18 @@ export default function WorkOrderDetail() {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
-  async function save(force = false) {
+  async function save(force = false, dupOk = false) {
     setBusy(true);
     setError("");
     setSuccess("");
     setConflict(null);
+    setDupWarn(null);
     try {
       if (isNew) {
-        const d = await api.post("/api/work-orders", { data: form });
+        const d = await api.post("/api/work-orders", {
+          data: form,
+          ...(dupOk ? { confirm_duplicate: true } : {}),
+        });
         setSuccess("Material request saved in the database. Excel updates at midnight.");
         toast("Saved", "success");
         nav(`/work-orders/${encodeURIComponent(d.item.record_id || d.item.work_order_id)}`);
@@ -344,7 +349,9 @@ export default function WorkOrderDetail() {
         toast(extraOnly ? "Delay notes saved" : appOnly ? "Camp site saved" : linesOnly ? "Line items saved" : "Saved", "success");
       }
     } catch (e) {
-      if (e.status === 409) {
+      if (e.status === 409 && e.detail?.duplicates) {
+        setDupWarn(e.detail);
+      } else if (e.status === 409) {
         setConflict(e.detail);
         setError("This record changed since you opened it. Reload or overwrite.");
       } else if (e.status === 422) {
@@ -676,6 +683,32 @@ export default function WorkOrderDetail() {
 
       {error && <div className="rounded-xl bg-rose-50 text-rose-800 px-4 py-3 text-sm dark:bg-rose-500/10 dark:text-rose-200">{error}</div>}
       {success && <div className="rounded-xl bg-emerald-50 text-emerald-800 px-4 py-3 text-sm dark:bg-emerald-500/10 dark:text-emerald-200">{success}</div>}
+      {dupWarn && (
+        <div className="card p-4 border-amber-300 bg-amber-50/60 dark:bg-amber-500/5">
+          <div className="font-semibold mb-1">Possible duplicate</div>
+          <p className="text-sm text-slate-600 dark:text-slate-300 mb-2">{dupWarn.message}</p>
+          <ul className="text-sm space-y-1 mb-3">
+            {dupWarn.duplicates.map((d) => (
+              <li key={d.record_id}>
+                <button className="text-sky-700 dark:text-sky-300 underline" onClick={() => nav(`/work-orders/${encodeURIComponent(d.record_id)}`)}>
+                  {d.work_order_id}
+                </button>
+                <span className="text-slate-500">
+                  {" "}· {d.status || "no status"} · {d.supplier || "no supplier"} · logged {(d.created_date || "").slice(0, 10) || "unknown date"}
+                  {d.assigned_to ? ` · ${d.assigned_to}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <button className="btn-warn" disabled={busy} onClick={() => save(false, true)}>
+            Create anyway
+          </button>
+          <button className="btn-outline ml-2" disabled={busy} onClick={() => setDupWarn(null)}>
+            Let me review
+          </button>
+        </div>
+      )}
+
       {conflict && (
         <div className="card p-4 border-amber-300">
           <div className="font-semibold mb-2">Record changed</div>
@@ -800,6 +833,26 @@ export default function WorkOrderDetail() {
                 </div>
                 <div className="md:col-span-2">
                   <label className="lbl">Delay justification</label>
+                  {(options.delay_reason_options || []).length > 0 && (
+                    <select
+                      className="mb-2"
+                      value=""
+                      disabled={fieldLocked("delay_justification")}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (!v) return;
+                        const cur = (form.delay_justification || "").trim();
+                        setField("delay_justification", cur ? `${cur} / ${v}` : v);
+                      }}
+                    >
+                      <option value="">Quick reasons…</option>
+                      {(options.delay_reason_options || []).map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <textarea rows={3} value={form.delay_justification || ""} disabled={fieldLocked("delay_justification")} onChange={(e) => setField("delay_justification", e.target.value)} />
                 </div>
               </div>

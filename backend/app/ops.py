@@ -29,6 +29,7 @@ from .domain import (
     is_po_issued,
     is_rfq_sent,
     is_status_open,
+    is_stale,
     is_waiting_supplier,
     matches_filters,
     similar_open_pairs,
@@ -456,6 +457,8 @@ def digest_payload(filters: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         "ntp": _sort_date([r for r in records if is_ntp(r) and is_open(r, cfg)], "created_date", False),
         "due_soon": _sort_date([r for r in records if is_due_soon(r, cfg)], "due_date", False),
     }
+    for r in buckets["overdue"]:
+        r["is_stale"] = is_stale(r, cfg)
     titles = {"overdue": "Overdue", "ntp": "UNDER NTP", "due_soon": "Due soon"}
     sections = [
         {"id": key, "title": titles[key], "count": len(rows), "sites": _group_site_assignee(rows, cfg)}

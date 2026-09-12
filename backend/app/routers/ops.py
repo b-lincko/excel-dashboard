@@ -212,3 +212,10 @@ def mark_queue_item_seen(body: SeenIn, user=Depends(require_permission("view")))
     item = database.mark_queue_seen(str(rec.get("record_id") or body.record_id), user["username"])
     seen = database.list_queue_seen([item["record_id"]]).get(item["record_id"], [])
     return {"item": item, "seen_by": seen}
+
+@router.post("/escalation/run")
+def run_escalation_now(user=Depends(require_permission("settings"))):
+    """Manual escalation pass (settings permission). The daemon runs every 6h."""
+    from ..escalation import run_escalation
+
+    return run_escalation(user["username"])
