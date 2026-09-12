@@ -237,3 +237,50 @@ def test_windows_bat_commands_and_guidance(wiz, monkeypatch):
     monkeypatch.setattr(wiz.shutil, "which", lambda name: None)
     r = wiz.check_smb_credentials("srv", "share", "DOM", "user", "pw", "backup", probe_share=True)
     assert r["status"] == "manual" and "net use" in r["detail"]
+
+
+def test_share_name_typed_as_account_is_caught(wiz):
+    """Field error seen in the field: mr.backup entered as the username."""
+    values = _values(
+        wiz,
+        SMB_BACKUP_ENABLED="true",
+        SMB_SERVER="192.168.100.5",
+        SMB_SHARE="mr.backup",
+        SMB_USERNAME="mr.backup",  # wrong: the share, not an account
+        SMB_PASSWORD="pw",
+    )
+    out = wiz.check_account_names(values)
+    assert out and out[0]["status"] == "error" and "SHARE name" in out[0]["detail"]
+
+    ok = _values(
+        wiz,
+        SMB_BACKUP_ENABLED="true",
+        SMB_USERNAME="svc_mr_backup",
+        SMB_SHARE="mr.backup",
+        FILES_SMB_USERNAME="svc_mr_files",
+        FILES_SMB_SHARE="mr.files",
+        NETDRIVE_PATH="",
+    )
+    assert wiz.check_account_names(ok) == []
+
+
+def test_mount_error_13_hint_names_the_real_causes(wiz):
+    hint = wiz._mount_error_hint(13, "mount error(13): Permission denied")
+    assert "ACCOUNT name" in hint and "share" in hint and "DOMAIN" in hint
+    assert wiz._mount_error_hint(2, "No such file or directory")[:5] == "share"
+    assert "firewall" in wiz._mount_error_hint(101, "Connection refused")
+
+
+def test_generated_script_uses_noperm_and_normal_user_hint(wiz):
+    values = _values(
+        wiz,
+        SMB_BACKUP_ENABLED="true",
+        SMB_SERVER="192.168.100.5",
+        SMB_SHARE="mr.backup",
+        SMB_USERNAME="svc_mr_backup",
+        SMB_PASSWORD="pw",
+        NETDRIVE_PATH="",
+    )
+    text = wiz.render_commands(values)
+    assert "noperm" in text
+    assert "Run as your NORMAL user" in text
